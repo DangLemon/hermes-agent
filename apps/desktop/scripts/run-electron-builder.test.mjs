@@ -29,6 +29,16 @@ test('package build script generates harness resource before Vite reads harness 
   assert.match(pkg.scripts.build, /write-build-stamp\.mjs && node scripts\/internal-desktop-harness\.mjs && vite build/)
 })
 
+test('cross-platform builds let electron-builder resolve the requested Electron distribution', () => {
+  const args = buildElectronBuilderArgs({
+    dist: '/host/electron/dist',
+    fsExists: () => true,
+    argv: ['--win', 'nsis', '--x64']
+  })
+
+  assert.equal(args.some(arg => String(arg).includes('electronDist')), false)
+})
+
 
 test('isDirectRun uses platform-correct file URL comparison for Windows paths', () => {
   const href = 'file:///C:/repo/apps/desktop/scripts/run-electron-builder.mjs'
