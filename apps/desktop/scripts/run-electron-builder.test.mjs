@@ -1,20 +1,27 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { test } from 'vitest'
+import { validateConfiguration } from 'app-builder-lib/out/util/config/config.js'
 
 import { buildElectronBuilderArgs, isDirectRun } from './run-electron-builder.mjs'
 
-test('electron-builder args include harness extraResource only when generated resource exists', () => {
+test('electron-builder uses a schema-valid static harness resource without indexed CLI overrides', async () => {
   const withHarness = buildElectronBuilderArgs({
     dist: null,
-    harnessResourcePath: 'build/internal-desktop-harness.json',
     argv: ['--dir']
   })
-  assert.ok(withHarness.includes('-c.extraResources.2.from=build/internal-desktop-harness.json'))
-  assert.ok(withHarness.includes('-c.extraResources.2.to=internal-desktop-harness.json'))
+  assert.equal(withHarness.some(arg => String(arg).includes('extraResources')), false)
 
-  const ordinary = buildElectronBuilderArgs({ dist: null, harnessResourcePath: null, argv: ['--dir'] })
+  const ordinary = buildElectronBuilderArgs({ dist: null, argv: ['--dir'] })
   assert.equal(ordinary.some(arg => String(arg).includes('internal-desktop-harness.json')), false)
+
+  const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+  assert.deepEqual(pkg.build.extraResources.at(-1), {
+    from: 'build',
+    to: '.',
+    filter: ['internal-desktop-harness.json']
+  })
+  await validateConfiguration(structuredClone(pkg.build))
 })
 
 test('package build script generates harness resource before Vite reads harness flags', () => {
