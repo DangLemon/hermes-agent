@@ -1,10 +1,7 @@
-// Resolve electronDist at runtime (#38673, #47917): electron-builder 26.8.x can
-// re-unpack a broken Electron.app; reusing the installed dist dodges that.
-// npm workspace hoisting is non-deterministic — require.resolve finds electron
-// wherever it landed. Dist present → -c.electronDist=<abs>/dist; absent → let
-// electron-builder fetch via @electron/get (electronVersion + ELECTRON_MIRROR).
+// Let electron-builder resolve Electron for the requested platform and arch.
+// Reusing the host's installed Electron distribution breaks cross-platform
+// packaging because a macOS dist does not contain Windows' electron.exe.
 
-import fs from "node:fs"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { spawnSync } from "node:child_process"
@@ -13,24 +10,6 @@ import { generateInternalDesktopHarnessResource } from "./internal-desktop-harne
 
 const require = createRequire(import.meta.url)
 
-function electronDistDir() {
-  try {
-    return path.join(path.dirname(require.resolve("electron/package.json")), "dist")
-  } catch {
-    return null
-  }
-}
-
-function distBinary(dist) {
-  if (process.platform === "darwin") {
-    return path.join(dist, "Electron.app", "Contents", "MacOS", "Electron")
-  }
-  if (process.platform === "win32") {
-    return path.join(dist, "electron.exe")
-  }
-  return path.join(dist, "electron")
-}
-
 function electronBuilderCli() {
   const pkgJson = require.resolve("electron-builder/package.json")
   const bin = require(pkgJson).bin
@@ -38,7 +17,7 @@ function electronBuilderCli() {
   return path.join(path.dirname(pkgJson), rel)
 }
 
-export function buildElectronBuilderArgs({ dist, argv = process.argv.slice(2), fsExists = fs.existsSync } = {}) {
+export function buildElectronBuilderArgs({ argv = process.argv.slice(2) } = {}) {
   // Local `hermes desktop` builds only ever package (--dir or dist), never
   // publish a GitHub release — no CI workflow drives this script. But the npm
   // lifecycle env sets CI=1 (so esbuild's postinstall doesn't try interactive
@@ -49,27 +28,13 @@ export function buildElectronBuilderArgs({ dist, argv = process.argv.slice(2), f
   // so it fails with "Cannot detect repository by .git/config". Pin publish to
   // "never" so electron-builder skips that lookup entirely.
   const args = ["--publish", "never"]
-  if (dist && fsExists(distBinary(dist))) {
-    args.push(`-c.electronDist=${dist}`)
-  }
   args.push(...argv)
   return args
 }
 
-export function shouldWarnMissingElectronDist(dist, fsExists = fs.existsSync) {
-  return !(dist && fsExists(distBinary(dist)))
-}
-
 function main() {
-  const dist = electronDistDir()
   generateInternalDesktopHarnessResource()
-  const args = buildElectronBuilderArgs({ dist })
-  if (shouldWarnMissingElectronDist(dist)) {
-    console.warn(
-      "[run-electron-builder] no local electron dist; electron-builder will fetch " +
-        "via @electron/get (electronVersion + ELECTRON_MIRROR)."
-    )
-  }
+  const args = buildElectronBuilderArgs()
 
   const result = spawnSync(process.execPath, [electronBuilderCli(), ...args], {
     stdio: "inherit",
