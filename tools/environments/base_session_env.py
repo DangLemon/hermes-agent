@@ -63,7 +63,17 @@ def _export_dump_excluding_session_vars(tmp_path: str, excluded_names: Iterable[
     # ${!PREFIX*} is bash 3.2+ name-prefix expansion; empty matches are ignored
     # under 2>/dev/null. Caller names are quoted so malformed config can never
     # become shell syntax (valid names stay unquoted by shlex.quote()).
-    safe_names = {name for name in excluded_names if isinstance(name, str) and name}
+    internal_names = {
+        "__hermes_ec",
+        "__hermes_expand_aliases",
+        "__hermes_fns",
+        "__hermes_snap_tmp",
+    }
+    safe_names = {
+        name
+        for name in (*excluded_names, *internal_names)
+        if isinstance(name, str) and name
+    }
     extra_unset = "".join(f" {shlex.quote(name)}" for name in sorted(safe_names))
     return (
         "{ ( unset ${!HERMES_SESSION_*} ${!HERMES_CRON_AUTO_DELIVER_*} "
@@ -75,6 +85,22 @@ def _export_dump_excluding_session_vars(tmp_path: str, excluded_names: Iterable[
         f"HERMES_UI_SESSION_ID{extra_unset} 2>/dev/null; "
         "export -p; ) || true; } "
         f"> {tmp_path}")
+
+
+def _snapshot_dump_script(tmp_path: str, excluded_names: Iterable[str] = ()) -> str:
+    """Dump exports, functions, aliases, and shell options to a snapshot temp file."""
+    return (
+        f"{_export_dump_excluding_session_vars(tmp_path, excluded_names)} &&\n"
+        "{ __hermes_fns=$(declare -F | awk '{print $3}' | grep -vE '^_[^_]') || true;\n"
+        f"if [ -n \"$__hermes_fns\" ]; then declare -f $__hermes_fns >> {tmp_path}; fi; }} &&\n"
+        f"alias -p >> {tmp_path} &&\n"
+        "if [ \"${__hermes_expand_aliases:-0}\" = 1 ]; then "
+        f"echo 'shopt -s expand_aliases' >> {tmp_path}; else "
+        f"echo 'shopt -u expand_aliases' >> {tmp_path}; fi &&\n"
+        # Snapshot sourcing must not turn startup strict-mode flags into a
+        # harness-wide early exit; keep the original bootstrap contract.
+        f"printf '%s\\n' 'set +e' 'set +u' >> {tmp_path}"
+    )
 
 
 def _snapshot_bootstrap_script(
@@ -91,15 +117,10 @@ def _snapshot_bootstrap_script(
     return (
         "umask 077\n"
         f"__hermes_snap_tmp=$(mktemp {snap_tmp_template}) || exit 1\n"
-        f"{_export_dump_excluding_session_vars(_SNAP_TMP, excluded_names)}\n"
-        "__hermes_fns=$(declare -F | awk '{print $3}' | grep -vE '^_[^_]') || true\n"
-        f"[ -n \"$__hermes_fns\" ] && declare -f $__hermes_fns >> {_SNAP_TMP} 2>/dev/null || true\n"
-        f"alias -p >> {_SNAP_TMP}\n"
-        f"echo 'shopt -s expand_aliases' >> {_SNAP_TMP}\n"
-        f"echo 'set +e' >> {_SNAP_TMP}\n"
-        f"echo 'set +u' >> {_SNAP_TMP}\n"
+        "__hermes_expand_aliases=1\n"
+        f"{{ {_snapshot_dump_script(_SNAP_TMP, excluded_names)} &&\n"
         # Publish only if assembly succeeded; otherwise drop the partial temp.
-        f"mv -f {_SNAP_TMP} {quoted_snap} || rm -f {_SNAP_TMP}\n"
+        f"mv -f {_SNAP_TMP} {quoted_snap}; }} || {{ rm -f {_SNAP_TMP}; exit 1; }}\n"
         f"builtin cd -- {quoted_cwd} 2>/dev/null || true\n"
         f"{_cwd_marker_printf(cwd_marker)}\n")
 
@@ -146,11 +167,15 @@ def _wrap_command_script(
         f"builtin cd -- {quoted_cwd} || exit 126",
         f"eval '{escaped}'",
         "__hermes_ec=$?",
+        "__hermes_expand_aliases=0",
+        "shopt -q expand_aliases && __hermes_expand_aliases=1",
+        "set +e",
+        "set +u",
         "umask 077"]
     if snapshot_ready:
         parts.append(
             f"__hermes_snap_tmp=$(mktemp {snap_tmp_template}) && "
-            f"{{ {_export_dump_excluding_session_vars(_SNAP_TMP, passthrough_names)} "
+            f"{{ {_snapshot_dump_script(_SNAP_TMP, passthrough_names)} "
             f"&& mv -f {_SNAP_TMP} {quoted_snap}; }} "
             f"2>/dev/null || rm -f {_SNAP_TMP} 2>/dev/null || true")
     parts += [_cwd_marker_printf(cwd_marker), "exit $__hermes_ec"]

@@ -242,3 +242,108 @@ class TestTriggerJobPromptStamp:
         jobs_mod.trigger_job(job["id"], extra_prompt="first context")
         retriggered = jobs_mod.trigger_job(job["id"])
         assert retriggered.get("manual_run_prompt") is None
+
+
+def test_manual_run_completion_preserves_newer_run_now_occurrence(tmp_path, monkeypatch):
+    """A stale completion must only consume the manual occurrence it dispatched."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    import importlib
+    from datetime import datetime, timedelta
+    import cron.jobs as jobs_mod
+
+    importlib.reload(jobs_mod)
+    job = jobs_mod.create_job(
+        prompt="daily report", schedule="0 9 * * *", name="overlap-manual"
+    )
+    first = jobs_mod.trigger_job(job["id"], extra_prompt="old manual")
+    first_manual_at = first["manual_run_at"]
+
+    # The first fire has been dispatched and is still running. A newer Run now
+    # is accepted while that older run is in flight.
+    later_now = datetime.fromisoformat(first_manual_at) + timedelta(seconds=10)
+    monkeypatch.setattr(jobs_mod, "_hermes_now", lambda: later_now)
+    second = jobs_mod.trigger_job(job["id"], extra_prompt="new manual")
+    second_manual_at = second["manual_run_at"]
+    assert second_manual_at != first_manual_at
+
+    jobs_mod.mark_job_run(
+        job["id"], success=True, consumed_manual_run_at=first_manual_at
+    )
+
+    after_old_completion = jobs_mod.get_job(job["id"])
+    assert after_old_completion["manual_run_at"] == second_manual_at
+    assert after_old_completion["manual_run_prompt"] == "new manual"
+    assert after_old_completion["next_run_at"] == second_manual_at
+
+    jobs_mod.mark_job_run(
+        job["id"], success=True, consumed_manual_run_at=second_manual_at
+    )
+    after_second_completion = jobs_mod.get_job(job["id"])
+    assert "manual_run_at" not in after_second_completion
+    assert "manual_run_prompt" not in after_second_completion
+
+
+
+def test_scheduler_scheduled_completion_preserves_newer_run_now_occurrence(tmp_path, monkeypatch):
+    """A normal scheduled snapshot has explicit no-manual identity; it must not consume a newer manual run."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    import importlib
+    from datetime import datetime, timedelta
+    import cron.jobs as jobs_mod
+    import cron.scheduler as sched
+
+    importlib.reload(jobs_mod)
+    importlib.reload(sched)
+    job = jobs_mod.create_job(
+        prompt="daily report", schedule="0 9 * * *", name="scheduled-overlap"
+    )
+    scheduled_snapshot = jobs_mod.claim_job_for_fire(job["id"], return_job=True)
+    fire_owner = scheduled_snapshot["fire_claim"]["by"]
+    assert "manual_run_at" not in scheduled_snapshot
+
+    next_manual_time = datetime.fromisoformat(scheduled_snapshot["next_run_at"]) + timedelta(seconds=10)
+    monkeypatch.setattr(jobs_mod, "_hermes_now", lambda: next_manual_time)
+    triggered = jobs_mod.trigger_job(job["id"], extra_prompt="new manual")
+    manual_run_at = triggered["manual_run_at"]
+    assert triggered["fire_claim"] == scheduled_snapshot["fire_claim"]
+
+    execution = sched.create_execution(job["id"], source="test")
+    sched.mark_execution_running(execution["id"])
+    assert sched._finish_completed_run(
+        sched._RunDelivery(job=scheduled_snapshot, success=True, error=None),
+        fire_owner,
+        execution["id"],
+    ) is True
+
+    after = jobs_mod.get_job(job["id"])
+    assert after["manual_run_at"] == manual_run_at
+    assert after["manual_run_prompt"] == "new manual"
+    assert after["next_run_at"] == manual_run_at
+
+
+def test_preserved_newer_manual_run_does_not_override_terminal_repeat_limit(tmp_path, monkeypatch):
+    """Existing finite repeat semantics still win if the completed run exhausts the job."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    import importlib
+    from datetime import datetime, timedelta
+    import cron.jobs as jobs_mod
+
+    importlib.reload(jobs_mod)
+    job = jobs_mod.create_job(
+        prompt="once", schedule="0 9 * * *", name="finite-overlap", repeat=1
+    )
+    first = jobs_mod.trigger_job(job["id"], extra_prompt="old manual")
+    first_manual_at = first["manual_run_at"]
+
+    later_now = datetime.fromisoformat(first_manual_at) + timedelta(seconds=10)
+    monkeypatch.setattr(jobs_mod, "_hermes_now", lambda: later_now)
+    second = jobs_mod.trigger_job(job["id"], extra_prompt="new manual")
+    assert second["manual_run_at"] != first_manual_at
+
+    jobs_mod.mark_job_run(job["id"], success=True, consumed_manual_run_at=first_manual_at)
+
+    after = jobs_mod.get_job(job["id"])
+    assert after["state"] == "completed"
+    assert after["enabled"] is False
+    assert "manual_run_at" not in after
+    assert "manual_run_prompt" not in after

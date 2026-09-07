@@ -6,8 +6,10 @@
 
 import fs from "node:fs"
 import path from "node:path"
+import { pathToFileURL } from "node:url"
 import { spawnSync } from "node:child_process"
 import { createRequire } from "node:module"
+import { HARNESS_RESOURCE_FILENAME, generateInternalDesktopHarnessResource } from "./internal-desktop-harness.mjs"
 
 const require = createRequire(import.meta.url)
 
@@ -36,32 +38,60 @@ function electronBuilderCli() {
   return path.join(path.dirname(pkgJson), rel)
 }
 
-const dist = electronDistDir()
-// Local `hermes desktop` builds only ever package (--dir or dist), never
-// publish a GitHub release — no CI workflow drives this script. But the npm
-// lifecycle env sets CI=1 (so esbuild's postinstall doesn't try interactive
-// animations), and electron-builder treats CI=1 as a signal to implicitly
-// resolve a publish target. That resolution reads <projectDir>/.git/config
-// directly — projectDir here is apps/desktop, which has no .git of its own
-// (only the repo root does) and no "repository" field in its package.json —
-// so it fails with "Cannot detect repository by .git/config". Pin publish to
-// "never" so electron-builder skips that lookup entirely.
-const args = ["--publish", "never"]
-if (dist && fs.existsSync(distBinary(dist))) {
-  args.push(`-c.electronDist=${dist}`)
-} else {
-  console.warn(
-    "[run-electron-builder] no local electron dist; electron-builder will fetch " +
-      "via @electron/get (electronVersion + ELECTRON_MIRROR)."
-  )
+export function buildElectronBuilderArgs({ dist, harnessResourcePath, argv = process.argv.slice(2), fsExists = fs.existsSync } = {}) {
+  // Local `hermes desktop` builds only ever package (--dir or dist), never
+  // publish a GitHub release — no CI workflow drives this script. But the npm
+  // lifecycle env sets CI=1 (so esbuild's postinstall doesn't try interactive
+  // animations), and electron-builder treats CI=1 as a signal to implicitly
+  // resolve a publish target. That resolution reads <projectDir>/.git/config
+  // directly — projectDir here is apps/desktop, which has no .git of its own
+  // (only the repo root does) and no "repository" field in its package.json —
+  // so it fails with "Cannot detect repository by .git/config". Pin publish to
+  // "never" so electron-builder skips that lookup entirely.
+  const args = ["--publish", "never"]
+  if (harnessResourcePath) {
+    args.push(`-c.extraResources.2.from=build/${HARNESS_RESOURCE_FILENAME}`)
+    args.push(`-c.extraResources.2.to=${HARNESS_RESOURCE_FILENAME}`)
+  }
+  if (dist && fsExists(distBinary(dist))) {
+    args.push(`-c.electronDist=${dist}`)
+  }
+  args.push(...argv)
+  return args
 }
-args.push(...process.argv.slice(2))
 
-const result = spawnSync(process.execPath, [electronBuilderCli(), ...args], {
-  stdio: "inherit",
-})
-if (result.error) {
-  console.error(`[run-electron-builder] spawn failed: ${result.error.message}`)
-  process.exit(1)
+export function shouldWarnMissingElectronDist(dist, fsExists = fs.existsSync) {
+  return !(dist && fsExists(distBinary(dist)))
 }
-process.exit(result.status == null ? 1 : result.status)
+
+function main() {
+  const dist = electronDistDir()
+  const harness = generateInternalDesktopHarnessResource()
+  const args = buildElectronBuilderArgs({ dist, harnessResourcePath: harness.resourcePath })
+  if (shouldWarnMissingElectronDist(dist)) {
+    console.warn(
+      "[run-electron-builder] no local electron dist; electron-builder will fetch " +
+        "via @electron/get (electronVersion + ELECTRON_MIRROR)."
+    )
+  }
+
+  const result = spawnSync(process.execPath, [electronBuilderCli(), ...args], {
+    stdio: "inherit",
+  })
+  if (result.error) {
+    console.error(`[run-electron-builder] spawn failed: ${result.error.message}`)
+    process.exit(1)
+  }
+  process.exit(result.status == null ? 1 : result.status)
+}
+
+export function isDirectRun(metaUrl, argv1 = process.argv[1], {
+  resolve = path.resolve,
+  pathToFileURLHref = value => pathToFileURL(value).href
+} = {}) {
+  return Boolean(argv1) && metaUrl === pathToFileURLHref(resolve(argv1))
+}
+
+if (isDirectRun(import.meta.url)) {
+  main()
+}

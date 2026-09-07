@@ -241,7 +241,9 @@ export async function fetchRegistrySessionRows(
             const params = new URLSearchParams(searchParams)
             params.delete('profile')
 
-            const data = await getJson(descriptor, `/api/sessions?${params}`).catch(() => null)
+            const data = await fetchRemoteProfileSessions(profileLabel || 'default', params, async (_profile, path) =>
+              getJson(descriptor, path)
+            ).catch(() => null)
 
             if (data) {
               tag(data, source.connectionId, profileLabel || 'default')
@@ -269,7 +271,9 @@ export async function fetchRegistrySessionRows(
         // Older remote without the aggregator: its own default-profile list.
         const flat = new URLSearchParams(searchParams)
         flat.delete('profile')
-        data = await getJson(shared.descriptor, `/api/sessions?${flat}`).catch(() => null)
+        data = await fetchRemoteProfileSessions('default', flat, async (_profile, path) =>
+          getJson(shared.descriptor, path)
+        ).catch(() => null)
       }
 
       if (data) {

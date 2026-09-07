@@ -23,6 +23,8 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 
 import type { ProfileScope } from '@/api/client'
+import { internalCompanyRouteAllowed } from '@/app/internal-company/capabilities'
+import { $internalCompanyCapabilities } from '@/app/internal-company/store'
 import { CodeEditor } from '@/components/chat/code-editor'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
@@ -147,6 +149,7 @@ const stepThroughCells: Modifier = ({ containerNodeRect, draggingNodeRect, trans
 // one is active, so a square never moves under the pointer that clicked it.
 export function ProfileRail() {
   const { t } = useI18n()
+  const internalCompany = useStore($internalCompanyCapabilities)
   const p = t.profiles
   const profiles = useStore($profiles)
   const scope = useStore($profileScope)
@@ -177,10 +180,14 @@ export function ProfileRail() {
 
   const connections = registry?.connections
 
-  const restGroups = useMemo(
+  const rawRestGroups = useMemo(
     () => (multipleConnections ? buildRestGroups({ activeConnectionId, connections: connections ?? [], roster }) : []),
     [activeConnectionId, connections, multipleConnections, roster]
   )
+
+  const harnessMode = internalCompany.mode === 'harness'
+  const upstreamMode = internalCompany.mode === 'upstream'
+  const restGroups = useMemo(() => (harnessMode ? [] : rawRestGroups), [harnessMode, rawRestGroups])
 
   // Fleet mode needs something to show beside the active gateway. Two
   // registrations of one backend collapse to a single roster source, which
@@ -225,7 +232,17 @@ export function ProfileRail() {
   // squares wherever they live.
   const condensed = profiles.length + countRestAgents(restGroups) > PROFILE_DROPDOWN_THRESHOLD
 
+  const chooseProfile = (name: string) => {
+    if (upstreamMode) {
+      selectProfile(name)
+    }
+  }
+
   const switchToRest = (agent: FleetAgent) => {
+    if (!upstreamMode) {
+      return
+    }
+
     const key = fleetRouteKey(agent.connectionId, agent.profile)
     triggerHaptic('selection')
     setPendingRoute(key)
@@ -345,49 +362,63 @@ export function ProfileRail() {
     }
 
     lastCreateRef.current = createRequest
-    setCreateOpen(true)
-  }, [createRequest])
+    upstreamMode && setCreateOpen(true)
+  }, [createRequest, upstreamMode])
 
   // The sortable strip of the active gateway's named profiles (unchanged
   // from the single-gateway rail; fleet mode only decides where it sits).
   const activeStrip = (
     <>
-      {multiProfile && (
-        <DndContext
-          collisionDetection={closestCenter}
-          modifiers={[stepThroughCells]}
-          onDragEnd={handleDragEnd}
-          onDragOver={handleDragOver}
-          onDragStart={handleDragStart}
-          sensors={sensors}
-        >
-          <SortableContext items={named.map(profile => profile.name)} strategy={horizontalListSortingStrategy}>
-            {/* relative → the strip is the dragged square's offsetParent, so the
+      {multiProfile &&
+        (harnessMode ? (
+          <div className="relative flex items-center gap-1">
+            {named.map(profile => (
+              <StaticProfileSquare
+                active={!isAll && normalizeProfileKey(profile.name) === activeKey}
+                color={resolveProfileColor(profile.name, colors)}
+                key={profile.name}
+                label={profileLabel(profile)}
+                onSelect={() => chooseProfile(profile.name)}
+                remoteHost={remoteOverrides[normalizeProfileKey(profile.name)]?.host ?? null}
+              />
+            ))}
+          </div>
+        ) : (
+          <DndContext
+            collisionDetection={closestCenter}
+            modifiers={[stepThroughCells]}
+            onDragEnd={handleDragEnd}
+            onDragOver={handleDragOver}
+            onDragStart={handleDragStart}
+            sensors={sensors}
+          >
+            <SortableContext items={named.map(profile => profile.name)} strategy={horizontalListSortingStrategy}>
+              {/* relative → the strip is the dragged square's offsetParent, so the
               clamp modifier bounds drags to the occupied cells (not the +). */}
-            <div className="relative flex items-center gap-1">
-              {named.map(profile => (
-                <ProfileSquare
-                  active={!isAll && normalizeProfileKey(profile.name) === activeKey}
-                  color={resolveProfileColor(profile.name, colors)}
-                  key={profile.name}
-                  label={profileLabel(profile)}
-                  // The legacy per-profile remote override predates the
-                  // gateway registry; once the rail shows machines directly
-                  // it only confuses, so it is offered on single-gateway
-                  // setups only.
-                  onConnectRemote={multipleConnections ? undefined : () => openRemoteOverrideDialog(profile.name)}
-                  onDelete={() => setPendingDelete(profile)}
-                  onEditSoul={() => setPendingSoul(profile.name)}
-                  onRecolor={color => setProfileColor(profile.name, color)}
-                  onRename={() => setPendingRename(profile)}
-                  onSelect={() => selectProfile(profile.name)}
-                  remoteHost={remoteOverrides[normalizeProfileKey(profile.name)]?.host ?? null}
-                />
-              ))}
-            </div>
-          </SortableContext>
-        </DndContext>
-      )}
+              <div className="relative flex items-center gap-1">
+                {named.map(profile => (
+                  <ProfileSquare
+                    active={!isAll && normalizeProfileKey(profile.name) === activeKey}
+                    color={resolveProfileColor(profile.name, colors)}
+                    key={profile.name}
+                    label={profileLabel(profile)}
+                    // The legacy per-profile remote override predates the
+                    // gateway registry; once the rail shows machines directly
+                    // it only confuses, so it is offered on single-gateway
+                    // setups only.
+                    onConnectRemote={multipleConnections ? undefined : () => openRemoteOverrideDialog(profile.name)}
+                    onDelete={() => setPendingDelete(profile)}
+                    onEditSoul={() => setPendingSoul(profile.name)}
+                    onRecolor={color => setProfileColor(profile.name, color)}
+                    onRename={() => setPendingRename(profile)}
+                    onSelect={() => chooseProfile(profile.name)}
+                    remoteHost={remoteOverrides[normalizeProfileKey(profile.name)]?.host ?? null}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
+        ))}
     </>
   )
 
@@ -411,7 +442,7 @@ export function ProfileRail() {
           active={isAll}
           glyph="layers"
           label={p.fleet.allOnGateway}
-          onSelect={() => setShowAllProfiles(true)}
+          onSelect={() => internalCompany.mode === 'upstream' && setShowAllProfiles(true)}
         />
       )}
 
@@ -427,10 +458,19 @@ export function ProfileRail() {
             active={isAll || onDefault}
             glyph={isAll ? 'layers' : 'home'}
             label={onDefault ? p.showAllProfiles : p.switchToProfile(profileLabel(defaultProfile))}
-            onSelect={() => (onDefault ? setShowAllProfiles(true) : selectProfile(defaultProfile.name))}
+            onSelect={() =>
+              onDefault
+                ? internalCompany.mode === 'upstream' && setShowAllProfiles(true)
+                : chooseProfile(defaultProfile.name)
+            }
           />
         ) : (
-          <ProfilePill active={isAll} glyph="layers" label={p.allProfiles} onSelect={() => setShowAllProfiles(true)} />
+          <ProfilePill
+            active={isAll}
+            glyph="layers"
+            label={p.allProfiles}
+            onSelect={() => internalCompany.mode === 'upstream' && setShowAllProfiles(true)}
+          />
         ))}
 
       {/* Single-profile: the active default's home icon next to the create +. */}
@@ -439,7 +479,7 @@ export function ProfileRail() {
           active
           glyph="home"
           label={profileLabel(defaultProfile)}
-          onSelect={() => selectProfile(defaultProfile.name)}
+          onSelect={() => chooseProfile(defaultProfile.name)}
         />
       )}
 
@@ -450,10 +490,11 @@ export function ProfileRail() {
         <div className="flex min-w-0 flex-1 items-center gap-1">
           <ProfileDropdown
             activeKey={isAll ? null : activeKey}
+            canManageProfiles={internalCompany.mode === 'upstream'}
             colors={colors}
             onCreate={() => setCreateOpen(true)}
             onImport={() => void runImportProfileFlow()}
-            onSelect={selectProfile}
+            onSelect={chooseProfile}
             onSelectRest={switchToRest}
             profiles={named}
             restGroups={restGroups}
@@ -490,7 +531,7 @@ export function ProfileRail() {
                           active={onDefault}
                           glyph="home"
                           label={profileLabel(defaultProfile)}
-                          onSelect={() => selectProfile(defaultProfile.name)}
+                          onSelect={() => chooseProfile(defaultProfile.name)}
                         />
                       )}
                       {activeStrip}
@@ -513,8 +554,10 @@ export function ProfileRail() {
               )
             : activeStrip}
 
-          <AddProfileButton label={p.newProfile} onClick={() => setCreateOpen(true)} />
-          <ImportProfileButton label={p.importProfile} />
+          {internalCompany.mode === 'upstream' && (
+            <AddProfileButton label={p.newProfile} onClick={() => setCreateOpen(true)} />
+          )}
+          {internalCompany.mode === 'upstream' && <ImportProfileButton label={p.importProfile} />}
         </div>
       )}
 
@@ -522,76 +565,97 @@ export function ProfileRail() {
           overlay is the only place to edit a profile's SOUL.md, and a
           single-profile user must be able to edit the default's persona
           without first creating a throwaway second profile. */}
-      <ProfilePill active={false} glyph="ellipsis" label={p.manageProfiles} onSelect={() => navigate(PROFILES_ROUTE)} />
+      {internalCompanyRouteAllowed(PROFILES_ROUTE, internalCompany) && (
+        <ProfilePill
+          active={false}
+          glyph="ellipsis"
+          label={p.manageProfiles}
+          onSelect={() => navigate(PROFILES_ROUTE)}
+        />
+      )}
 
       {/* Multi-gateway discoverability: before a second source exists, a plug
           pinned beside Manage deep-links to the unified Gateways page. Once
           there are several sources, the same action lives in their selector. */}
-      {!multipleConnections && (
-        <ProfilePill
-          active={false}
-          glyph="plug"
-          label={p.connectGateway}
-          onSelect={() => navigate(`${SETTINGS_ROUTE}?tab=gateway`)}
-        />
-      )}
+      {!harnessMode &&
+        !multipleConnections &&
+        internalCompanyRouteAllowed(`${SETTINGS_ROUTE}?tab=gateway`, internalCompany) && (
+          <ProfilePill
+            active={false}
+            glyph="plug"
+            label={p.connectGateway}
+            onSelect={() => navigate(`${SETTINGS_ROUTE}?tab=gateway`)}
+          />
+        )}
 
       {/* Land in the new profile on a fresh chat (selectProfile triggers the
           new-session reset), not stuck on the session you were just in. */}
-      <CreateProfileDialog
-        onClose={() => setCreateOpen(false)}
-        onCreated={async name => {
-          await refreshActiveProfile()
-          selectProfile(name)
-        }}
-        open={createOpen}
-        profiles={profiles}
-      />
+      {!harnessMode && (
+        <CreateProfileDialog
+          onClose={() => setCreateOpen(false)}
+          onCreated={async name => {
+            await refreshActiveProfile()
+            chooseProfile(name)
+          }}
+          open={createOpen}
+          profiles={profiles}
+        />
+      )}
 
-      <RenameProfileDialog
-        currentName={pendingRename?.name ?? ''}
-        isDefault={pendingRename?.is_default ?? false}
-        onClose={() => setPendingRename(null)}
-        onRenamed={refreshActiveProfile}
-        open={pendingRename !== null}
-      />
+      {!harnessMode && (
+        <RenameProfileDialog
+          currentName={pendingRename?.name ?? ''}
+          isDefault={pendingRename?.is_default ?? false}
+          onClose={() => setPendingRename(null)}
+          onRenamed={refreshActiveProfile}
+          open={pendingRename !== null}
+        />
+      )}
 
-      <DeleteProfileDialog
-        onClose={() => setPendingDelete(null)}
-        onDeleted={refreshActiveProfile}
-        open={pendingDelete !== null}
-        profile={pendingDelete}
-      />
+      {!harnessMode && (
+        <DeleteProfileDialog
+          onClose={() => setPendingDelete(null)}
+          onDeleted={refreshActiveProfile}
+          open={pendingDelete !== null}
+          profile={pendingDelete}
+        />
+      )}
 
-      <EditSoulDialog onClose={() => setPendingSoul(null)} profileName={pendingSoul} />
+      {!harnessMode && <EditSoulDialog onClose={() => setPendingSoul(null)} profileName={pendingSoul} />}
 
       {/* Fleet-side dialogs: scoped to the at-rest square's owning gateway, and
           they refresh the roster (not the active profile list) on success. */}
-      <RenameProfileDialog
-        currentName={pendingRestRename?.profile ?? ''}
-        onClose={() => setPendingRestRename(null)}
-        onRenamed={() => refreshFleetRoster({ force: true })}
-        open={pendingRestRename !== null}
-        scope={pendingRestRename ? restScope(pendingRestRename) : undefined}
-      />
+      {!harnessMode && (
+        <RenameProfileDialog
+          currentName={pendingRestRename?.profile ?? ''}
+          onClose={() => setPendingRestRename(null)}
+          onRenamed={() => refreshFleetRoster({ force: true })}
+          open={pendingRestRename !== null}
+          scope={pendingRestRename ? restScope(pendingRestRename) : undefined}
+        />
+      )}
 
-      <DeleteProfileDialog
-        gatewayLabel={pendingRestDelete?.connectionLabel}
-        onClose={() => setPendingRestDelete(null)}
-        onDeleted={() => refreshFleetRoster({ force: true })}
-        open={pendingRestDelete !== null}
-        profile={pendingRestDelete ? { name: pendingRestDelete.profile, path: pendingRestDelete.handle } : null}
-        scope={pendingRestDelete ? restScope(pendingRestDelete) : undefined}
-      />
+      {!harnessMode && (
+        <DeleteProfileDialog
+          gatewayLabel={pendingRestDelete?.connectionLabel}
+          onClose={() => setPendingRestDelete(null)}
+          onDeleted={() => refreshFleetRoster({ force: true })}
+          open={pendingRestDelete !== null}
+          profile={pendingRestDelete ? { name: pendingRestDelete.profile, path: pendingRestDelete.handle } : null}
+          scope={pendingRestDelete ? restScope(pendingRestDelete) : undefined}
+        />
+      )}
 
-      <EditSoulDialog
-        gatewayLabel={pendingRestSoul?.connectionLabel}
-        onClose={() => setPendingRestSoul(null)}
-        profileName={pendingRestSoul?.profile ?? null}
-        scope={pendingRestSoul ? restScope(pendingRestSoul) : undefined}
-      />
+      {!harnessMode && (
+        <EditSoulDialog
+          gatewayLabel={pendingRestSoul?.connectionLabel}
+          onClose={() => setPendingRestSoul(null)}
+          profileName={pendingRestSoul?.profile ?? null}
+          scope={pendingRestSoul ? restScope(pendingRestSoul) : undefined}
+        />
+      )}
 
-      <ProfileRemoteOverrideDialog profileNames={profileNames} />
+      {!harnessMode && <ProfileRemoteOverrideDialog profileNames={profileNames} />}
     </div>
   )
 }
@@ -724,6 +788,7 @@ function ImportProfileButton({ label }: { label: string }) {
 // falls back to the placeholder since the left toggle pill carries that state.
 function ProfileDropdown({
   activeKey,
+  canManageProfiles,
   colors,
   onCreate,
   onImport,
@@ -733,6 +798,7 @@ function ProfileDropdown({
   restGroups
 }: {
   activeKey: null | string
+  canManageProfiles: boolean
   colors: Record<string, string>
   onCreate: () => void
   onImport: () => void
@@ -778,15 +844,19 @@ function ProfileDropdown({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-48 max-w-72" collisionPadding={8} side="top">
-        <DropdownMenuItem onSelect={onCreate}>
-          <Codicon aria-hidden="true" name="add" size="0.875rem" />
-          <span className="truncate">{p.newProfile}</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={onImport}>
-          <Codicon aria-hidden="true" name="cloud-download" size="0.875rem" />
-          <span className="truncate">{p.importProfile}</span>
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
+        {canManageProfiles && (
+          <>
+            <DropdownMenuItem onSelect={onCreate}>
+              <Codicon aria-hidden="true" name="add" size="0.875rem" />
+              <span className="truncate">{p.newProfile}</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onImport}>
+              <Codicon aria-hidden="true" name="cloud-download" size="0.875rem" />
+              <span className="truncate">{p.importProfile}</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
         <DropdownMenuRadioGroup onValueChange={name => name && onSelect(name)} value={value}>
           {profiles.map(profile => (
             <ProfileDropdownItem
@@ -1126,6 +1196,58 @@ function RestSquare({
         />
       </PopoverContent>
     </Popover>
+  )
+}
+
+function StaticProfileSquare({
+  active,
+  color,
+  label,
+  onSelect,
+  remoteHost
+}: {
+  active: boolean
+  color: null | string
+  label: string
+  onSelect: () => void
+  remoteHost: null | string
+}) {
+  const { t } = useI18n()
+  const p = t.profiles
+  const hue = color ?? 'var(--ui-text-quaternary)'
+  const { cancelPrewarm, startPrewarm } = useProfilePrewarm(label)
+
+  return (
+    <Tip label={remoteHost ? `${label} · ${p.remoteOverride.badge(remoteHost)}` : label}>
+      <button
+        aria-label={remoteHost ? `${label} — ${p.remoteOverride.badge(remoteHost)}` : label}
+        aria-pressed={active}
+        className={cn(
+          'relative grid size-5 shrink-0 select-none place-items-center rounded-[3px] text-[0.5625rem] font-semibold uppercase leading-none transition-opacity hover:opacity-100',
+          active ? 'opacity-100' : 'opacity-55'
+        )}
+        onClick={onSelect}
+        onPointerEnter={startPrewarm}
+        onPointerLeave={cancelPrewarm}
+        style={{
+          backgroundColor: profileColorSoft(hue, active ? 30 : 22),
+          boxShadow: active ? `inset 0 0 0 1.5px ${hue}` : undefined,
+          color: color ?? undefined
+        }}
+        type="button"
+      >
+        {label.replace(/[^a-z0-9]/gi, '').charAt(0) || '?'}
+        {remoteHost && (
+          <span
+            aria-hidden="true"
+            className="absolute -right-0.5 -top-0.5 grid size-2 place-items-center rounded-full bg-(--ui-panel-background)"
+            data-slot="profile-remote-badge"
+          >
+            <Codicon name="globe" size="0.5rem" />
+          </span>
+        )}
+      </button>
+    </Tip>
   )
 }
 

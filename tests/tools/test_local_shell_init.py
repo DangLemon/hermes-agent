@@ -170,6 +170,77 @@ class TestSnapshotEndToEnd:
         assert "PROBE=probe-ok" in output
         assert "/opt/shell-init-probe/bin" in output
 
+    def test_functions_and_aliases_survive_snapshot_refresh_without_rerunning_init(
+        self, tmp_path
+    ):
+        init_file = tmp_path / "custom-init.sh"
+        counter = tmp_path / "init-count"
+        init_file.write_text(
+            f'printf x >> "{counter}"\n'
+            "hermes_probe_fn() { printf 'fn:%s\\n' \"$1\"; }\n"
+            "alias hermes_probe_alias='printf alias-ok\\n'\n"
+            # Bootstrap enables aliases even when the user's init only defines them.
+        )
+
+        with patch(
+            "tools.environments.local._read_terminal_shell_init_config",
+            return_value=([str(init_file)], False),
+        ):
+            env = LocalEnvironment(cwd=str(tmp_path), timeout=15)
+            try:
+                first = env.execute("hermes_probe_fn one; hermes_probe_alias")
+                second = env.execute("hermes_probe_fn two; hermes_probe_alias")
+                third = env.execute("hermes_probe_fn three; hermes_probe_alias")
+            finally:
+                env.cleanup()
+
+        for result, value in [(first, "one"), (second, "two"), (third, "three")]:
+            assert result["returncode"] == 0
+            assert f"fn:{value}" in result.get("output", "")
+            assert "alias-ok" in result.get("output", "")
+
+        assert counter.read_text() == "x"
+
+    def test_snapshot_refresh_tracks_function_and_alias_redefine_and_remove(
+        self, tmp_path
+    ):
+        init_file = tmp_path / "custom-init.sh"
+        init_file.write_text(
+            "hermes_probe_fn() { printf 'old-fn\\n'; }\n"
+            "alias hermes_probe_alias='printf old-alias\\n'\n"
+            "shopt -s expand_aliases\n"
+        )
+
+        with patch(
+            "tools.environments.local._read_terminal_shell_init_config",
+            return_value=([str(init_file)], False),
+        ):
+            env = LocalEnvironment(cwd=str(tmp_path), timeout=15)
+            try:
+                first = env.execute(
+                    "hermes_probe_fn() { printf 'new-fn\\n'; }; "
+                    "alias hermes_probe_alias='printf new-alias\\n'"
+                )
+                second = env.execute("hermes_probe_fn; hermes_probe_alias")
+                third = env.execute("unset -f hermes_probe_fn; unalias hermes_probe_alias")
+                fourth = env.execute(
+                    "type hermes_probe_fn >/dev/null 2>&1; "
+                    'printf "fn_status=$?\\n"; '
+                    "alias hermes_probe_alias >/dev/null 2>&1; "
+                    'printf "alias_status=$?\\n"'
+                )
+            finally:
+                env.cleanup()
+
+        assert first["returncode"] == 0
+        assert third["returncode"] == 0
+        assert second["returncode"] == 0
+        assert "new-fn" in second.get("output", "")
+        assert "new-alias" in second.get("output", "")
+        assert fourth["returncode"] == 0
+        assert "fn_status=1" in fourth.get("output", "")
+        assert "alias_status=1" in fourth.get("output", "")
+
     def test_profile_path_export_survives_bashrc_interactive_guard(
         self, tmp_path, monkeypatch
     ):

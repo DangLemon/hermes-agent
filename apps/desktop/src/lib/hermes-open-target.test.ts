@@ -4,7 +4,8 @@ import {
   normalizeHermesOpenString,
   pathFromHermesDeepLink,
   pathFromOpenDeepLink,
-  resolveHermesOpenPath
+  resolveHermesOpenPath,
+  resolveInternalCompanyOpenPath
 } from './hermes-open-target'
 
 describe('normalizeHermesOpenString', () => {
@@ -43,6 +44,18 @@ describe('resolveHermesOpenPath', () => {
 
   it('resolves href the same as a bare string', () => {
     expect(resolveHermesOpenPath({ href: 'hermes://index-network/intent/1' })).toBe('/index-network/intent/1')
+  })
+})
+
+describe('resolveInternalCompanyOpenPath', () => {
+  it('preserves upstream deep links and filters harness routes', () => {
+    const upstream = { allowedRoutes: new Set<string>(), mode: 'upstream' as const }
+    const harness = { allowedRoutes: new Set(['/', '/artifacts', '/skills']), mode: 'harness' as const }
+
+    expect(resolveInternalCompanyOpenPath('hermes://open/settings/plugins', upstream)).toBe('/settings/plugins')
+    expect(resolveInternalCompanyOpenPath('hermes://open/settings/plugins', harness)).toBeNull()
+    expect(resolveInternalCompanyOpenPath({ path: '/skills', params: { tab: 'mcp' } }, harness)).toBe('/skills?tab=mcp')
+    expect(resolveInternalCompanyOpenPath('/artifacts', harness)).toBe('/artifacts')
   })
 })
 

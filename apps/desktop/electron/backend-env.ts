@@ -122,15 +122,17 @@ function buildDesktopBackendEnv({
   hermesHome,
   pythonPathEntries = [],
   venvRoot,
+  managedDir,
   currentEnv = process.env,
   platform = process.platform,
   pathModule = pathModuleForPlatform(platform)
-}: any = {}) {
+}: any = {}): Record<string, string> {
   const delimiter = delimiterForPlatform(platform)
   const currentPythonPath = currentEnv?.PYTHONPATH || ''
   const key = pathEnvKey(currentEnv, platform)
 
   return {
+    ...(managedDir ? { HERMES_MANAGED_DIR: String(managedDir) } : {}),
     PYTHONPATH: appendUniquePathEntries([...pythonPathEntries, currentPythonPath], { delimiter }),
     // Force PEP 540 UTF-8 mode in the spawned Python backend so its stdio and
     // subprocess defaults are UTF-8 even on non-UTF-8 Windows locales (GBK,

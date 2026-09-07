@@ -7,7 +7,11 @@ import threading
 import time
 from types import SimpleNamespace
 
+import pytest
+
 from agent import relay_runtime
+from agent.session_persistence import _db_flush_row, _db_flush_write
+from agent.turn_facade_lease import admit_durable_turn_lease
 from hermes_state import SessionDB
 from run_agent import AIAgent
 
@@ -194,6 +198,90 @@ def test_fresh_session_keeps_caller_seed_without_durable_lease(monkeypatch):
 
     assert observed["history"] is seed
     assert db.events == []
+
+
+def test_uncontended_lease_reconciles_foreign_durable_appends(tmp_path, monkeypatch):
+    """A cached idle client must see rows another process committed before lease acquisition."""
+    path = tmp_path / "state.db"
+    first = SessionDB(path)
+    second = SessionDB(path)
+    first.create_session("shared", source="test")
+    agent = _agent_with_db(first, session_id="shared")
+    cached = [
+        {"role": "user", "content": [
+            {"type": "text", "text": "old user"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,fixture"}},
+        ]},
+        {"role": "assistant", "content": "old assistant"},
+    ]
+    _db_flush_write(agent, [_db_flush_row(agent, message, False) for message in cached], cached)
+    second.append_message("shared", "user", "foreign user")
+    second.append_message("shared", "assistant", "foreign assistant")
+
+    monkeypatch.setattr(
+        "agent.turn_liveness.resolve_turn_liveness_settings", lambda cfg: (None, 1.0)
+    )
+    admission = admit_durable_turn_lease(
+        agent,
+        session_id="shared",
+        relay_turn_id="shared:t:abcd",
+        task_context={"session_id": "shared", "task_id": "t", "platform": "desktop"},
+        conversation_history=cached,
+    )
+    try:
+        assert [m["content"] for m in admission.conversation_history] == [
+            cached[0]["content"],
+            "old assistant",
+            "foreign user",
+            "foreign assistant",
+        ]
+        assert admission.conversation_history[0] is cached[0]
+    finally:
+        if admission.lease:
+            admission.lease.release()
+        first.close()
+        second.close()
+
+
+@pytest.mark.parametrize("history_kind", ["replayed", "live_text", "live_multimodal"])
+def test_uncontended_lease_preserves_unchanged_cached_history_identity(tmp_path, monkeypatch, history_kind):
+    """Unchanged durable rows must keep the in-memory prefix and its richer transient fields."""
+    path = tmp_path / "state.db"
+    db = SessionDB(path)
+    db.create_session("shared", source="test")
+    agent = _agent_with_db(db, session_id="shared")
+    cached = [
+        {"role": "user", "content": "old user"},
+        {"role": "assistant", "content": "  old assistant  ", "reasoning_content": "retained reasoning"},
+    ]
+    if history_kind == "live_multimodal":
+        cached[0]["content"] = [
+            {"type": "text", "text": "old user"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,fixture"}},
+        ]
+    rows = [_db_flush_row(agent, message, False) for message in cached]
+    _db_flush_write(agent, rows, cached)
+    if history_kind == "replayed":
+        cached = db.get_messages_as_conversation("shared", repair_alternation=True, include_row_ids=True)
+    cached[0]["_live_only"] = {"kept": True}
+
+    monkeypatch.setattr(
+        "agent.turn_liveness.resolve_turn_liveness_settings", lambda cfg: (None, 1.0)
+    )
+    admission = admit_durable_turn_lease(
+        agent,
+        session_id="shared",
+        relay_turn_id="shared:t:abcd",
+        task_context={"session_id": "shared", "task_id": "t", "platform": "desktop"},
+        conversation_history=cached,
+    )
+    try:
+        assert admission.conversation_history is cached
+        assert admission.conversation_history[0]["_live_only"] == {"kept": True}
+    finally:
+        if admission.lease:
+            admission.lease.release()
+        db.close()
 
 
 def test_run_conversation_lease_timeout_returns_resend_notice(monkeypatch):

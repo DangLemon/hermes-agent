@@ -149,6 +149,34 @@ export function buildCredentialSearchEntries(
     })
 }
 
+
+function companyManagedAllowsSettingsSearchEntry(entry: SettingsSearchEntry): boolean {
+  const view = entry.target.view
+
+  if (view === 'keys' || view === 'providers' || view === 'gateway' || view === 'billing' || view === 'plugins') {
+    return false
+  }
+
+  if (entry.target.providerView || entry.target.keysView || entry.target.key || entry.target.plugin) {
+    return false
+  }
+
+  const field = entry.target.field ?? ''
+
+  return !(
+    field.startsWith('gateway.') ||
+    field.startsWith('mcp.') ||
+    field.startsWith('models.') ||
+    field.startsWith('providers.') ||
+    field.includes('api_key') ||
+    field.includes('endpoint')
+  )
+}
+
+export function filterCompanyManagedSettingsSearchEntries(entries: SettingsSearchEntry[]): SettingsSearchEntry[] {
+  return entries.filter(companyManagedAllowsSettingsSearchEntry)
+}
+
 function searchScore(entry: SettingsSearchEntry, query: string): number {
   const needle = normalize(query)
 

@@ -45,10 +45,39 @@ export function isDesktopFsRemoteMode() {
   return $connection.get()?.mode === 'remote'
 }
 
+function connectionIsRemote(connection: HermesConnection | null | undefined = $connection.get()) {
+  return connection?.mode === 'remote'
+}
+
 // Active profile for FS/git REST calls. Without it the Electron api bridge
 // hits the primary (local) backend even when the user switched to a remote profile.
-export function desktopFsProfile(): string | undefined {
-  return $connection.get()?.profile || undefined
+export function desktopFsProfile(
+  connection: HermesConnection | null | undefined = $connection.get()
+): string | undefined {
+  return connection?.profile || undefined
+}
+
+function desktopFsScope(connection?: HermesConnection | null): { connectionId?: string | null; profile?: string } {
+  // Legacy remotes have no stable registry id: their IPC route uses the
+  // current backend. Stop a captured operation if that route has changed.
+  if (
+    connection?.mode === 'remote' &&
+    !connection.connectionId &&
+    desktopFsCacheKey(connection) !== desktopFsCacheKey()
+  ) {
+    throw new Error('File operation cancelled because the remote connection changed.')
+  }
+
+  const profile = desktopFsProfile(connection)
+
+  if (connection === undefined) {
+    return profile ? { profile } : {}
+  }
+
+  return {
+    ...(connection?.connectionId ? { connectionId: connection.connectionId } : { connectionId: null }),
+    ...(profile ? { profile } : {})
+  }
 }
 
 function fsPath(endpoint: string, filePath: string) {
@@ -65,9 +94,13 @@ function bridge() {
   return desktop
 }
 
-function remoteFsApi<T>(path: string, body?: Record<string, unknown>): Promise<T> {
+function remoteFsApi<T>(
+  path: string,
+  body?: Record<string, unknown>,
+  connection?: HermesConnection | null
+): Promise<T> {
   return hermesApi<T>(
-    body ? { body, method: 'POST', path, profile: desktopFsProfile() } : { path, profile: desktopFsProfile() }
+    body ? { body, method: 'POST', path, ...desktopFsScope(connection) } : { path, ...desktopFsScope(connection) }
   )
 }
 
@@ -79,22 +112,29 @@ export async function readDesktopDir(path: string): Promise<HermesReadDirResult>
   return remoteFsApi<HermesReadDirResult>(fsPath('list', path))
 }
 
-export async function readDesktopFileText(path: string): Promise<HermesReadFileTextResult> {
-  if (!isDesktopFsRemoteMode()) {
+export async function readDesktopFileText(
+  path: string,
+  connection?: HermesConnection | null
+): Promise<HermesReadFileTextResult> {
+  if (!connectionIsRemote(connection)) {
     return bridge().readFileText(path)
   }
 
-  return remoteFsApi<HermesReadFileTextResult>(fsPath('read-text', path))
+  return remoteFsApi<HermesReadFileTextResult>(fsPath('read-text', path), undefined, connection)
 }
 
 // Save UTF-8 text back to a file. Local writes go through the hardened Electron
 // IPC; remote writes hit the dashboard's POST /api/fs/write-text (same path
 // hardening, parent-must-exist, size cap) so the editor behaves identically in
 // both modes. Stale-on-disk detection is the caller's job (re-read before save).
-export async function writeDesktopFileText(path: string, content: string): Promise<{ path: string }> {
+export async function writeDesktopFileText(
+  path: string,
+  content: string,
+  connection?: HermesConnection | null
+): Promise<{ path: string }> {
   const desktop = bridge()
 
-  if (!isDesktopFsRemoteMode()) {
+  if (!connectionIsRemote(connection)) {
     if (!desktop.writeTextFile) {
       throw new Error('Saving is not available')
     }
@@ -102,7 +142,7 @@ export async function writeDesktopFileText(path: string, content: string): Promi
     return desktop.writeTextFile(path, content)
   }
 
-  const result = await remoteFsApi<{ ok?: boolean; path?: string }>('/api/fs/write-text', { content, path })
+  const result = await remoteFsApi<{ ok?: boolean; path?: string }>('/api/fs/write-text', { content, path }, connection)
 
   return { path: result.path || path }
 }

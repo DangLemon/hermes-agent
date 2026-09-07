@@ -1,5 +1,6 @@
 import { useStore } from '@nanostores/react'
 
+import { $internalCompanyCapabilities } from '@/app/internal-company/store'
 import { Codicon } from '@/components/ui/codicon'
 import {
   ContextMenu,
@@ -36,11 +37,16 @@ const RAIL_ACTION =
  *  shell's `exit`, middle-click, or the context menu. */
 export function TerminalRail() {
   const { t } = useI18n()
+  const internalCompany = useStore($internalCompanyCapabilities)
   const terminals = useStore($terminals)
   const activeId = useStore($activeTerminalId)
   const bindings = useStore($bindings)
   const toggleHint = bindings['view.showTerminal']?.[0]
   const newHint = bindings['view.newTerminal']?.[0]
+
+  if (!internalCompany.terminalAllowed) {
+    return null
+  }
 
   return (
     <div

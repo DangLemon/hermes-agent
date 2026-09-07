@@ -3,6 +3,8 @@ import { type ReactNode, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router'
 
 import { blurComposerInput } from '@/app/chat/composer/focus'
+import { internalCompanyRouteAllowed } from '@/app/internal-company/capabilities'
+import { $internalCompanyCapabilities } from '@/app/internal-company/store'
 import { AGENTS_ROUTE } from '@/app/routes'
 import { BillingBanner } from '@/components/billing-banner'
 import { composerDockCard } from '@/components/chat/composer-dock'
@@ -132,7 +134,13 @@ export function ComposerStatusStack({ queue, sessionId }: ComposerStatusStackPro
     return () => clearInterval(timer)
   }, [hasRunningBackground, sessionId])
 
-  const openAgents = () => navigate(AGENTS_ROUTE)
+  const internalCompany = useStore($internalCompanyCapabilities)
+
+  const openAgents = () => {
+    if (internalCompanyRouteAllowed(AGENTS_ROUTE, internalCompany)) {
+      navigate(AGENTS_ROUTE)
+    }
+  }
 
   const openSubagent = (item: ComposerStatusItem) =>
     item.sessionId ? void openSessionInNewWindow(item.sessionId, { watch: true }) : openAgents()

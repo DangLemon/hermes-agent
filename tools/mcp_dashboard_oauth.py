@@ -37,6 +37,8 @@ class DashboardOAuthFlow:
     hermes_home: str
     redirect_uri: str
     reconnect_live: bool = False
+    callback_transport: str = "backend"
+    callback_redirect_uri: str | None = None
     created_at: float = field(default_factory=time.time)
     status: str = "starting"
     authorization_url: str | None = None
@@ -113,7 +115,9 @@ class DashboardOAuthFlow:
     def snapshot(self) -> dict:
         with self._lock:
             return {"flow_id": self.flow_id, "server_name": self.server_name, "status": self.status,
-                    "authorization_url": self.authorization_url, "error": self.error}
+                    "authorization_url": self.authorization_url, "error": self.error,
+                    "callback_transport": self.callback_transport, "callback_redirect_uri": self.callback_redirect_uri,
+                    "callback_expected_state": self.expected_state if self.callback_transport == "desktop_loopback" else None}
 
     def mark_worker_done(self) -> None:
         self._worker_done.set()

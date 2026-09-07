@@ -17,11 +17,10 @@ import { TextTab } from '@/components/ui/text-tab'
 import { Textarea } from '@/components/ui/textarea'
 import { Tip } from '@/components/ui/tooltip'
 import {
-  authMcpServer,
+  createMcpOAuthClient,
   getActionStatus,
   getLogs,
   getMcpCatalog,
-  getMcpOAuthFlow,
   getUsageAnalytics,
   type HermesGateway,
   installMcpCatalogEntry,
@@ -38,6 +37,7 @@ import { brandFor } from '@/lib/mcp-brands'
 import { estimateServerTokens, serverUsageCount } from '@/lib/mcp-cost'
 import { completeMcpDesktopOAuth } from '@/lib/mcp-dashboard-oauth'
 import { type McpImportEntry, parseMcpImport } from '@/lib/mcp-import'
+import { useMcpOAuthScopeGuard } from '@/lib/mcp-oauth-scope'
 import { NEEDS_AUTH_RE, PROBE_TTL_MS, probeCache, probeKey, serverFingerprint } from '@/lib/mcp-probe-cache'
 import { getServers, isServerShape, type McpServers, normalizeEntry } from '@/lib/mcp-servers'
 import { countEnabledTools, isToolEnabled, toggleToolInServer } from '@/lib/mcp-tool-filter'
@@ -347,7 +347,15 @@ function scanServerBlocks(text: string): ServerBlock[] {
   return blocks
 }
 
-export function McpTab({ gateway, profile }: { gateway: HermesGateway | null; profile?: ProfileScope }) {
+export function McpTab({
+  gateway,
+  profile,
+  readOnly = false
+}: {
+  gateway: HermesGateway | null
+  profile?: ProfileScope
+  readOnly?: boolean
+}) {
   const { t } = useI18n()
   const m = t.settings.mcp
   const activeSessionId = useStore($activeSessionId)
@@ -360,6 +368,7 @@ export function McpTab({ gateway, profile }: { gateway: HermesGateway | null; pr
   // resolves to $activeGatewayProfile, so behavior is identical to before.
   const appProfile = useStore($activeGatewayProfile)
   const scopeProfileKey = profile != null ? profileScopeKey(profile) : normalizeProfileKey(appProfile)
+  const captureOAuthScopeGuard = useMcpOAuthScopeGuard(profile)
 
   // Shared config cache (see use-config-record): revisiting the tab paints the
   // cached record instantly; mutations write through `setConfig` and stay
@@ -439,6 +448,7 @@ export function McpTab({ gateway, profile }: { gateway: HermesGateway | null; pr
   const catalogQuery = useQuery({
     queryKey: [...MCP_CATALOG_KEY, scopeProfileKey],
     queryFn: () => getMcpCatalog(profile ?? undefined),
+    enabled: !readOnly,
     staleTime: 5 * 60_000
   })
 
@@ -450,8 +460,8 @@ export function McpTab({ gateway, profile }: { gateway: HermesGateway | null; pr
   // entry under the same name (covers a just-saved doc the catalog refetch
   // hasn't caught up with yet).
   const availableCatalog = useMemo(
-    () => catalog.filter((entry: McpCatalogEntry) => !entry.installed && !(entry.name in servers)),
-    [catalog, servers]
+    () => (readOnly ? [] : catalog.filter((entry: McpCatalogEntry) => !entry.installed && !(entry.name in servers))),
+    [catalog, readOnly, servers]
   )
 
   const descriptionFor = (serverName: string, server: Record<string, unknown>): null | string => {
@@ -526,6 +536,7 @@ export function McpTab({ gateway, profile }: { gateway: HermesGateway | null; pr
   // epoch at call time and bail if it changed, so a slow profile-A request can't
   // write its result into profile B's state after the user switched.
   const profileEpoch = useRef(0)
+  const oauthAttempt = useRef(0)
 
   // A profile switch invalidates the config query (see store/profile.ts), which
   // refetches the new backend's mcp.json. Reset ALL per-profile view state — the
@@ -605,21 +616,27 @@ export function McpTab({ gateway, profile }: { gateway: HermesGateway | null; pr
   // auth result doubles as the probe (it carries the tool list).
   const authenticate = async (serverName: string) => {
     const epoch = profileEpoch.current
+    const attempt = ++oauthAttempt.current
+    const oauthScopeGuard = captureOAuthScopeGuard()
+    const oauthClient = createMcpOAuthClient(profile ?? undefined, oauthScopeGuard)
     setAuthing(serverName)
     setProbes(current => ({ ...current, [serverName]: 'probing' }))
 
     try {
       const flow = await completeMcpDesktopOAuth({
         serverName,
-        start: name => authMcpServer(name, profile ?? undefined),
-        status: flowId => getMcpOAuthFlow(flowId, profile ?? undefined),
+        start: oauthClient.start,
+        status: oauthClient.status,
+        cancelled: () => profileEpoch.current !== epoch || !oauthScopeGuard(),
+        cancel: oauthClient.cancel,
+        relayCallback: oauthClient.relayCallback,
         openExternal: url => window.hermesDesktop.openExternal(url)
       })
 
       const result: McpTestResult = { ok: true, tools: flow.tools ?? [] }
 
-      // Bail if the user switched profiles mid-flow — this result is profile A's.
-      if (profileEpoch.current !== epoch) {
+      // Abandoned flows cannot update another view, scope, or authentication attempt.
+      if (profileEpoch.current !== epoch || oauthAttempt.current !== attempt || !oauthScopeGuard()) {
         return
       }
 
@@ -654,7 +671,7 @@ export function McpTab({ gateway, profile }: { gateway: HermesGateway | null; pr
         notifyError(new Error(result.error), serverName)
       }
     } catch (err) {
-      if (profileEpoch.current !== epoch) {
+      if (profileEpoch.current !== epoch || oauthAttempt.current !== attempt || !oauthScopeGuard()) {
         return
       }
 
@@ -664,7 +681,7 @@ export function McpTab({ gateway, profile }: { gateway: HermesGateway | null; pr
       }))
       notifyError(err, serverName)
     } finally {
-      if (profileEpoch.current === epoch) {
+      if (profileEpoch.current === epoch && oauthAttempt.current === attempt) {
         setAuthing(null)
       }
     }
@@ -782,6 +799,10 @@ export function McpTab({ gateway, profile }: { gateway: HermesGateway | null; pr
   }
 
   const setServerEnabled = async (serverName: string, enabled: boolean) => {
+    if (readOnly) {
+      return
+    }
+
     if (profilePending) {
       return
     }
@@ -812,6 +833,10 @@ export function McpTab({ gateway, profile }: { gateway: HermesGateway | null; pr
   // The probe still lists every discovered tool; the filter decides which ones
   // the agent actually registers.
   const toggleTool = async (serverName: string, toolName: string) => {
+    if (readOnly) {
+      return
+    }
+
     const base = servers[serverName]
 
     if (!base || profilePending) {
@@ -838,6 +863,10 @@ export function McpTab({ gateway, profile }: { gateway: HermesGateway | null; pr
   }
 
   const removeServer = async (serverName: string) => {
+    if (readOnly) {
+      return
+    }
+
     if (profilePending) {
       return
     }
@@ -874,6 +903,10 @@ export function McpTab({ gateway, profile }: { gateway: HermesGateway | null; pr
   // "+" seeds a starter entry into the document (unique key) and marks it
   // dirty — naming happens in the editor, like every other mcp.json.
   const addServer = () => {
+    if (readOnly) {
+      return
+    }
+
     if (profilePending) {
       return
     }
@@ -913,6 +946,10 @@ export function McpTab({ gateway, profile }: { gateway: HermesGateway | null; pr
   // new block. Saving stays an explicit step, so the user can fix placeholder
   // env values (YOUR_KEY, …) in the editor first.
   const importServers = (entries: McpImportEntry[]) => {
+    if (readOnly) {
+      return
+    }
+
     if (profilePending || entries.length === 0) {
       return
     }
@@ -956,6 +993,10 @@ export function McpTab({ gateway, profile }: { gateway: HermesGateway | null; pr
   }
 
   const saveDoc = async () => {
+    if (readOnly) {
+      return
+    }
+
     if (profilePending) {
       return
     }
@@ -1056,6 +1097,7 @@ export function McpTab({ gateway, profile }: { gateway: HermesGateway | null; pr
             onToggle={checked => void setServerEnabled(selected, checked)}
             onToggleTool={toolName => void toggleTool(selected, toolName)}
             probe={probes[selected]}
+            readOnly={readOnly}
             saved={savedEntry !== undefined}
             saving={saving}
           />
@@ -1072,14 +1114,16 @@ export function McpTab({ gateway, profile }: { gateway: HermesGateway | null; pr
                   Skills/Tools views. */}
               <div className="mb-1 flex h-6 shrink-0 items-center pl-2 pr-1">
                 <span className="flex-1 text-[0.72rem] font-medium text-(--ui-text-tertiary)">{m.tabServers}</span>
-                <McpImportButton disabled={profilePending} onImport={importServers} />
+                {!readOnly && <McpImportButton disabled={profilePending} onImport={importServers} />}
               </div>
               {names.length === 0 ? (
                 <PanelEmpty
                   action={
-                    <Button onClick={addServer} size="sm">
-                      {m.newServer}
-                    </Button>
+                    !readOnly ? (
+                      <Button onClick={addServer} size="sm">
+                        {m.newServer}
+                      </Button>
+                    ) : undefined
                   }
                   description={m.emptyDesc}
                   icon="plug"
@@ -1103,6 +1147,7 @@ export function McpTab({ gateway, profile }: { gateway: HermesGateway | null; pr
                         onRemove={() => void removeServer(serverName)}
                         onSelect={() => focusServer(serverName)}
                         onToggle={checked => void setServerEnabled(serverName, checked)}
+                        readOnly={readOnly}
                         status={status}
                         statusText={statusLine(m, status, probes[serverName], server, cost)}
                         unused={
@@ -1115,10 +1160,10 @@ export function McpTab({ gateway, profile }: { gateway: HermesGateway | null; pr
                       />
                     )
                   })}
-                  <PanelAddButton label={m.newServer} onClick={addServer} />
+                  {!readOnly && <PanelAddButton label={m.newServer} onClick={addServer} />}
                 </>
               )}
-              {(catalogQuery.isLoading || availableCatalog.length > 0) && (
+              {!readOnly && (catalogQuery.isLoading || availableCatalog.length > 0) && (
                 <>
                   <div className="mb-1 mt-3 flex h-6 shrink-0 items-center border-t border-(--ui-stroke-quaternary) pl-2 pr-1 pt-2">
                     <span className="text-[0.72rem] font-medium text-(--ui-text-tertiary)">{m.tabCatalog}</span>
@@ -1140,7 +1185,7 @@ export function McpTab({ gateway, profile }: { gateway: HermesGateway | null; pr
       <main className="flex min-h-0 flex-col overflow-hidden">
         <JsonDocumentEditor
           apiRef={editorApi}
-          disabled={saving}
+          disabled={readOnly || saving}
           filePath="mcp.json"
           header={
             <>
@@ -1151,6 +1196,10 @@ export function McpTab({ gateway, profile }: { gateway: HermesGateway | null; pr
           highlight={activeBlock ? { from: activeBlock.from, to: activeBlock.to } : null}
           initialValue={draft}
           onChange={next => {
+            if (readOnly) {
+              return
+            }
+
             setDraft(next)
             setDirty(true)
           }}
@@ -1159,9 +1208,11 @@ export function McpTab({ gateway, profile }: { gateway: HermesGateway | null; pr
           onSave={() => void saveDoc()}
           remountKey={docVersion}
           trailing={
-            <Button disabled={saving || !dirty} onClick={() => void saveDoc()} size="xs">
-              {saving ? t.common.saving : t.common.save}
-            </Button>
+            readOnly ? undefined : (
+              <Button disabled={saving || !dirty} onClick={() => void saveDoc()} size="xs">
+                {saving ? t.common.saving : t.common.save}
+              </Button>
+            )
           }
         />
         <DetailPane
@@ -1211,6 +1262,7 @@ function ServerConfig({
   onToggle,
   onToggleTool,
   probe,
+  readOnly,
   saved,
   saving
 }: {
@@ -1226,6 +1278,7 @@ function ServerConfig({
   onToggle: (checked: boolean) => void
   onToggleTool: (toolName: string) => void
   probe: Probe | undefined
+  readOnly: boolean
   saved: boolean
   saving: boolean
 }) {
@@ -1282,18 +1335,21 @@ function ServerConfig({
           <>
             <ServerIconActions
               className="mt-3"
+              hideRemove={readOnly}
               onProbe={onProbe}
               onRemove={onRemove}
               probing={probe === 'probing'}
               saving={saving}
             />
-            <ServerSwitch
-              className="mt-3.5"
-              disabled={saving}
-              enabled={serverEnabled(entry)}
-              name={name}
-              onToggle={onToggle}
-            />
+            {!readOnly && (
+              <ServerSwitch
+                className="mt-3.5"
+                disabled={saving}
+                enabled={serverEnabled(entry)}
+                name={name}
+                onToggle={onToggle}
+              />
+            )}
           </>
         )}
       </div>
@@ -1332,10 +1388,10 @@ function ServerConfig({
                 aria-pressed={on}
                 className={cn(
                   'rounded-md px-1.5 py-0.5 font-mono text-[0.65rem] text-(--ui-text-tertiary) hover:text-foreground',
-                  saved ? 'cursor-pointer' : 'cursor-default',
+                  saved && !readOnly ? 'cursor-pointer' : 'cursor-default',
                   on ? 'bg-(--ui-bg-quinary)' : 'line-through opacity-70'
                 )}
-                disabled={!saved}
+                disabled={!saved || readOnly}
                 key={tool.name}
                 onClick={() => onToggleTool(tool.name)}
                 title={on ? m.disableTool(tool.name) : m.enableTool(tool.name)}
@@ -1385,12 +1441,14 @@ function ServerSwitch({
 // Refresh + delete, identical beside every toggle (rows and config header).
 function ServerIconActions({
   className,
+  hideRemove = false,
   onProbe,
   onRemove,
   probing,
   saving
 }: {
   className?: string
+  hideRemove?: boolean
   onProbe: () => void
   onRemove: () => void
   probing: boolean
@@ -1413,18 +1471,20 @@ function ServerIconActions({
           <Codicon name="refresh" size="0.8125rem" spinning={probing} />
         </Button>
       </Tip>
-      <Tip label={m.remove}>
-        <Button
-          aria-label={m.remove}
-          className={cn(ICON_BUTTON, 'hover:text-destructive')}
-          disabled={saving}
-          onClick={onRemove}
-          size="icon"
-          variant="ghost"
-        >
-          <Codicon name="trash" size="0.8125rem" />
-        </Button>
-      </Tip>
+      {!hideRemove && (
+        <Tip label={m.remove}>
+          <Button
+            aria-label={m.remove}
+            className={cn(ICON_BUTTON, 'hover:text-destructive')}
+            disabled={saving}
+            onClick={onRemove}
+            size="icon"
+            variant="ghost"
+          >
+            <Codicon name="trash" size="0.8125rem" />
+          </Button>
+        </Tip>
+      )}
     </span>
   )
 }
@@ -1792,6 +1852,7 @@ function McpRow({
   onRemove,
   onSelect,
   onToggle,
+  readOnly,
   status,
   statusText,
   unused
@@ -1804,6 +1865,7 @@ function McpRow({
   onRemove: () => void
   onSelect: () => void
   onToggle: (checked: boolean) => void
+  readOnly: boolean
   status: ServerStatus
   statusText: string
   unused?: boolean
@@ -1849,12 +1911,13 @@ function McpRow({
       </button>
       <ServerIconActions
         className="opacity-0 transition-opacity focus-within:opacity-100 group-hover/row:opacity-100"
+        hideRemove={readOnly}
         onProbe={onProbe}
         onRemove={onRemove}
         probing={status === 'probing'}
         saving={busy}
       />
-      <ServerSwitch disabled={busy} enabled={enabled} name={name} onToggle={onToggle} />
+      {!readOnly && <ServerSwitch disabled={busy} enabled={enabled} name={name} onToggle={onToggle} />}
     </div>
   )
 }

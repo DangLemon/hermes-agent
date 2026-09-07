@@ -119,7 +119,8 @@ def test_run_one_job_exception_delivers_failure_alert(monkeypatch):
         ("j3", "⚠️ Cron 'morning' failed: Gemini HTTP 503 (UNAVAILABLE)")
     ]
     assert marked == [
-        (("j3", False, "Gemini HTTP 503 (UNAVAILABLE)"), {"delivery_error": None})
+        (("j3", False, "Gemini HTTP 503 (UNAVAILABLE)"),
+         {"delivery_error": None, "consumed_manual_run_at": None})
     ]
     assert finished == [
         (
@@ -157,7 +158,8 @@ def test_run_one_job_exception_records_failure_alert_delivery_error(monkeypatch)
 
     assert s.run_one_job({"id": "j4", "deliver": "telegram"}) is False
     assert marked == [
-        (("j4", False, "provider failed"), {"delivery_error": "send failed: 502"})
+        (("j4", False, "provider failed"),
+         {"delivery_error": "send failed: 502", "consumed_manual_run_at": None})
     ]
 
 
@@ -271,10 +273,11 @@ def test_run_one_job_exception_after_delivery_does_not_redeliver(monkeypatch):
 
     assert ok is False
     assert delivered == [("j5", "final response")]
-    assert mark_calls[0] == (("j5", True, None), {"delivery_error": None})
+    assert mark_calls[0] == (
+        ("j5", True, None), {"delivery_error": None, "consumed_manual_run_at": None})
     assert mark_calls[1] == (
         ("j5", False, "bookkeeping boom"),
-        {"delivery_error": None},
+        {"delivery_error": None, "consumed_manual_run_at": None},
     )
 
 
@@ -314,7 +317,7 @@ def test_run_one_job_keyboard_interrupt_skips_delivery_and_reraises(monkeypatch)
         s.run_one_job({"id": "j6", "name": "interrupt", "deliver": "telegram"})
 
     assert delivered == []
-    assert marked == [(("j6", False, "KeyboardInterrupt"), {})]
+    assert marked == [(("j6", False, "KeyboardInterrupt"), {"consumed_manual_run_at": None})]
     assert finished == [
         (
             ("exec-j6",),
@@ -376,5 +379,4 @@ def test_run_one_job_installs_secret_scope_under_multiplex(monkeypatch, tmp_path
     assert scope_during_delivery["base_url"] == "https://openrouter.ai/api/v1"
     # And it was torn down after the full lifecycle returned (no leak).
     assert ss.current_secret_scope() is None
-
 

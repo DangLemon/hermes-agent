@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router'
 
 import { ConnectionSwitcher } from '@/app/chat/sidebar/connection-switcher'
 import type { CommandCenterSection } from '@/app/command-center'
+import { $internalCompanyCapabilities } from '@/app/internal-company/store'
 import { useApprovalModeStatusbarItem } from '@/app/shell/approval-mode-menu'
 import { ContextUsagePanel } from '@/app/shell/context-usage-panel'
 import { GatewayMenuPanel } from '@/app/shell/gateway-menu-panel'
@@ -107,6 +108,7 @@ export function useStatusbarItems({
   // the takeover store alone stays true behind a stacked sibling tab or a
   // minimized zone, which lit the button for a pane the user couldn't see.
   const terminalShowing = useStore($paneVisible('terminal'))
+  const internalCompany = useStore($internalCompanyCapabilities)
   const sessionsShowing = useStore($paneVisible('sessions'))
   const botsShowing = useStore($paneVisible('hermes-bots:pane'))
   const primaryBusy = useStore($busy)
@@ -233,7 +235,7 @@ export function useStatusbarItems({
   // a second per-session copy of the same fact. Re-derives whenever the cwd or
   // the tree changes; null (no named project) falls back to the cwd leaf below.
   const projectTree = useStore($projectTree)
-  const projectName = useMemo(() => projectNameForCwd(currentCwd), [currentCwd, projectTree])
+  const projectName = useMemo(() => projectNameForCwd(currentCwd), [currentCwd])
 
   const sessionStartedAt = primaryFocused
     ? primarySessionStartedAt
@@ -291,13 +293,22 @@ export function useStatusbarItems({
     () => (close: () => void) => (
       <GatewayMenuPanel
         gatewayState={gatewayState}
+        harnessMode={internalCompany.mode === 'harness'}
+        harnessProvisioning={internalCompany.provisioning}
         inferenceStatus={inferenceStatus}
         onClose={close}
         onOpenSystem={() => openCommandCenterSection('system')}
         statusSnapshot={statusSnapshot}
       />
     ),
-    [gatewayState, inferenceStatus, openCommandCenterSection, statusSnapshot]
+    [
+      gatewayState,
+      inferenceStatus,
+      internalCompany.mode,
+      internalCompany.provisioning,
+      openCommandCenterSection,
+      statusSnapshot
+    ]
   )
 
   const gatewayOpen = gatewayState === 'open'
@@ -306,16 +317,23 @@ export function useStatusbarItems({
   const gatewayDegraded = gatewayOpen || gatewayConnecting
   const readinessDisplay = runtimeReadinessDisplay(inferenceStatus)
 
-  const gatewayDetail = gatewayOpen
-    ? {
-        checking: copy.gatewayChecking,
-        needs_setup: copy.gatewayNeedsSetup,
-        ready: copy.gatewayReady,
-        unavailable: copy.gatewayUnavailable
-      }[readinessDisplay]
-    : gatewayConnecting
-      ? copy.gatewayConnecting
-      : copy.gatewayOffline
+  const harnessProvisioning = internalCompany.mode === 'harness' ? internalCompany.provisioning : null
+
+  const gatewayDetail =
+    harnessProvisioning?.state === 'incomplete'
+      ? 'IT setup incomplete'
+      : harnessProvisioning?.state === 'unknown'
+        ? 'setup status unknown'
+        : gatewayOpen
+          ? {
+              checking: copy.gatewayChecking,
+              needs_setup: copy.gatewayNeedsSetup,
+              ready: copy.gatewayReady,
+              unavailable: copy.gatewayUnavailable
+            }[readinessDisplay]
+          : gatewayConnecting
+            ? copy.gatewayConnecting
+            : copy.gatewayOffline
 
   const gatewayClassName = inferenceReady
     ? undefined
@@ -446,7 +464,7 @@ export function useStatusbarItems({
         menuClassName: 'w-72',
         menuContent: gatewayMenuContent,
         // Tip only when there's a real status reason — not "gateway status" restating the label.
-        title: inferenceStatus?.reason || undefined,
+        title: harnessProvisioning?.detail || inferenceStatus?.reason || undefined,
         toggleLabel: copy.gateway,
         variant: 'menu'
       },
@@ -540,6 +558,7 @@ export function useStatusbarItems({
       gatewayClassName,
       gatewayDetail,
       gatewayRestarting,
+      harnessProvisioning?.detail,
       inferenceReady,
       inferenceStatus?.reason,
       openAgents,
@@ -613,7 +632,7 @@ export function useStatusbarItems({
       {
         actionId: 'view.showTerminal',
         className: `w-7 justify-center px-0${terminalShowing ? ' bg-accent/55 text-foreground' : ''}`,
-        hidden: !chatOpen,
+        hidden: !chatOpen || !internalCompany.terminalAllowed,
         icon: <Terminal className="size-3.5" />,
         id: 'terminal',
         onSelect: () => togglePaneVisible('terminal'),
@@ -637,6 +656,7 @@ export function useStatusbarItems({
       contextUsage,
       copy,
       gaugeUsage,
+      internalCompany.terminalAllowed,
       sessionStartedAt,
       gatewayState,
       systemResourcesItem,

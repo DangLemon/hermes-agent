@@ -12,6 +12,8 @@
  *  - `/my-page?item=x` / `#/my-page?item=x` (hash-router paths)
  */
 
+import { type InternalCompanyCapabilityState, internalCompanyRouteAllowed } from '@/app/internal-company/capabilities'
+
 export type HermesOpenTarget = string | { href: string } | { path: string; params?: Record<string, string> }
 
 const HERMES_PROTOCOL = 'hermes:'
@@ -149,6 +151,19 @@ export function resolveHermesOpenPath(target: HermesOpenTarget | null | undefine
   }
 
   return null
+}
+
+export function resolveInternalCompanyOpenPath(
+  target: HermesOpenTarget | null | undefined,
+  state: Pick<InternalCompanyCapabilityState, 'allowedRoutes' | 'mode'>
+): string | null {
+  const path = resolveHermesOpenPath(target)
+
+  if (!path || !internalCompanyRouteAllowed(path, state)) {
+    return null
+  }
+
+  return path
 }
 
 /**

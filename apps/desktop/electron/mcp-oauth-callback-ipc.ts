@@ -44,11 +44,66 @@ interface CallbackResult {
   state: null | string
 }
 
+interface ListenOptions {
+  expectedState?: null | string
+  redirectUri?: null | string
+  timeoutMs?: null | number
+}
+
 interface PendingListener {
+  lifetimeTimer: ReturnType<typeof setTimeout> | null
   result: CallbackResult | null
   server: http.Server
   settled: boolean
   waiters: Array<(result: CallbackResult) => void>
+}
+
+function parseListenOptions(options?: ListenOptions): {
+  host: string
+  path: string
+  port: number
+  redirectUri: string
+} {
+  const raw = typeof options?.redirectUri === 'string' ? options.redirectUri.trim() : ''
+
+  if (!raw) {
+    return { host: '127.0.0.1', path: '/callback', port: 0, redirectUri: '' }
+  }
+
+  let parsed: URL
+
+  try {
+    parsed = new URL(raw)
+  } catch (error) {
+    throw new Error('Invalid MCP OAuth redirect URI')
+  }
+
+  if (parsed.protocol !== 'http:') {
+    throw new Error('MCP OAuth loopback redirect URI must use http')
+  }
+
+  if (parsed.username || parsed.password || parsed.hash) {
+    throw new Error('MCP OAuth loopback redirect URI must not include userinfo or fragments')
+  }
+
+  if (!['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname)) {
+    throw new Error('MCP OAuth loopback redirect URI must use localhost or 127.0.0.1')
+  }
+
+  if (!parsed.port) {
+    throw new Error('MCP OAuth loopback redirect URI must include a port')
+  }
+
+  if (!parsed.pathname || parsed.pathname === '/') {
+    throw new Error('MCP OAuth loopback redirect URI must include a callback path')
+  }
+
+  return {
+    host: parsed.hostname === '[::1]' ? '::1' : parsed.hostname,
+    path: parsed.pathname,
+    port: Number(parsed.port),
+    redirectUri: raw
+  }
 }
 
 const pending = new Map<string, PendingListener>()
@@ -86,56 +141,102 @@ function dispose(id: string) {
     settle(id, { code: null, error: 'cancelled', state: null })
   }
 
+  if (entry.lifetimeTimer) {
+    clearTimeout(entry.lifetimeTimer)
+    entry.lifetimeTimer = null
+  }
+
   pending.delete(id)
 }
 
 export function registerMcpOauthCallbackIpc() {
   // Bind a one-shot loopback listener; resolves { id, redirectUri }.
-  ipcMain.handle('hermes:mcp-oauth:listen', async () => {
+  ipcMain.handle('hermes:mcp-oauth:listen', async (_event, options?: ListenOptions) => {
     if (pending.size >= MAX_PENDING_LISTENERS) {
       throw new Error('Too many MCP OAuth listeners are already pending')
     }
 
     const id = String(nextId++)
+    const parsedOptions = parseListenOptions(options)
+
+    const expectedState =
+      typeof options?.expectedState === 'string' && options.expectedState ? options.expectedState : null
 
     const server = http.createServer((req, res) => {
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-      res.end(DONE_HTML)
-
       const url = req.url || '/'
+      const baseHost = parsedOptions.host.includes(':') ? `[${parsedOptions.host}]` : parsedOptions.host
+      let parsed: URL
 
-      // Ignore favicon and other noise — wait for the ?code= / ?error= hit.
-      if (!/[?&](code|error)=/.test(url)) {
+      try {
+        parsed = new URL(url, `http://${baseHost}`)
+      } catch {
+        res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' })
+        res.end('Invalid OAuth callback URL')
+
         return
       }
 
-      let code: null | string = null
-      let state: null | string = null
-      let error: null | string = null
+      if (parsed.pathname !== parsedOptions.path) {
+        res.writeHead(parsedOptions.redirectUri ? 404 : 200, { 'content-type': 'text/html; charset=utf-8' })
+        res.end(parsedOptions.redirectUri ? '<h1>OAuth callback not found</h1>' : DONE_HTML)
 
-      try {
-        const parsed = new URL(url, 'http://127.0.0.1')
-
-        code = parsed.searchParams.get('code')
-        state = parsed.searchParams.get('state')
-        error = parsed.searchParams.get('error')
-      } catch {
-        error = 'unparseable callback URL'
+        return
       }
 
+      // Ignore right-path noise — wait for the ?code= / ?error= hit.
+      if (!parsed.searchParams.has('code') && !parsed.searchParams.has('error')) {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+        res.end(DONE_HTML)
+
+        return
+      }
+
+      const code = parsed.searchParams.get('code')
+      const state = parsed.searchParams.get('state')
+      const error = parsed.searchParams.get('error')
+
+      if (expectedState && state !== expectedState) {
+        res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' })
+        res.end('<h1>OAuth callback rejected</h1><p>State mismatch.</p>')
+
+        return
+      }
+
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(DONE_HTML)
       settle(id, { code, error, state })
     })
 
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject)
-      server.listen(0, '127.0.0.1', () => resolve())
-    })
+    const lifetime = Math.min(Math.max(Number(options?.timeoutMs) || DEFAULT_WAIT_TIMEOUT_MS, 1000), 15 * 60 * 1000)
+    const lifetimeTimer = setTimeout(() => dispose(id), lifetime)
+
+    pending.set(id, { lifetimeTimer, result: null, server, settled: false, waiters: [] })
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject)
+        server.listen(parsedOptions.port, parsedOptions.host, () => resolve())
+      })
+    } catch (error) {
+      if (lifetimeTimer) {
+        clearTimeout(lifetimeTimer)
+      }
+
+      pending.delete(id)
+
+      try {
+        server.close()
+      } catch {
+        // already closed
+      }
+
+      throw error
+    }
 
     const port = (server.address() as AddressInfo).port
+    const redirectUri = parsedOptions.redirectUri || `http://127.0.0.1:${port}/callback`
 
-    pending.set(id, { result: null, server, settled: false, waiters: [] })
-
-    return { id, redirectUri: `http://127.0.0.1:${port}/callback` }
+    return { id, redirectUri }
   })
 
   // Resolve when the redirect arrives (or timeout). Safe to call once per id.
@@ -149,7 +250,7 @@ export function registerMcpOauthCallbackIpc() {
     if (entry.result) {
       const result = entry.result
 
-      pending.delete(String(id))
+      dispose(String(id))
 
       return result
     }
@@ -167,7 +268,7 @@ export function registerMcpOauthCallbackIpc() {
       })
     })
 
-    pending.delete(String(id))
+    dispose(String(id))
 
     return result
   })

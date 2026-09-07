@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 
+import type { HarnessProvisioning } from '@/app/internal-company/capabilities'
 import { StatusDot, type StatusTone } from '@/components/status-dot'
 import { Button } from '@/components/ui/button'
 import { LogView } from '@/components/ui/log-view'
@@ -16,6 +17,8 @@ import type { StatusResponse } from '@/types/hermes'
 
 interface GatewayMenuPanelProps {
   gatewayState: string
+  harnessMode?: boolean
+  harnessProvisioning?: HarnessProvisioning | null
   inferenceStatus: RuntimeReadinessResult | null
   onClose: () => void
   onOpenSystem: () => void
@@ -91,6 +94,8 @@ const trimLogLine = (raw: string) => raw.trim().replace(TIMESTAMP_RE, '').replac
 
 export function GatewayMenuPanel({
   gatewayState,
+  harnessMode = false,
+  harnessProvisioning = null,
   inferenceStatus,
   onClose,
   onOpenSystem,
@@ -126,6 +131,8 @@ export function GatewayMenuPanel({
   }
 
   const gatewayOpen = gatewayState === 'open'
+  const showAdminChrome = !harnessMode
+  const showProvisioningNotice = harnessMode && harnessProvisioning?.state && harnessProvisioning.state !== 'complete'
   const gatewayConnecting = gatewayState === 'connecting'
   const inferenceReady = gatewayOpen && inferenceStatus?.ready === true
 
@@ -185,34 +192,40 @@ export function GatewayMenuPanel({
               </Button>
             </Tip>
           )}
-          <Tip label={copy.openSystem}>
-            <Button
-              aria-label={copy.openSystem}
-              className="text-muted-foreground hover:text-foreground"
-              onClick={openSystem}
-              size="icon-xs"
-              variant="ghost"
-            >
-              <LayoutDashboard />
-            </Button>
-          </Tip>
-          {/* Restart is the heavy, disruptive action: keep it visually distinct
-              (power icon, destructive hover) and separated from the benign
-              reconnect/system buttons so it can't be hit by mistake. */}
-          <span aria-hidden className="mx-1 h-4 w-px bg-border/70" />
-          <Tip label={t.commandCenter.restartGateway}>
-            <Button
-              aria-label={t.commandCenter.restartGateway}
-              className="text-muted-foreground hover:text-destructive"
-              onClick={restart}
-              size="icon-xs"
-              variant="ghost"
-            >
-              <Power />
-            </Button>
-          </Tip>
+          {showAdminChrome && (
+            <>
+              <Tip label={copy.openSystem}>
+                <Button
+                  aria-label={copy.openSystem}
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={openSystem}
+                  size="icon-xs"
+                  variant="ghost"
+                >
+                  <LayoutDashboard />
+                </Button>
+              </Tip>
+              {/* Restart is the heavy, disruptive action: keep it visually distinct
+                  (power icon, destructive hover) and separated from the benign
+                  reconnect/system buttons so it can't be hit by mistake. */}
+              <span aria-hidden className="mx-1 h-4 w-px bg-border/70" />
+              <Tip label={t.commandCenter.restartGateway}>
+                <Button
+                  aria-label={t.commandCenter.restartGateway}
+                  className="text-muted-foreground hover:text-destructive"
+                  onClick={restart}
+                  size="icon-xs"
+                  variant="ghost"
+                >
+                  <Power />
+                </Button>
+              </Tip>
+            </>
+          )}
         </div>
       </div>
+
+      {showProvisioningNotice && harnessProvisioning && <ProvisioningNotice provisioning={harnessProvisioning} />}
 
       {inferenceStatus?.reason && (
         <Section className="text-xs text-muted-foreground">
@@ -224,15 +237,17 @@ export function GatewayMenuPanel({
         <Section>
           <div className="flex items-center justify-between gap-2">
             <SectionLabel>{copy.recentActivity}</SectionLabel>
-            <Button
-              className="-mr-2 h-auto py-0 font-medium leading-none text-muted-foreground"
-              onClick={openSystem}
-              size="xs"
-              type="button"
-              variant="text"
-            >
-              {copy.viewAllLogs}
-            </Button>
+            {showAdminChrome && (
+              <Button
+                className="-mr-2 h-auto py-0 font-medium leading-none text-muted-foreground"
+                onClick={openSystem}
+                size="xs"
+                type="button"
+                variant="text"
+              >
+                {copy.viewAllLogs}
+              </Button>
+            )}
           </div>
           <LogView className="mt-1.5 max-h-40 border-0 px-0" ref={logScrollRef}>
             {recentLogs.map(trimLogLine).join('\n')}
@@ -257,6 +272,24 @@ export function GatewayMenuPanel({
         </Section>
       )}
     </div>
+  )
+}
+
+function ProvisioningNotice({ provisioning }: { provisioning: HarnessProvisioning }) {
+  const title = provisioning.state === 'unknown' ? 'IT setup status unknown' : 'IT setup incomplete'
+
+  const detail =
+    provisioning.detail ??
+    (provisioning.state === 'unknown'
+      ? 'Runtime provisioning has not reported readiness yet.'
+      : 'One or more required setup categories are missing.')
+
+  return (
+    <Section className="space-y-1 text-xs text-muted-foreground">
+      <SectionLabel>{title}</SectionLabel>
+      <div>{detail}</div>
+      {provisioning.missing.length > 0 && <div>Missing: {provisioning.missing.join(', ')}</div>}
+    </Section>
   )
 }
 

@@ -7,6 +7,7 @@ export interface PrimaryBackendStartupOptions<Backend, RuntimeBackend, Remote, C
   resolveRemote: () => Promise<Remote | null>
   waitForDecision: (backend: Backend) => Promise<FirstRunSetupDecision>
   waitForLocalStart: () => Promise<unknown>
+  forceLocalBackend?: boolean
 }
 
 export type PrimaryBackendStartupResult<RuntimeBackend, Connection> =
@@ -31,6 +32,24 @@ interface ResolvedPrimaryRemote {
   }
   token: unknown
   wsUrl: string
+}
+
+
+export function resolvePrimaryHarnessLaunchScope({
+  harnessRequested,
+  persistedProfile
+}: {
+  harnessRequested: boolean
+  persistedProfile?: string | null
+}) {
+  const primaryProfile = harnessRequested ? 'default' : String(persistedProfile || '').trim() || 'default'
+  const backendArgs = ['serve', '--host', '127.0.0.1', '--port', '0']
+
+  if (!harnessRequested && persistedProfile) {
+    backendArgs.unshift('--profile', persistedProfile)
+  }
+
+  return { primaryProfile, backendArgs }
 }
 
 /**
@@ -80,11 +99,12 @@ export async function runPrimaryBackendStartup<Backend, RuntimeBackend, Remote, 
   prepareLocalBackend,
   resolveRemote,
   waitForDecision,
-  waitForLocalStart
+  waitForLocalStart,
+  forceLocalBackend = false
 }: PrimaryBackendStartupOptions<Backend, RuntimeBackend, Remote, Connection>): Promise<
   PrimaryBackendStartupResult<RuntimeBackend, Connection>
 > {
-  const savedRemote = await resolveRemote()
+  const savedRemote = forceLocalBackend ? null : await resolveRemote()
 
   if (savedRemote) {
     return { kind: 'remote', connection: await connectRemote(savedRemote) }
@@ -93,6 +113,11 @@ export async function runPrimaryBackendStartup<Backend, RuntimeBackend, Remote, 
   await waitForLocalStart()
 
   const backend = await prepareLocalBackend()
+
+  if (forceLocalBackend) {
+    return { kind: 'local', backend: await ensureLocalRuntime(backend) }
+  }
+
   const decision = await waitForDecision(backend)
 
   if (decision === 'remote-applied') {

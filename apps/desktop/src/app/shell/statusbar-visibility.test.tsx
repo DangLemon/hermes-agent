@@ -1,7 +1,12 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
+import { initialInternalCompanyCapabilities } from '@/app/internal-company/capabilities'
+import {
+  resetInternalCompanyCapabilitiesForTest,
+  setInternalCompanyCapabilitiesForTest
+} from '@/app/internal-company/store'
 import { StatusbarControls, type StatusbarItem } from '@/app/shell/statusbar-controls'
 import {
   $statusbarHiddenIds,
@@ -20,6 +25,7 @@ afterEach(() => {
   cleanup()
   $statusbarHiddenIds.set([...STATUSBAR_HIDDEN_BY_DEFAULT])
   $statusbarVisible.set(true)
+  resetInternalCompanyCapabilitiesForTest()
 })
 
 const item = (id: string, label: string, extra: Partial<StatusbarItem> = {}): StatusbarItem => ({
@@ -86,6 +92,16 @@ describe('statusbar item visibility', () => {
     const row = await screen.findByRole('menuitemcheckbox', { name: 'Command Center' })
     expect(row.getAttribute('data-disabled')).not.toBeNull()
     expect(row.getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('hides denied route actions in the internal harness before they can execute', () => {
+    const onSelect = vi.fn()
+    setInternalCompanyCapabilitiesForTest(initialInternalCompanyCapabilities(true))
+
+    bar([item('profiles', 'Profiles', { onSelect, to: '/profiles' })])
+
+    expect(screen.queryByText('Profiles')).toBeNull()
+    expect(onSelect).not.toHaveBeenCalled()
   })
 
   it('leaves items that never opted into the menu alone', () => {

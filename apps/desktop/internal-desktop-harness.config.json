@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "profile": "internal",
+  "sourceRepository": "DangLemon/hermes-agent",
+  "ui": {
+    "agents": false,
+    "cron": true,
+    "messaging": false,
+    "terminal": true,
+    "webhooks": false
+  },
+  "managedConfig": {
+    "model": {
+      "provider": "custom",
+      "default": "openai-codex-gpt-5-5",
+      "base_url": "http://127.0.0.1:5173/v1",
+      "api_key": "${HERMES_COMPANY_API_KEY}"
+    },
+    "mcp_servers": {
+      "tiktok-ads": {
+        "url": "https://business-api.tiktok.com/open_mcp/tt-ads-mcp-layer",
+        "auth": "oauth"
+      },
+      "algolia": {
+        "url": "https://mcp.algolia.com/mcp",
+        "auth": "oauth",
+        "enabled": false
+      },
+      "amazon-ads": {
+        "url": "https://advertising-ai.amazon.com/mcp",
+        "auth": "oauth",
+        "oauth": {
+          "client_id": "${AMAZON_ADS_CLIENT_ID}",
+          "client_secret": "${AMAZON_ADS_CLIENT_SECRET}",
+          "redirect_uri": "http://localhost:8000/auth/callback",
+          "redirect_port": 8000
+        }
+      }
+    }
+  },
+  "credentialRequirements": {
+    "provider": {
+      "requiredEnv": [
+        "HERMES_COMPANY_API_KEY"
+      ],
+      "label": "Company provider API key"
+    },
+    "mcpServers": {
+      "amazon-ads": {
+        "requiredEnv": [
+          "AMAZON_ADS_CLIENT_ID",
+          "AMAZON_ADS_CLIENT_SECRET"
+        ],
+        "labels": {
+          "AMAZON_ADS_CLIENT_ID": "Amazon Ads OAuth client ID",
+          "AMAZON_ADS_CLIENT_SECRET": "Amazon Ads OAuth client secret"
+        }
+      }
+    }
+  }
+}

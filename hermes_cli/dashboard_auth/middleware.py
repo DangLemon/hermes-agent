@@ -9,7 +9,12 @@ redirected to ``/login``; ``/api/*`` routes get a 401 JSON envelope.
 """
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import Future
+import hashlib
 import logging
+import threading
+import time
 from typing import Awaitable, Callable
 from urllib.parse import quote
 
@@ -31,6 +36,11 @@ from hermes_cli.dashboard_auth.request_utils import (
     unreachable_response)
 
 _log = logging.getLogger(__name__)
+_REFRESH_REUSE_TTL_SECONDS = 2.0
+_REFRESH_REUSE_MAX_ENTRIES = 128
+_refresh_singleflight_lock = threading.Lock()
+_refresh_inflight: dict[tuple[str, int, str], Future] = {}
+_refresh_recent: dict[tuple[str, int, str], tuple[float, object]] = {}
 
 # Prefix-matched bypass list: auth bootstrap routes and static asset mounts. ``/assets/`` with
 # the trailing slash matches ``/assets/foo.css`` but not ``/assetsleak``.
@@ -120,6 +130,26 @@ def _verify_access_token(
         phase="verify" if audit else "bearer verify", log=_log, on_unreachable=_audit_unreachable)
 
 
+async def _verify_access_token_async(
+    request: Request, *, access_token: str, provider_hint: str | None = None, audit: bool = True):
+    return await asyncio.to_thread(
+        _verify_access_token,
+        request,
+        access_token=access_token,
+        provider_hint=provider_hint,
+        audit=audit,
+    )
+
+
+async def _attempt_refresh_async(request: Request, *, refresh_token, provider_hint: str | None = None):
+    return await asyncio.to_thread(
+        _attempt_refresh,
+        request,
+        refresh_token=refresh_token,
+        provider_hint=provider_hint,
+    )
+
+
 async def _serve_refreshed(request: Request, call_next, new_session, provider: str) -> Response:
     """Serve the request under a just-rotated session and write the rotated cookies back. Writing
     the ROTATED RT is mandatory: Portal runs reuse detection, so replaying the stale RT would
@@ -161,7 +191,7 @@ async def gated_auth_middleware(
     bearer = _extract_bearer(request)
     if bearer:
         try:
-            bearer_session = _verify_access_token(request, access_token=bearer, audit=False)
+            bearer_session = await _verify_access_token_async(request, access_token=bearer, audit=False)
         except ProviderError as e:
             return unreachable_response(str(e))
         if bearer_session is not None:
@@ -180,14 +210,14 @@ async def gated_auth_middleware(
     session = None
     if at:
         try:
-            session = _verify_access_token(request, access_token=at, provider_hint=provider_hint)
+            session = await _verify_access_token_async(request, access_token=at, provider_hint=provider_hint)
         except ProviderError as e:
             return unreachable_response(str(e))
     if session is None:
         # Rotate via the refresh token before forcing re-login; on success the request is
         # served transparently with the rotated cookies re-set.
         try:
-            refreshed = _attempt_refresh(request, refresh_token=_rt, provider_hint=provider_hint)
+            refreshed = await _attempt_refresh_async(request, refresh_token=_rt, provider_hint=provider_hint)
         except ProviderError as e:
             # Uncertain (provider unreachable), not rejected: keep the cookies.
             return unreachable_response(str(e))
@@ -218,13 +248,63 @@ def _attempt_refresh(request: Request, *, refresh_token, provider_hint: str | No
             ip=_client_ip(request))
 
     def _refresh(provider):
-        new_session = provider.refresh_session(refresh_token=refresh_token)
+        new_session = _refresh_provider_singleflight(provider, refresh_token=refresh_token)
         return None if new_session is None else (new_session, provider.name)
 
     return scan_session_providers(
         provider_hint, _refresh, phase="refresh", log=_log, swallow=(RefreshExpiredError,),
         on_swallow=_audit_failure("refresh_expired"),
         on_unreachable=_audit_failure("provider_unreachable"))
+
+
+def _refresh_token_fingerprint(refresh_token: str) -> str:
+    return hashlib.sha256(refresh_token.encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def _cleanup_recent_refreshes(now: float, *, max_entries: int = _REFRESH_REUSE_MAX_ENTRIES) -> None:
+    expired = [key for key, (expires_at, _result) in _refresh_recent.items() if expires_at <= now]
+    for key in expired:
+        _refresh_recent.pop(key, None)
+    while len(_refresh_recent) > max_entries:
+        oldest_key = min(_refresh_recent, key=lambda key: _refresh_recent[key][0])
+        _refresh_recent.pop(oldest_key, None)
+
+
+def _refresh_provider_singleflight(provider, *, refresh_token: str):
+    key = (provider.name, id(provider), _refresh_token_fingerprint(refresh_token))
+    owner = False
+    with _refresh_singleflight_lock:
+        now = time.monotonic()
+        _cleanup_recent_refreshes(now)
+        cached = _refresh_recent.get(key)
+        if cached is not None:
+            return cached[1]
+        future = _refresh_inflight.get(key)
+        if future is None:
+            future = Future()
+            _refresh_inflight[key] = future
+            owner = True
+
+    if not owner:
+        return future.result()
+
+    try:
+        result = provider.refresh_session(refresh_token=refresh_token)
+    except BaseException as exc:
+        future.set_exception(exc)
+        with _refresh_singleflight_lock:
+            if _refresh_inflight.get(key) is future:
+                _refresh_inflight.pop(key, None)
+        raise
+
+    future.set_result(result)
+    with _refresh_singleflight_lock:
+        now = time.monotonic()
+        _cleanup_recent_refreshes(now, max_entries=_REFRESH_REUSE_MAX_ENTRIES - 1)
+        _refresh_recent[key] = (now + _REFRESH_REUSE_TTL_SECONDS, result)
+        if _refresh_inflight.get(key) is future:
+            _refresh_inflight.pop(key, None)
+    return result
 
 
 # ---- BEGIN PLUGIN-COMPAT (revert-scheduled; see COMPAT_MANIFEST.md) ----
