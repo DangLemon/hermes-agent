@@ -1438,6 +1438,7 @@ def save_jobs(
 
 
 _MISSING = object()
+_MANUAL_RUN_AT_OMITTED = object()
 
 
 def _with_job(
@@ -1456,6 +1457,8 @@ def _with_job(
 def _complete_job_record(job: Dict[str, Any]) -> None:
     """Retire *job* in place as a terminal completion (record kept for `cronjob list`)."""
     job.update(enabled=False, state="completed", next_run_at=None)
+    job.pop("manual_run_at", None)
+    job.pop("manual_run_prompt", None)
 
 
 def _activate_job_record(job: Dict[str, Any]) -> None:
@@ -2145,13 +2148,16 @@ def note_fire_forward_failure(job_id: str, detail: str) -> bool:
 
 def _record_run_outcome(
     job: Dict[str, Any], success: bool, error: Optional[str], delivery_error: Optional[str],
-    status: Optional[str], now: str,
+    status: Optional[str], now: str, consumed_manual_run_at: Any = _MANUAL_RUN_AT_OMITTED,
 ) -> None:
     """Stamp one completed run onto *job*: status fields, failure streak, alert markers, claims."""
     job["last_run_at"] = now
-    job.pop("manual_run_at", None)
-    # The transient manual-run context is single-fire: the run that just completed consumed it.
-    job.pop("manual_run_prompt", None)
+    manual_run_at = job.get("manual_run_at")
+    # The transient manual-run context is single-fire. A completion only consumes the manual
+    # occurrence it actually dispatched; an older in-flight run must not clear a newer Run now.
+    if consumed_manual_run_at is _MANUAL_RUN_AT_OMITTED or manual_run_at == consumed_manual_run_at:
+        job.pop("manual_run_at", None)
+        job.pop("manual_run_prompt", None)
     delivery_failed = isinstance(delivery_error, str) and bool(delivery_error.strip())
     job["last_status"] = status or (
         "error" if not success else ("delivery_failed" if delivery_failed else "ok"))
@@ -2201,6 +2207,13 @@ def _advance_after_run(job: Dict[str, Any], now: str) -> None:
             _complete_job_record(job)
             return
 
+    preserved_manual_run_at = job.get("manual_run_at")
+    if preserved_manual_run_at:
+        job["next_run_at"] = preserved_manual_run_at
+        if job.get("state") != "paused":
+            job["state"] = "scheduled"
+        return
+
     job["next_run_at"] = compute_next_run(job["schedule"], now)
     if job["next_run_at"] is not None:
         if job.get("state") != "paused":
@@ -2229,6 +2242,7 @@ def mark_job_run(
     status: Optional[str] = None,
     *,
     expected_fire_owner: Optional[str] = None,
+    consumed_manual_run_at: Any = _MANUAL_RUN_AT_OMITTED,
 ) -> bool:
     """Mark a job as run: update last_run_at/last_status, bump completed, recompute next_run_at,
     and retire the record as a terminal completion when the repeat limit is reached.
@@ -2247,7 +2261,7 @@ def mark_job_run(
                     job_id)
                 return False
         now = _hermes_now().isoformat()
-        _record_run_outcome(job, success, error, delivery_error, status, now)
+        _record_run_outcome(job, success, error, delivery_error, status, now, consumed_manual_run_at)
         _advance_after_run(job, now)
         save_jobs(jobs)
         return True

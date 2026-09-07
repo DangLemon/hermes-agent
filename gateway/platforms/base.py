@@ -1888,6 +1888,7 @@ class BasePlatformAdapter(ABC):
         self._busy_text_debounce_seconds: float = _float_env("HERMES_GATEWAY_BUSY_TEXT_DEBOUNCE_SECONDS", 0.35)
         self._busy_text_hard_cap_seconds: float = _float_env("HERMES_GATEWAY_BUSY_TEXT_HARD_CAP_SECONDS", 1.0)
         self._text_debounce: dict[str, TextDebounceState] = {}
+        self._pending_text_overflow: dict[str, list[MessageEvent]] = {}
         # handle_message() tasks; shutdown cancels them so a replaced gateway stops working.
         self._background_tasks: set[asyncio.Task] = set()
         # Post-delivery one-shots per session_key: bare callback (legacy) or ``(generation,
@@ -3238,6 +3239,44 @@ class BasePlatformAdapter(ABC):
     def _text_debounce_store(self) -> dict[str, TextDebounceState]:
         return _lazy_attr(self, "_text_debounce", dict)
 
+    def _pending_text_overflow_store(self) -> dict[str, list[MessageEvent]]:
+        return _lazy_attr(self, "_pending_text_overflow", dict)
+
+    def _pending_text_queue_depth(self, session_key: str) -> int:
+        depth = len(self._pending_text_overflow_store().get(session_key) or ())
+        if session_key in self._pending_messages:
+            depth += 1
+        if session_key in self._text_debounce_store():
+            depth += 1
+        return depth
+
+    def _append_pending_text_overflow(self, session_key: str, event: MessageEvent) -> bool:
+        """Append one attributed busy-text burst behind the pending slot."""
+        if self._pending_text_queue_depth(session_key) >= 32:
+            logger.warning(
+                "[%s] Dropping queue-mode text follow-up for %s — pending text FIFO at cap",
+                self.name, session_key)
+            return False
+        overflow = self._pending_text_overflow_store().setdefault(session_key, [])
+        if overflow and self._can_merge_text_debounce_events(overflow[-1], event):
+            if event.text:
+                overflow[-1].text = _append_text(overflow[-1].text, event.text)
+        else:
+            overflow.append(event)
+        return True
+
+    def _promote_pending_overflow_now(self, session_key: str) -> bool:
+        """Move the next adapter-level busy-text FIFO item into the pending slot if it is free."""
+        if session_key in self._pending_messages:
+            return False
+        overflow = self._pending_text_overflow_store().get(session_key)
+        if not overflow:
+            return False
+        self._pending_messages[session_key] = overflow.pop(0)
+        if not overflow:
+            self._pending_text_overflow_store().pop(session_key, None)
+        return True
+
     def _is_queue_text_debounce_candidate(self, event: MessageEvent) -> bool:
         """Return True for normal text eligible for queue-mode debounce."""
         result = (
@@ -3284,11 +3323,6 @@ class BasePlatformAdapter(ABC):
             # fresh.
             await self._flush_text_debounce_now(session_key)
             state = store.get(session_key)
-            if state is not None and not self._can_merge_text_debounce_events(state.event, event):
-                existing_pending = self._pending_messages.get(session_key)
-                if existing_pending is not None and self._can_merge_text_debounce_events(existing_pending, event):
-                    merge_pending_message_event(self._pending_messages, session_key, event, merge_text=True)
-                return
         now = time.monotonic()
         if state is None:
             state = TextDebounceState(event=event, task=None, first_ts=now, last_ts=now)
@@ -3328,9 +3362,13 @@ class BasePlatformAdapter(ABC):
             return False
         state.cancel_timer(unless=asyncio.current_task())
         state.task = None
+        if self._pending_text_overflow_store().get(session_key):
+            store.pop(session_key, None)
+            return self._append_pending_text_overflow(session_key, state.event)
         pending = self._pending_messages.get(session_key)
         if pending is not None and not self._can_merge_text_debounce_events(pending, state.event):
-            return False
+            store.pop(session_key, None)
+            return self._append_pending_text_overflow(session_key, state.event)
         store.pop(session_key, None)
         merge_pending_message_event(self._pending_messages, session_key, state.event, merge_text=True)
         return True
@@ -3340,6 +3378,7 @@ class BasePlatformAdapter(ABC):
         state = self._text_debounce_store().pop(session_key, None)
         if state is not None:
             state.cancel_timer()
+        self._pending_text_overflow_store().pop(session_key, None)
 
     # ── Session task + guard ownership helpers: paired with the _session_tasks owner map so
     # reconciliation is deterministic across completion, /stop /new /reset, and stale-lock heal.
@@ -3431,6 +3470,7 @@ class BasePlatformAdapter(ABC):
         """Tail of /stop, /new, /reset: release the command-scoped guard, then
         spawn a fresh processing task for any follow-up queued meanwhile."""
         await self._flush_text_debounce_now(session_key)
+        self._promote_pending_overflow_now(session_key)
         pending_event = self._pending_messages.pop(session_key, None)
         self._release_session_guard(session_key, guard=command_guard)
         if pending_event is not None:
@@ -3940,6 +3980,7 @@ class BasePlatformAdapter(ABC):
             # Force-flush an unfired debounce timer so this task hands off to a fresh drain task.
             # Clear the Event BEFORE the stop-typing await so concurrent inbound sees a live guard.
             await self._flush_text_debounce_now(session_key)
+            self._promote_pending_overflow_now(session_key)
             if session_key in self._pending_messages:
                 pending_event = self._pending_messages.pop(session_key)
                 logger.debug("[%s] Processing queued follow-up message", self.name)
@@ -3970,6 +4011,7 @@ class BasePlatformAdapter(ABC):
                 event.source.chat_id, None, metadata=_thread_metadata, stop_attempts=1)
             # Flush any timer that missed the in-band drain, then reconcile ownership.
             await self._flush_text_debounce_now(session_key)
+            self._promote_pending_overflow_now(session_key)
             self._finish_session_task(session_key, interrupt_event)
 
     def _spawn_drain_task(self, pending_event: MessageEvent, session_key: str) -> None:
@@ -4026,13 +4068,18 @@ class BasePlatformAdapter(ABC):
                                "releasing tracking and letting them unwind in the background",
                                self.name, sum(not t.done() for t in tasks))
                 break
+        for session_key in list(self._text_debounce_store()):
+            with contextlib.suppress(Exception):
+                await self._flush_text_debounce_now(session_key)
         with contextlib.suppress(Exception):  # flush pending messages to disk before clearing
-            from gateway.shutdown_flush import flush_pending_to_file
+            from gateway.shutdown_flush import flush_overflow_to_file, flush_pending_to_file
             flush_pending_to_file(self._pending_messages, reason="adapter_shutdown")
+            flush_overflow_to_file(self._pending_text_overflow_store(), reason="adapter_shutdown")
         for state in self._text_debounce_store().values():
             state.cancel_timer()
         for bucket in (self._background_tasks, self._expected_cancelled_tasks, self._session_tasks,
-                       self._pending_messages, self._active_sessions, self._text_debounce_store()):
+                       self._pending_messages, self._active_sessions, self._text_debounce_store(),
+                       self._pending_text_overflow_store()):
             bucket.clear()
 
     def has_pending_interrupt(self, session_key: str) -> bool:
@@ -4041,6 +4088,7 @@ class BasePlatformAdapter(ABC):
 
     def get_pending_message(self, session_key: str) -> Optional[MessageEvent]:
         """Get and clear any pending message for a session."""
+        self._promote_pending_overflow_now(session_key)
         return self._pending_messages.pop(session_key, None)
 
     def build_source(

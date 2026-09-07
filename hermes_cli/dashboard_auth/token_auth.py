@@ -9,6 +9,7 @@ otherwise 401, or 503 when a provider's backing store was unreachable. Fails clo
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 from typing import Awaitable, Callable, Optional, Tuple
@@ -79,7 +80,7 @@ async def token_auth_middleware(
     path = request.url.path
     if not is_token_route(path):
         return await call_next(request)
-    principal, unreachable = authenticate_token(request)
+    principal, unreachable = await asyncio.to_thread(authenticate_token, request)
     if principal is not None:
         request.state.token_principal = principal
         request.state.token_authenticated = True

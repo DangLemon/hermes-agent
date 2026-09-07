@@ -17,13 +17,18 @@ def test_dashboard_flow_exposes_authorization_url_and_accepts_callback():
         redirect_uri="https://agent.example/mcp/oauth/callback/flow-1",
     )
 
-    asyncio.run(flow.publish_authorization_url("https://idp.example/authorize?state=s1"))
+    asyncio.run(
+        flow.publish_authorization_url("https://idp.example/authorize?state=s1")
+    )
     assert flow.snapshot() == {
         "flow_id": "flow-1",
         "server_name": "reports",
         "status": "authorization_required",
         "authorization_url": "https://idp.example/authorize?state=s1",
         "error": None,
+        "callback_transport": "backend",
+        "callback_redirect_uri": None,
+        "callback_expected_state": None,
     }
 
     flow.deliver_callback(code="code-1", state="s1", error=None)
@@ -40,7 +45,9 @@ def test_dashboard_flow_accepts_only_one_concurrent_callback():
         hermes_home="/tmp/hermes-test",
         redirect_uri="https://agent.example/mcp/oauth/callback/flow-race",
     )
-    asyncio.run(flow.publish_authorization_url("https://idp.example/authorize?state=state"))
+    asyncio.run(
+        flow.publish_authorization_url("https://idp.example/authorize?state=state")
+    )
 
     start = threading.Barrier(3)
     outcomes: list[str] = []
@@ -53,7 +60,9 @@ def test_dashboard_flow_accepts_only_one_concurrent_callback():
         except ValueError:
             outcomes.append("rejected")
 
-    workers = [threading.Thread(target=deliver, args=(code,)) for code in ("one", "two")]
+    workers = [
+        threading.Thread(target=deliver, args=(code,)) for code in ("one", "two")
+    ]
     for worker in workers:
         worker.start()
     start.wait()
@@ -87,9 +96,7 @@ def test_mcp_oauth_helpers_use_dashboard_flow_without_loopback_port():
         assert str(metadata.redirect_uris[0]) == flow.redirect_uri
 
         asyncio.run(
-            _make_redirect_handler(0)(
-                "https://idp.example/authorize?state=state-4"
-            )
+            _make_redirect_handler(0)("https://idp.example/authorize?state=state-4")
         )
         flow.deliver_callback(code="code-4", state="state-4", error=None)
         # mcp 2.0's callback_handler contract returns an

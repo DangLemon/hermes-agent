@@ -212,6 +212,44 @@ class TurnLeaseAdmission:
     conversation_history: Optional[List[Dict[str, Any]]] = None
 
 
+def _reconcile_durable_history(agent, cached_history, durable_history):
+    """Adopt foreign changes without replacing unchanged live message payloads.
+
+    SQLite generates timestamps and stores text projections of images. Compare
+    through the same persistence projection, not the rich live dicts; preserve
+    matching dicts even when a foreign turn appended a new tail.
+    """
+    from agent.context_compressor import _DB_PERSISTED_MARKER
+    from agent.memory_manager import sanitize_context
+    from agent.session_persistence import _db_flush_row, _ROW_REASONING_KEYS
+
+    cached = cached_history or []
+    if not durable_history and not any(
+        isinstance(message, dict)
+        and (message.get(_DB_PERSISTED_MARKER) or message.get("_row_id") is not None)
+        for message in cached
+    ):
+        return cached_history  # A pre-created empty session can still carry an unwritten seed.
+
+    keys = ("role", "content", "api_content", "tool_calls", "tool_call_id", "tool_name",
+            "finish_reason", *_ROW_REASONING_KEYS)
+    reconciled = []
+    for index, durable in enumerate(durable_history):
+        live = cached[index] if index < len(cached) else None
+        if isinstance(live, dict):
+            row = _db_flush_row(agent, live, False)
+            if row["role"] in {"user", "assistant"} and isinstance(row["content"], str):
+                row["content"] = sanitize_context(row["content"]).strip()
+            same_row = "_row_id" not in row or row["_row_id"] == durable.get("_row_id")
+            if same_row and all(row.get(key) == durable.get(key) for key in keys):
+                reconciled.append(live)
+                continue
+        reconciled.append(durable)
+    if len(cached) == len(reconciled) and all(a is b for a, b in zip(cached, reconciled)):
+        return cached_history
+    return reconciled
+
+
 def _durable_session_exists(db, session_id: str) -> bool:
     try:
         return db.get_session(session_id) is not None
@@ -283,15 +321,22 @@ def admit_durable_turn_lease(
     try:
         if waited:
             agent._emit_status("Session is free; loading the latest transcript...")
-            # The holder may have compressed/rotated the session while we waited: reload only
-            # AFTER admission; an immediate acquisition skips this (needless prompt-cache miss).
-            latest_session_id = db.resolve_resume_session_id(session_id)
-            if latest_session_id:
-                agent.session_id = latest_session_id
-                task_context["session_id"] = latest_session_id
-            admission.conversation_history = db.get_messages_as_conversation(
-                agent.session_id, repair_alternation=True, include_row_ids=True
-            )
+        # The holder may have appended, rewritten, or compressed/rotated the session before
+        # this process acquired the lease. Reconcile after admission for every durable turn,
+        # but keep the exact cached list when the durable projection is unchanged so prompt
+        # caching and in-memory-only fields survive.
+        latest_session_id = db.resolve_resume_session_id(session_id)
+        if latest_session_id:
+            agent.session_id = latest_session_id
+            task_context["session_id"] = latest_session_id
+        durable_history = db.get_messages_as_conversation(
+            agent.session_id, repair_alternation=True, include_row_ids=True
+        )
+        admission.conversation_history = _reconcile_durable_history(
+            agent,
+            admission.conversation_history if agent.session_id == session_id else None,
+            durable_history,
+        )
         lease.build_threads()
     except BaseException:
         # The façade never saw this lease; release here so an admitted row is not leaked.

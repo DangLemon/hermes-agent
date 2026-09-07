@@ -12,6 +12,7 @@ import secrets
 import threading
 import time
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -44,6 +45,43 @@ def _gc_mcp_oauth_flows() -> None:
         stale = [fid for fid, flow in _mcp_oauth_flows.items() if getattr(flow, "created_at", 0) < cutoff]
         for flow_id in stale:
             _mcp_oauth_flows.pop(flow_id, None)
+
+
+def _same_url_without_trailing_slash(left: str, right: str) -> bool:
+    return left.rstrip("/") == right.rstrip("/")
+
+
+def _desktop_loopback_redirect_uri(uri: Any, canonical_uri: str) -> str | None:
+    """Return exact desktop loopback URI, None for backend callback, or raise 400 for unsafe custom HTTP."""
+    if uri is None:
+        return None
+    if not isinstance(uri, str):
+        raise HTTPException(status_code=400, detail="Invalid oauth.redirect_uri")
+    value = uri.strip()
+    if not value:
+        return None
+    if _same_url_without_trailing_slash(value, canonical_uri):
+        return None
+    try:
+        parsed = urlparse(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid oauth.redirect_uri") from exc
+    if parsed.scheme == "https":
+        if parsed.username or parsed.password or parsed.fragment:
+            raise HTTPException(status_code=400, detail="Invalid oauth.redirect_uri: HTTPS redirects must not include userinfo or fragments")
+        return None
+    if parsed.scheme != "http":
+        raise HTTPException(status_code=400, detail="Invalid oauth.redirect_uri: only HTTPS or HTTP loopback redirects are supported")
+    if parsed.username or parsed.password or parsed.fragment:
+        raise HTTPException(status_code=400, detail="Invalid oauth.redirect_uri: loopback redirects must not include userinfo or fragments")
+    if parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        raise HTTPException(status_code=400, detail="Invalid oauth.redirect_uri: HTTP redirects must use localhost or 127.0.0.1")
+    if port is None:
+        raise HTTPException(status_code=400, detail="Invalid oauth.redirect_uri: loopback redirects must include an explicit port")
+    if not parsed.path or parsed.path == "/":
+        raise HTTPException(status_code=400, detail="Invalid oauth.redirect_uri: loopback redirects must include a callback path")
+    return value
 
 
 def _mcp_oauth_callback_url(request: Request, server_name: str) -> str:
@@ -220,14 +258,32 @@ async def auth_mcp_server(name: str, request: Request, profile: Optional[str] = 
         raise HTTPException(status_code=400, detail="This server uses header/API-key auth, not OAuth")
     cfg["auth"] = "oauth"
 
+    supports_desktop_loopback = False
+    try:
+        body = await request.json()
+        supports_desktop_loopback = isinstance(body, dict) and body.get("supports_desktop_loopback") is True
+    except Exception:
+        pass
+    canonical_redirect_uri = _mcp_oauth_callback_url(request, name)
+    configured_redirect_uri = (cfg.get("oauth") or {}).get("redirect_uri")
+    desktop_redirect_uri = _desktop_loopback_redirect_uri(configured_redirect_uri, canonical_redirect_uri)
+    if desktop_redirect_uri and not supports_desktop_loopback:
+        raise HTTPException(
+            status_code=400,
+            detail="This MCP server requires a Desktop loopback OAuth callback. Open this flow in Hermes Desktop and retry.",
+        )
+    redirect_uri = configured_redirect_uri or canonical_redirect_uri
+
     flow_id = secrets.token_urlsafe(24)
     flow = DashboardOAuthFlow(
         flow_id=flow_id,
         server_name=name,
         profile=profile,
         hermes_home=flow_home,
-        redirect_uri=(cfg.get("oauth") or {}).get("redirect_uri") or _mcp_oauth_callback_url(request, name),
+        redirect_uri=redirect_uri,
         reconnect_live=flow_home == process_home,
+        callback_transport="desktop_loopback" if desktop_redirect_uri else "backend",
+        callback_redirect_uri=desktop_redirect_uri,
     )
     with _mcp_oauth_flows_lock:
         live = [f for f in _mcp_oauth_flows.values() if not f.worker_done]
@@ -254,6 +310,34 @@ async def mcp_oauth_flow_status(flow_id: str, request: Request):
     snapshot = flow.snapshot()
     snapshot["tools"] = flow.tools
     return snapshot
+
+
+@router.post("/api/mcp/oauth/flows/{flow_id}/callback")
+async def mcp_oauth_flow_callback(flow_id: str, request: Request):
+    """Relay a Desktop-captured loopback callback into its pinned backend flow."""
+    _require_token(request)
+    _gc_mcp_oauth_flows()
+    flow = _mcp_oauth_flows.get(flow_id)
+    if flow is None:
+        raise HTTPException(status_code=404, detail="OAuth flow not found or expired")
+    if getattr(flow, "callback_transport", "backend") != "desktop_loopback":
+        raise HTTPException(status_code=400, detail="OAuth flow does not accept desktop loopback callback relay")
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid OAuth callback payload") from exc
+    code = body.get("code") if isinstance(body, dict) else None
+    state = body.get("state") if isinstance(body, dict) else None
+    error = body.get("error") if isinstance(body, dict) else None
+    try:
+        flow.deliver_callback(
+            code=str(code) if code is not None else None,
+            state=str(state) if state is not None else None,
+            error=str(error) if error is not None else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409 if "already received" in str(exc) else 400, detail=str(exc)) from exc
+    return {"ok": True, "flow_id": flow.flow_id}
 
 
 @router.delete("/api/mcp/oauth/flows/{flow_id}")

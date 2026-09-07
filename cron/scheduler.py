@@ -510,6 +510,7 @@ _parallel_pool: Optional[concurrent.futures.ThreadPoolExecutor] = None
 _parallel_pool_max_workers: Optional[int] = None
 _running_job_ids: set = set()
 _running_fire_owners: dict[str, dict[object, tuple[Optional[str], Path]]] = {}
+_running_fire_manual_run_at: dict[object, Optional[str]] = {}
 # Parent gateway threads synchronously waiting on restart-safe scope workers.
 # Shutdown must not misclassify these as ownerless in-process runs: the tool
 # process sweep cannot reach the worker's transient scope.
@@ -862,27 +863,27 @@ def mark_running_jobs_interrupted(
     with _running_lock:
         restart_safe_waiters = set(_restart_safe_waiter_job_ids)
         active_fires = [
-            (token, job_id, owner, profile_home)
+            (token, job_id, owner, profile_home, _running_fire_manual_run_at.get(token))
             for job_id, executions in _running_fire_owners.items()
             if job_id not in restart_safe_waiters
             for token, (owner, profile_home) in executions.items()
         ]
         if only_owners is not None:
             active_fires = [fire for fire in active_fires if (fire[1], fire[2]) in only_owners]
-        registered_ids = {job_id for _t, job_id, _o, _p in active_fires}
+        registered_ids = {job_id for _t, job_id, _o, _p, _m in active_fires}
         if only_owners is None:
             active_fires.extend(
-                (None, job_id, None, _get_hermes_home())
+                (None, job_id, None, _get_hermes_home(), None)
                 for job_id in (
                     _running_job_ids - registered_ids - restart_safe_waiters
                 )
             )
         _interrupted_job_ids.update(
             token if token is not None else job_id
-            for token, job_id, _owner, _profile_home in active_fires
+            for token, job_id, _owner, _profile_home, _manual_run_at in active_fires
         )
     marked = []
-    for _token, job_id, fire_owner, profile_home in active_fires:
+    for _token, job_id, fire_owner, profile_home, manual_run_at in active_fires:
         if not fire_owner:
             logger.warning(
                 "Job '%s' interrupted before its durable fire owner was registered; "
@@ -896,7 +897,8 @@ def mark_running_jobs_interrupted(
         try:
             with use_cron_store(profile_home):
                 if mark_job_run(
-                    job_id, False, reason, expected_fire_owner=fire_owner):
+                    job_id, False, reason, expected_fire_owner=fire_owner,
+                    consumed_manual_run_at=manual_run_at):
                     marked.append(job_id)
         except Exception as e:
             logger.warning("Failed to mark job %s interrupted: %s", job_id, e)
@@ -2519,6 +2521,7 @@ def run_one_job(
                     job["id"],
                     False,
                     error,
+                    consumed_manual_run_at=job.get("manual_run_at"),
                     **({"expected_fire_owner": owner} if owner else {}),
                 )
             finally:
@@ -2532,11 +2535,13 @@ def run_one_job(
             extra_prompt = str(_stamped)
     claim = job.get("fire_claim")
     fire_owner = str(claim.get("by") or "") if isinstance(claim, dict) else ""
+    manual_run_at = job.get("manual_run_at")
     execution_token = object()
     profile_home = _get_hermes_home().resolve()
     with _running_lock:
         _running_fire_owners.setdefault(job["id"], {})[execution_token] = (
             fire_owner or None, profile_home)
+        _running_fire_manual_run_at[execution_token] = str(manual_run_at) if manual_run_at else None
     try:
         return _run_with_fire_claim_heartbeat(
             job,
@@ -2559,17 +2564,23 @@ def run_one_job(
                 executions.pop(execution_token, None)
                 if not executions:
                     _running_fire_owners.pop(job["id"], None)
+            _running_fire_manual_run_at.pop(execution_token, None)
 
 
 _OWNERSHIP_LOST_INTERRUPTED = "Interrupted by shutdown before terminal completion."
 
 
-def _record_fire_ownership_lost(job_id: str, fire_owner: Optional[str], execution_id: str) -> None:
+def _record_fire_ownership_lost(
+    job_id: str, fire_owner: Optional[str], execution_id: str,
+    consumed_manual_run_at: Optional[str] = None,
+) -> None:
     """Bookkeeping after fire-claim ownership loss. A transport-level cancel (dashboard drain) is
     not a real loss — we still own the claim, so record the interruption via the owner-fenced
     terminal write instead of leaving fire_claim/last_status stale; otherwise discard."""
     if fire_owner is not None and heartbeat_fire_claim(job_id, expected_owner=fire_owner):
-        mark_job_run(job_id, False, _OWNERSHIP_LOST_INTERRUPTED, expected_fire_owner=fire_owner)
+        mark_job_run(
+            job_id, False, _OWNERSHIP_LOST_INTERRUPTED, expected_fire_owner=fire_owner,
+            consumed_manual_run_at=consumed_manual_run_at)
         finish_execution(execution_id, success=False, error=_OWNERSHIP_LOST_INTERRUPTED)
     else:
         finish_execution(
@@ -2785,6 +2796,8 @@ def _finish_completed_run(d: _RunDelivery, fire_owner: Optional[str], execution_
     """mark_job_run (owner-fenced) + execution ledger row for a run that reached delivery."""
     job = d.job
     mark_kwargs = {"delivery_error": d.delivery_error}
+    mark_kwargs["consumed_manual_run_at"] = (
+        str(job["manual_run_at"]) if job.get("manual_run_at") else None)
     if fire_owner is not None:
         mark_kwargs["expected_fire_owner"] = fire_owner
     if d.blocked_config:
@@ -2949,7 +2962,9 @@ def _run_one_job_body(
 
         if _fire_claim_ownership_lost():
             _teardown_deferred()
-            _record_fire_ownership_lost(job["id"], fire_owner, execution_id)
+            _record_fire_ownership_lost(
+                job["id"], fire_owner, execution_id,
+                consumed_manual_run_at=job.get("manual_run_at"))
             return True
 
         # Agent is still live through delivery; wrap ALL of save/compose/deliver in try/finally so a
@@ -2967,7 +2982,9 @@ def _run_one_job_body(
             _teardown_deferred()
 
         if d.side_effect_ownership_lost or _fire_claim_ownership_lost():
-            _record_fire_ownership_lost(job["id"], fire_owner, execution_id)
+            _record_fire_ownership_lost(
+                job["id"], fire_owner, execution_id,
+                consumed_manual_run_at=job.get("manual_run_at"))
             return True
 
         # Empty final_response is a soft failure so last_status is not "ok".
@@ -3015,6 +3032,8 @@ def _run_one_job_body(
                 mark_kwargs = {}
                 if fire_owner is not None:
                     mark_kwargs["expected_fire_owner"] = fire_owner
+                mark_kwargs["consumed_manual_run_at"] = (
+                    str(job["manual_run_at"]) if job.get("manual_run_at") else None)
                 if isinstance(e, Exception):
                     mark_kwargs["delivery_error"] = delivery_error
                 mark_job_run(job["id"], False, _err_text, **mark_kwargs)
