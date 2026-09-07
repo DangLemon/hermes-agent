@@ -66,6 +66,7 @@ import {
 import { waitForDashboardPortAnnouncement } from './backend-ready'
 import { recycleOwnedBackend } from './backend-recycle'
 import { isPidAliveWindows, waitForBackendRelease } from './backend-release-gate'
+import { buildHermesBackendSpawnEnv } from './backend-spawn-env'
 import {
   isHostKeyChangedBootFailure,
   isRetryableRemoteBootFailure,
@@ -231,6 +232,7 @@ import { snapHudBounds } from './hud-snap'
 import { createHudSnapShortcut } from './hud-snap-shortcut'
 import { buildHudWindowUrl } from './hud-url'
 import { resolveHudWindowing } from './hud-windowing'
+import { initializeInternalDesktopHarness } from './internal-desktop-harness'
 import { createLinkTitleWindow, guardLinkTitleSession, readLinkTitleWindowTitle } from './link-title-window'
 import { ensureMainWindow } from './main-window-lifecycle'
 import {
@@ -299,6 +301,7 @@ import { PreviewReachRegistry } from './preview-reach'
 import {
   createPrimaryRemoteConnection,
   FirstRunSetupResetError,
+  resolvePrimaryHarnessLaunchScope,
   runPrimaryBackendStartup
 } from './primary-backend-startup'
 import { rehomePrimaryConnection } from './primary-connection-rehome'
@@ -811,6 +814,32 @@ function resolveHermesHome() {
 }
 
 const HERMES_HOME = resolveHermesHome()
+
+const INTERNAL_DESKTOP_HARNESS = initializeInternalDesktopHarness({
+  resourcesPath: process.resourcesPath,
+  appRoot: APP_ROOT,
+  userDataPath: app.getPath('userData'),
+  isWsl: IS_WSL,
+  allowBuildResource: !IS_PACKAGED && Boolean(process.env.HERMES_DESKTOP_HARNESS_CONFIG)
+})
+
+if (INTERNAL_DESKTOP_HARNESS.active) {
+  console.log('[hermes] internal Desktop harness active; forcing local managed runtime')
+} else if (INTERNAL_DESKTOP_HARNESS.diagnostic) {
+  console.warn(`[hermes] internal Desktop harness inactive: ${INTERNAL_DESKTOP_HARNESS.diagnostic}`)
+}
+
+function internalDesktopHarnessManagedDir() {
+  return INTERNAL_DESKTOP_HARNESS.active ? INTERNAL_DESKTOP_HARNESS.managedDir : null
+}
+
+function internalDesktopHarnessSuppressesRemoteBackends() {
+  return INTERNAL_DESKTOP_HARNESS.suppressRemoteBackends
+}
+
+function internalDesktopHarnessRequested() {
+  return INTERNAL_DESKTOP_HARNESS.requested
+}
 
 function pathWithHermesManagedNode(...entries) {
   const managed = hermesManagedNodePathEntries(HERMES_HOME).filter(directoryExists)
@@ -2443,7 +2472,7 @@ function unwrapWindowsVenvHermesCommand(command, backendArgs) {
     canImportHermesCli,
     getVenvPython,
     getVenvSitePackagesEntries,
-    buildDesktopBackendEnv,
+    buildDesktopBackendEnv: opts => buildDesktopBackendEnv({ ...opts, managedDir: internalDesktopHarnessManagedDir() }),
     hermesHome: HERMES_HOME,
     resolvePath: (...segments) => path.resolve(...segments),
     dirname: p => path.dirname(p),
@@ -4860,7 +4889,8 @@ function createPythonBackend(root, label, backendArgs, options: any = {}) {
     env: buildDesktopBackendEnv({
       hermesHome: HERMES_HOME,
       pythonPathEntries: [root, ...getVenvSitePackagesEntries(venvRoot)],
-      venvRoot
+      venvRoot,
+      managedDir: internalDesktopHarnessManagedDir()
     }),
     root,
     bootstrap: Boolean(options.bootstrap),
@@ -4884,12 +4914,20 @@ function createActiveBackend(backendArgs) {
     env: buildDesktopBackendEnv({
       hermesHome: HERMES_HOME,
       pythonPathEntries: [ACTIVE_HERMES_ROOT, ...getVenvSitePackagesEntries(VENV_ROOT)],
-      venvRoot: VENV_ROOT
+      venvRoot: VENV_ROOT,
+      managedDir: internalDesktopHarnessManagedDir()
     }),
     root: ACTIVE_HERMES_ROOT,
     bootstrap: true,
     shell: false
   }
+}
+
+function externalDesktopBackendEnv() {
+  return buildDesktopBackendEnv({
+    hermesHome: HERMES_HOME,
+    managedDir: internalDesktopHarnessManagedDir()
+  })
 }
 
 function resolveHermesBackend(backendArgs) {
@@ -5002,7 +5040,7 @@ function resolveHermesBackend(backendArgs) {
           command: hermesCommand,
           args: backendArgs,
           bootstrap: false,
-          env: {},
+          env: externalDesktopBackendEnv(),
           kind: 'command',
           shell: shellForProbe
         }
@@ -5035,7 +5073,7 @@ function resolveHermesBackend(backendArgs) {
         command: python,
         args: ['-m', 'hermes_cli.main', ...backendArgs],
         bootstrap: false,
-        env: {},
+        env: externalDesktopBackendEnv(),
         shell: false
       }
     }
@@ -10764,6 +10802,10 @@ function persistSshConnectionToken(profile, source, token, registryConnectionId 
 // A null/empty profile resolves the env/global remote, so legacy callers and
 // the connection test (which pass no profile) are unchanged.
 async function resolveRemoteBackend(profile, options: { poolKey?: string; primary?: boolean } = {}) {
+  if (internalDesktopHarnessSuppressesRemoteBackends()) {
+    return null
+  }
+
   const profileKey = String(profile || '').trim() || 'default'
 
   const managedPrimary = options.primary
@@ -10888,6 +10930,10 @@ function configuredRemoteProfileNames() {
 // profile via ?profile=. Cloud counts — it resolves to a remote backend (Q6).
 // Distinct from per-profile overrides — here there's one host for all.
 function globalRemoteActive() {
+  if (internalDesktopHarnessSuppressesRemoteBackends()) {
+    return false
+  }
+
   if (process.env.HERMES_DESKTOP_REMOTE_URL) {
     return true
   }
@@ -10928,6 +10974,10 @@ function registryPrimaryIsRemote() {
 // latch — transient, must stay retryable) vs local (latch to break install
 // loops) BEFORE the throwing resolve/mint runs.
 function primaryBackendIsRemote() {
+  if (internalDesktopHarnessSuppressesRemoteBackends()) {
+    return false
+  }
+
   return Boolean(profileHasRemoteOverride(primaryProfileKey())) || globalRemoteActive()
 }
 
@@ -12507,25 +12557,16 @@ async function spawnPoolBackend(profile, entry, opts: { forceLocal?: boolean; po
     backend.args,
     hiddenWindowsChildOptions({
       cwd: hermesCwd,
-      env: {
-        ...process.env,
-        HERMES_HOME,
-        ...backend.env,
-        // Pin the gateway's tool/terminal cwd to the same directory we chose for
-        // the child process. Inherited TERMINAL_CWD (or a stale config bridge)
-        // can still point at the install dir even when spawn cwd is home.
-        TERMINAL_CWD: hermesCwd,
-        HERMES_DASHBOARD_SESSION_TOKEN: token,
-        // Marks this dashboard backend as desktop-spawned so it runs the cron
-        // scheduler tick loop (the gateway isn't running under the app).
-        HERMES_DESKTOP: '1',
-        // Exact parent identity lets the backend self-exit after an unclean
-        // Desktop death without mistaking a reused PID for its owner. If the
-        // optional marker probe fails, retain legacy PID-only tracking.
-        ...parentIdentityEnv,
-        HERMES_WEB_DIST: webDist,
-        ...(readyFile ? { HERMES_DESKTOP_READY_FILE: readyFile } : {})
-      },
+      env: buildHermesBackendSpawnEnv({
+        processEnv: process.env,
+        hermesHome: HERMES_HOME,
+        backendEnv: backend.env,
+        terminalCwd: hermesCwd,
+        sessionToken: token,
+        parentIdentityEnv,
+        webDist,
+        readyFile
+      }),
       shell: backend.shell,
       stdio: ['ignore', 'pipe', 'pipe']
     })
@@ -12797,7 +12838,7 @@ async function startHermes() {
   migrateActiveProfileIfMissing()
 
   const connectionAttempt = backendConnectionState.startAttempt()
-  const primaryProfile = primaryProfileKey()
+  const primaryProfile = internalDesktopHarnessRequested() ? 'default' : primaryProfileKey()
 
   // Legacy path callers without an explicit profile belong to the primary
   // window backend. Profile-scoped callers still pass their key directly.
@@ -12858,17 +12899,20 @@ async function startHermes() {
 
     const token = crypto.randomBytes(32).toString('base64url')
     // --port 0: the OS assigns an ephemeral port; the child announces it on stdout.
-    const backendArgs = ['serve', '--host', '127.0.0.1', '--port', '0']
     // Pin the desktop's chosen profile via the global --profile flag. This is
     // deterministic (it wins over the sticky ~/.hermes/active_profile file) and
     // resolves HERMES_HOME the same way `hermes -p <name>` does on the CLI. An
     // unset preference keeps the legacy launch so existing installs are
-    // unaffected.
+    // unaffected. A requested harness is a fixed single-local-runtime profile,
+    // so it uses default and does not inherit a persisted profile argument.
     const activeProfile = readActiveDesktopProfile()
 
-    if (activeProfile) {
-      backendArgs.unshift('--profile', activeProfile)
-    }
+    const launchScope = resolvePrimaryHarnessLaunchScope({
+      harnessRequested: internalDesktopHarnessRequested(),
+      persistedProfile: activeProfile
+    })
+
+    const backendArgs = launchScope.backendArgs
 
     const setup = await runPrimaryBackendStartup({
       connectRemote,
@@ -12888,7 +12932,8 @@ async function startHermes() {
       waitForDecision: waitForFirstRunSetupChoice,
       // Mutual exclusion with an in-app update (#50238). Remote connections
       // return before this waiter; local starts park until the updater exits.
-      waitForLocalStart: waitForUpdateToFinish
+      waitForLocalStart: waitForUpdateToFinish,
+      forceLocalBackend: internalDesktopHarnessSuppressesRemoteBackends()
     })
 
     if (setup.kind === 'remote') {
@@ -12914,7 +12959,7 @@ async function startHermes() {
     await advanceBootProgress('backend.spawn', `Starting Hermes backend via ${backend.label}`, 84)
     rememberLog(`Starting Hermes backend via ${backend.label}`)
 
-    const profile = primaryProfileKey()
+    const profile = launchScope.primaryProfile
     const parentStartMarker = await desktopParentStartMarker()
     const backendNonce = crypto.randomBytes(16).toString('hex')
     const parentIdentityEnv = parentWatchdogEnv(process.pid, parentStartMarker, backendNonce)
@@ -12924,30 +12969,16 @@ async function startHermes() {
       backend.args,
       hiddenWindowsChildOptions({
         cwd: hermesCwd,
-        env: {
-          ...process.env,
-          // Explicitly pin HERMES_HOME for the child so Python's get_hermes_home()
-          // resolves to the SAME location our resolveHermesHome() picked. Without
-          // this pin, Python falls back to ~/.hermes on every platform — fine on
-          // mac/linux (where our default matches), but on Windows our default is
-          // %LOCALAPPDATA%\hermes, which differs from C:\Users\<u>\.hermes.
-          // Mismatch would split config / sessions / .env / logs across two
-          // directories. install.ps1 sets HERMES_HOME via setx; the desktop
-          // can't reliably do that, so we set it inline for every spawn.
-          HERMES_HOME,
-          ...backend.env,
-          TERMINAL_CWD: hermesCwd,
-          HERMES_DASHBOARD_SESSION_TOKEN: token,
-          // Marks this dashboard backend as desktop-spawned so it runs the cron
-          // scheduler tick loop (the gateway isn't running under the app).
-          HERMES_DESKTOP: '1',
-          // Exact parent identity lets the backend self-exit after an unclean
-          // Desktop death without mistaking a reused PID for its owner. If the
-          // optional marker probe fails, retain legacy PID-only tracking.
-          ...parentIdentityEnv,
-          HERMES_WEB_DIST: webDist,
-          ...(readyFile ? { HERMES_DESKTOP_READY_FILE: readyFile } : {})
-        },
+        env: buildHermesBackendSpawnEnv({
+          processEnv: process.env,
+          hermesHome: HERMES_HOME,
+          backendEnv: backend.env,
+          terminalCwd: hermesCwd,
+          sessionToken: token,
+          parentIdentityEnv,
+          webDist,
+          readyFile
+        }),
         shell: backend.shell,
         stdio: ['ignore', 'pipe', 'pipe']
       })

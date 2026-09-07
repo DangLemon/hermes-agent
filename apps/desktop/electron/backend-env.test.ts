@@ -147,6 +147,38 @@ test('buildDesktopBackendEnv forces PYTHONUTF8 unless the user set it explicitly
   assert.equal(optedOut.PYTHONUTF8, '0')
 })
 
+
+test('buildDesktopBackendEnv propagates HERMES_MANAGED_DIR only when supplied', () => {
+  const mac = buildDesktopBackendEnv({
+    hermesHome: '/Users/test/.hermes',
+    managedDir: '/Users/test/Library/Application Support/Hermes/internal-managed/1',
+    currentEnv: { PATH: '/usr/bin' },
+    platform: 'darwin',
+    pathModule: path.posix
+  })
+
+  assert.equal(mac.HERMES_MANAGED_DIR, '/Users/test/Library/Application Support/Hermes/internal-managed/1')
+
+  const win = buildDesktopBackendEnv({
+    hermesHome: 'C:\\Users\\test\\AppData\\Local\\hermes',
+    managedDir: 'C:\\Users\\test\\AppData\\Roaming\\Hermes\\internal-managed\\1',
+    currentEnv: { Path: 'C:\\Windows\\System32' },
+    platform: 'win32',
+    pathModule: path.win32
+  })
+
+  assert.equal(win.HERMES_MANAGED_DIR, 'C:\\Users\\test\\AppData\\Roaming\\Hermes\\internal-managed\\1')
+
+  const ordinary = buildDesktopBackendEnv({
+    hermesHome: '/Users/test/.hermes',
+    currentEnv: { PATH: '/usr/bin' },
+    platform: 'darwin',
+    pathModule: path.posix
+  })
+
+  assert.equal(Object.prototype.hasOwnProperty.call(ordinary, 'HERMES_MANAGED_DIR'), false)
+})
+
 test('normalizeHermesHomeRoot maps profile homes back to the global Hermes root', () => {
   assert.equal(
     normalizeHermesHomeRoot('/Users/test/.hermes/profiles/oracle', { pathModule: path.posix }),

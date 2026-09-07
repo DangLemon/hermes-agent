@@ -43,6 +43,27 @@ export function setSkillEnabled(
   })
 }
 
+export function createSkill(
+  name: string,
+  content: string,
+  category?: null | string,
+  profile?: ProfileScope
+): Promise<{ name?: string; success: boolean }> {
+  const scoped = capabilityScoped(profile)
+
+  return window.hermesDesktop.api<{ name?: string; success: boolean }>({
+    ...scoped,
+    path: '/api/skills',
+    method: 'POST',
+    body: {
+      name,
+      content,
+      ...(category?.trim() ? { category: category.trim() } : {}),
+      ...(scoped.profile ? { profile: scoped.profile } : {})
+    }
+  })
+}
+
 export function getStarmapGraph(): Promise<StarmapGraph> {
   return hermesApi<StarmapGraph>({
     ...profileScoped(),

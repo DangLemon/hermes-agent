@@ -1,6 +1,6 @@
-import { defineConfig } from 'vite'
 import babel from '@rolldown/plugin-babel'
 import react, { reactCompilerPreset } from '@vitejs/plugin-react'
+import { defineConfig } from 'vite'
 
 /** React Compiler preset scoped to modules that can actually contain
  *  components/hooks (JSX syntax or a react-ish import). The preset's default
@@ -10,12 +10,15 @@ import react, { reactCompilerPreset } from '@vitejs/plugin-react'
 function compilerPreset() {
   const preset = reactCompilerPreset()
   preset.rolldown.filter.code = /\/>|<\/|from\s*['"][^'"]*react/
+
   return preset
 }
-import tailwindcss from '@tailwindcss/vite'
-import path from 'path'
+
 import fs from 'fs'
 import { createRequire } from 'module'
+import path from 'path'
+
+import tailwindcss from '@tailwindcss/vite'
 
 // `hgui` symlinks a worktree's node_modules to the main checkout. Vite realpaths
 // those before enforcing server.fs.allow, so codicon/font assets resolve outside
@@ -25,6 +28,34 @@ const real = (p: string): string | null => {
     return fs.realpathSync(p)
   } catch {
     return null
+  }
+}
+
+
+const HARNESS_UI_KEYS = ['agents', 'cron', 'messaging', 'terminal', 'webhooks'] as const
+
+function harnessViteDefines(env: Record<string, string | undefined>) {
+  const selected = String(env.HERMES_DESKTOP_HARNESS_CONFIG || '').trim()
+
+  if (!selected) {return {}}
+
+  try {
+    const resource = JSON.parse(fs.readFileSync(path.resolve(selected), 'utf8'))
+
+    if (resource?.schemaVersion !== 1 || resource?.profile !== 'internal' || !resource?.ui) {return {}}
+
+    const define: Record<string, string> = {
+      'import.meta.env.VITE_HERMES_DESKTOP_HARNESS': JSON.stringify('internal')
+    }
+
+    for (const key of HARNESS_UI_KEYS) {
+      if (typeof resource.ui[key] !== 'boolean') {return {}}
+      define[`import.meta.env.VITE_HERMES_HARNESS_SHOW_${key.toUpperCase()}`] = JSON.stringify(String(resource.ui[key]))
+    }
+
+    return define
+  } catch {
+    return {}
   }
 }
 
@@ -80,9 +111,10 @@ const emojibaseAssets = () => ({
   }) {
     server.middlewares.use('/emojibase', (req, res, next) => {
       const rel = (req.url ?? '').split('?')[0].replace(/^\/+/, '')
-      if (!emojibaseDir || !EMOJIBASE_PATH.test(rel)) return next()
+
+      if (!emojibaseDir || !EMOJIBASE_PATH.test(rel)) {return next()}
       fs.readFile(path.join(emojibaseDir, rel), (err: unknown, buf: Buffer) => {
-        if (err) return next()
+        if (err) {return next()}
         res.setHeader('Content-Type', 'application/json')
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
         res.end(buf)
@@ -90,7 +122,8 @@ const emojibaseAssets = () => ({
     })
   },
   generateBundle(this: { emitFile: (asset: { type: 'asset'; fileName: string; source: Uint8Array }) => void }) {
-    if (!emojibaseDir) return
+    if (!emojibaseDir) {return}
+
     for (const rel of ['en/data.json', 'en/messages.json', 'en/shortcodes/emojibase.json']) {
       this.emitFile({
         type: 'asset',
@@ -103,6 +136,7 @@ const emojibaseAssets = () => ({
 
 export default defineConfig(({ command }) => ({
   base: './',
+  define: harnessViteDefines(process.env as Record<string, string | undefined>),
   plugins: [react(), babel({ presets: [compilerPreset()] }), tailwindcss(), emojibaseAssets()],
   css: {
     // Pin an explicit (empty) PostCSS config. Tailwind is handled entirely by

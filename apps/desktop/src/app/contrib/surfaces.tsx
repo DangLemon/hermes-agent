@@ -11,6 +11,7 @@ import { useStore } from '@nanostores/react'
 import { type ComponentProps, lazy, memo, type ReactNode, Suspense, useMemo } from 'react'
 import { Navigate, Route, Routes, useParams } from 'react-router'
 
+import { $internalCompanyCapabilities } from '@/app/internal-company/store'
 import { ContribBoundary, ContribRender } from '@/contrib/react/boundary'
 import { useContributions } from '@/contrib/react/use-contributions'
 import { $activeConnectionId } from '@/store/connections'
@@ -21,7 +22,7 @@ import { $freshDraftReady, $gatewayState } from '@/store/session'
 import { ChatView } from '../chat'
 import { ChatSidebar } from '../chat/sidebar'
 import { TerminalPaneChrome } from '../right-sidebar/terminal/chrome'
-import { contributedRoutes, NEW_CHAT_ROUTE, ROUTES_AREA, sessionRoute } from '../routes'
+import { contributedRoutes, internalCompanyRouteAllowed, NEW_CHAT_ROUTE, ROUTES_AREA, sessionRoute } from '../routes'
 import { useStatusSnapshot } from '../shell/hooks/use-status-snapshot'
 import { useStatusbarItems } from '../shell/hooks/use-statusbar-items'
 import { ModelMenuPanel } from '../shell/model-menu-panel'
@@ -57,6 +58,12 @@ export const SidebarSurface = memo(function SidebarSurface({
 })
 
 export const TerminalSurface = memo(function TerminalSurface() {
+  const internalCompany = useStore($internalCompanyCapabilities)
+
+  if (!internalCompany.terminalAllowed) {
+    return null
+  }
+
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-(--ui-terminal-surface-background)">
       <TerminalPaneChrome />
@@ -121,12 +128,16 @@ export const ChatRoutesSurface = memo(function ChatRoutesSurface({
   const activeGatewayProfile = useStore($activeGatewayProfile)
   const gateway = useStore($gateway)
   const gatewayState = useStore($gatewayState)
+  const internalCompany = useStore($internalCompanyCapabilities)
   useContributions(ROUTES_AREA)
-  const routeContributions = contributedRoutes()
+
+  const routeContributions = contributedRoutes().filter(route =>
+    internalCompanyRouteAllowed(route.path, internalCompany)
+  )
 
   const modelMenuContent = useMemo(
     () =>
-      gatewayState === 'open' ? (
+      gatewayState === 'open' && internalCompany.mode === 'upstream' ? (
         <ModelMenuPanel
           gateway={gateway || undefined}
           onSelectModel={actions.selectModel}
@@ -135,7 +146,7 @@ export const ChatRoutesSurface = memo(function ChatRoutesSurface({
           requestGateway={actions.requestGateway}
         />
       ) : null,
-    [actions, activeConnectionId, activeGatewayProfile, gateway, gatewayState]
+    [actions, activeConnectionId, activeGatewayProfile, gateway, gatewayState, internalCompany.mode]
   )
 
   const chatActions = useMemo(() => latestChatActions(actions), [actions])
@@ -163,20 +174,29 @@ export const ChatRoutesSurface = memo(function ChatRoutesSurface({
     </div>
   )
 
+  const pageOrHome = (path: string, view: ReactNode) =>
+    internalCompanyRouteAllowed(path, internalCompany) ? page(view) : <Navigate replace to={NEW_CHAT_ROUTE} />
+
   return (
     <Routes>
       <Route element={chatView} index />
       <Route element={chatView} path=":sessionId" />
-      <Route element={page(<SkillsView setStatusbarItemGroup={setStatusbarItemGroup} />)} path="skills" />
-      <Route element={page(<MessagingView setStatusbarItemGroup={setStatusbarItemGroup} />)} path="messaging" />
+      <Route
+        element={pageOrHome('/skills', <SkillsView setStatusbarItemGroup={setStatusbarItemGroup} />)}
+        path="skills"
+      />
+      <Route
+        element={pageOrHome('/messaging', <MessagingView setStatusbarItemGroup={setStatusbarItemGroup} />)}
+        path="messaging"
+      />
       <Route element={page(<ArtifactsView setStatusbarItemGroup={setStatusbarItemGroup} />)} path="artifacts" />
-      <Route element={null} path="agents" />
-      <Route element={null} path="command-center" />
-      <Route element={null} path="cron" />
-      <Route element={null} path="profiles" />
-      <Route element={null} path="settings" />
-      <Route element={null} path="starmap" />
-      <Route element={null} path="webhooks" />
+      <Route element={pageOrHome('/agents', chatView)} path="agents" />
+      <Route element={pageOrHome('/command-center', chatView)} path="command-center" />
+      <Route element={pageOrHome('/cron', chatView)} path="cron" />
+      <Route element={pageOrHome('/profiles', chatView)} path="profiles" />
+      <Route element={pageOrHome('/settings', chatView)} path="settings" />
+      <Route element={pageOrHome('/starmap', chatView)} path="starmap" />
+      <Route element={pageOrHome('/webhooks', chatView)} path="webhooks" />
       {/* Registry-contributed pages (core features + plugins) render in the
           workspace pane like any built-in view — behind the same blast wall
           as every other contribution mount. */}

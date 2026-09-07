@@ -36,6 +36,7 @@ import { $localModelsEnabled } from '@/store/local-models-flag'
 import { notifyError } from '@/store/notifications'
 
 import { useRouteEnumParam } from '../hooks/use-route-enum-param'
+import { $internalCompanyCapabilities } from '../internal-company/store'
 import { OverlayIconButton } from '../overlays/overlay-chrome'
 import { OverlayMain, OverlayNav, type OverlayNavGroup, OverlaySplitLayout } from '../overlays/overlay-split-layout'
 import { OverlayView } from '../overlays/overlay-view'
@@ -71,10 +72,43 @@ const SETTINGS_VIEWS: readonly SettingsViewId[] = [
   'about'
 ]
 
+const HARNESS_ALLOWED_CONFIG_SECTIONS = new Set(['appearance', 'browser', 'chat', 'memory', 'safety', 'voice', 'workspace'])
+
+const HARNESS_ALLOWED_SETTINGS_VIEWS: readonly SettingsViewId[] = [
+  'config:appearance',
+  'config:browser',
+  'config:chat',
+  'config:memory',
+  'config:safety',
+  'config:voice',
+  'config:workspace',
+  'keybinds',
+  'notifications',
+  'sessions',
+  'about'
+]
+
+const HARNESS_DEFAULT_SETTINGS_VIEW = 'config:appearance' as SettingsViewId
+
+function harnessAllowsSettingsView(view: SettingsViewId): boolean {
+  return HARNESS_ALLOWED_SETTINGS_VIEWS.includes(view)
+}
+
+function harnessAllowsSettingsNavGroup(group: OverlayNavGroup): boolean {
+  if (typeof group.id === 'string' && group.id.startsWith('config:')) {
+    return HARNESS_ALLOWED_CONFIG_SECTIONS.has(group.id.slice('config:'.length))
+  }
+
+  return ['about', 'keybinds', 'notifications', 'sessions'].includes(String(group.id))
+}
+
 export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: SettingsPageProps) {
   const { t } = useI18n()
   const navigate = useNavigate()
   const { hash, pathname, search } = useLocation()
+  const internalCompany = useStore($internalCompanyCapabilities)
+  const harnessMode = internalCompany.mode === 'harness'
+  const defaultView = harnessMode ? HARNESS_DEFAULT_SETTINGS_VIEW : ('config:model' as SettingsViewId)
 
   // MCP moved out of Settings into Capabilities (/skills?tab=mcp). Keep old
   // `/settings?tab=mcp` deep links working — `useRouteEnumParam` would silently
@@ -90,15 +124,24 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
     }
   }, [navigate, search])
 
-  const [activeView, setActiveView] = useRouteEnumParam('tab', SETTINGS_VIEWS, 'config:model' as SettingsViewId)
+  const [activeView, setActiveView] = useRouteEnumParam('tab', SETTINGS_VIEWS, defaultView)
+
+  const effectiveActiveView =
+    harnessMode && !harnessAllowsSettingsView(activeView) ? HARNESS_DEFAULT_SETTINGS_VIEW : activeView
+
+  useEffect(() => {
+    if (harnessMode && !harnessAllowsSettingsView(activeView)) {
+      setActiveView(HARNESS_DEFAULT_SETTINGS_VIEW)
+    }
+  }, [activeView, harnessMode, setActiveView])
 
   // Connections merged into the unified Gateways page: land old
   // `?tab=connections` routes/bookmarks there instead of a dead entry.
   useEffect(() => {
     if (activeView === 'connections') {
-      setActiveView('gateway')
+      setActiveView(harnessMode ? HARNESS_DEFAULT_SETTINGS_VIEW : 'gateway')
     }
-  }, [activeView, setActiveView])
+  }, [activeView, harnessMode, setActiveView])
   // Providers subnav (Accounts vs API keys) lives in its own param so each
   // sub-view is deep-linkable and survives a refresh.
   const [providerView, setProviderView] = useRouteEnumParam<ProviderView>('pview', PROVIDER_VIEWS, 'accounts')
@@ -169,7 +212,7 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
     }
   }
 
-  const navGroups: OverlayNavGroup[] = useMemo(
+  const allNavGroups: OverlayNavGroup[] = useMemo(
     () => [
       ...SECTIONS.map(s => {
         const view = `config:${s.id}` as SettingsViewId
@@ -305,6 +348,11 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
     [activeView, keysView, providerView, t, setActiveView, openProviderView, openKeysView]
   )
 
+  const navGroups = useMemo(
+    () => (harnessMode ? allNavGroups.filter(harnessAllowsSettingsNavGroup) : allNavGroups),
+    [allNavGroups, harnessMode]
+  )
+
   // Type-to-search: printable keystrokes on the Settings surface (outside any
   // field) open the settings-scoped palette, seeded with the character — same
   // reflex as the chat surface's type-to-focus, pointed at search instead.
@@ -356,7 +404,7 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
     </button>
   )
 
-  const navFooter = (
+  const navFooter = harnessMode ? null : (
     <>
       <Tip label={t.settings.exportConfig}>
         <OverlayIconButton onClick={() => void exportConfig()}>
@@ -388,24 +436,24 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
   )
 
   const activeSettingsContent =
-    activeView === 'config:appearance' ? (
+    effectiveActiveView === 'config:appearance' ? (
       <AppearanceSettings />
-    ) : activeView === 'about' ? (
+    ) : effectiveActiveView === 'about' ? (
       <AboutSettings />
-    ) : activeView === 'gateway' || activeView === 'connections' ? (
+    ) : effectiveActiveView === 'gateway' || effectiveActiveView === 'connections' ? (
       // 'connections' renders the unified page too so the frame before
       // the alias redirect lands doesn't flash the fallback view.
       <GatewaySettings />
-    ) : activeView === 'keybinds' ? (
+    ) : effectiveActiveView === 'keybinds' ? (
       <KeybindSettings />
-    ) : activeView.startsWith('config:') ? (
+    ) : effectiveActiveView.startsWith('config:') ? (
       <ConfigSettings
-        activeSectionId={activeView.slice('config:'.length)}
+        activeSectionId={effectiveActiveView.slice('config:'.length)}
         importInputRef={importInputRef}
         onConfigSaved={onConfigSaved}
         onMainModelChanged={onMainModelChanged}
       />
-    ) : activeView === 'providers' ? (
+    ) : effectiveActiveView === 'providers' ? (
       <ProvidersSettings
         onClose={onClose}
         onConfigSaved={onConfigSaved}
@@ -413,13 +461,13 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
         onViewChange={setProviderView}
         view={providerView}
       />
-    ) : activeView === 'keys' ? (
+    ) : effectiveActiveView === 'keys' ? (
       <KeysSettings view={keysView} />
-    ) : activeView === 'notifications' ? (
+    ) : effectiveActiveView === 'notifications' ? (
       <NotificationsSettings />
-    ) : activeView === 'billing' ? (
+    ) : effectiveActiveView === 'billing' ? (
       <BillingSettings />
-    ) : activeView === 'plugins' ? (
+    ) : effectiveActiveView === 'plugins' ? (
       <PluginsSettings />
     ) : (
       <SessionsSettings />

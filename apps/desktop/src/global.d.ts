@@ -327,7 +327,10 @@ declare global {
        *  pass redirectUri as client_redirect_uri to mcp.servers.oauth.start,
        *  await the provider redirect, relay code/state via oauth.callback. */
       mcpOauth?: {
-        listen: () => Promise<{ id: string; redirectUri: string }>
+        listen: (options?: {
+          expectedState?: null | string
+          redirectUri?: null | string
+        }) => Promise<{ id: string; redirectUri: string }>
         wait: (
           id: string,
           timeoutMs?: number

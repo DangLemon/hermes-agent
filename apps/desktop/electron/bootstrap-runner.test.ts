@@ -13,6 +13,7 @@ import {
   installedAgentInstallScript,
   installRefForStamp,
   isPinnedCommit,
+  resolveBootstrapSourceRepository,
   resolveInstallScript,
   resolveMarkerPinnedCommit,
   runBootstrap
@@ -92,6 +93,39 @@ test('fresh bootstrap args include the packaged commit pin', () => {
       hermesHome: '/tmp/hermes'
     }),
     ['--dir', '/tmp/hermes-agent', '--hermes-home', '/tmp/hermes', '--branch', 'main', '--commit', installStamp.commit]
+  )
+})
+
+test('internal bootstrap args include a validated source repository', () => {
+  const installStamp = { commit: 'a'.repeat(40), branch: 'main' }
+
+  assert.deepEqual(buildPinArgs(installStamp, { sourceRepository: 'DangLemon/hermes-agent' }), [
+    '-Repository',
+    'DangLemon/hermes-agent',
+    '-Commit',
+    installStamp.commit,
+    '-Branch',
+    'main'
+  ])
+  assert.deepEqual(
+    buildPosixPinArgs({
+      installStamp,
+      activeRoot: '/tmp/hermes-agent',
+      hermesHome: '/tmp/hermes',
+      sourceRepository: 'DangLemon/hermes-agent'
+    }),
+    [
+      '--dir',
+      '/tmp/hermes-agent',
+      '--hermes-home',
+      '/tmp/hermes',
+      '--repo',
+      'DangLemon/hermes-agent',
+      '--branch',
+      'main',
+      '--commit',
+      installStamp.commit
+    ]
   )
 })
 
@@ -185,6 +219,64 @@ test('resolveInstallScript downloads fallback stamps by branch instead of zero c
     )
   } finally {
     fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('resolveInstallScript downloads internal scripts from the harness repository and isolates cache entries', async () => {
+  const home = mkTmpHome()
+
+  try {
+    const commit = 'b'.repeat(40)
+    const calls = []
+
+    const result = await resolveInstallScript({
+      installStamp: { commit, branch: 'main' },
+      sourceRepoRoot: null,
+      hermesHome: home,
+      sourceRepository: 'DangLemon/hermes-agent',
+      emit: () => {},
+      _download: async (ref, destPath, sourceRepository) => {
+        calls.push({ ref, destPath, sourceRepository })
+        fs.mkdirSync(path.dirname(destPath), { recursive: true })
+        fs.writeFileSync(destPath, '#!/bin/sh\necho internal\n')
+
+        return destPath
+      }
+    })
+
+    assert.deepEqual(calls.map(call => ({ ref: call.ref, sourceRepository: call.sourceRepository })), [
+      { ref: commit, sourceRepository: 'DangLemon/hermes-agent' }
+    ])
+    assert.equal(result.source, 'download')
+    assert.equal(result.path, cachedScriptPath(home, commit, 'DangLemon/hermes-agent'))
+    assert.ok(result.path.includes('DangLemon__hermes-agent'))
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('resolveBootstrapSourceRepository reads packaged harness sourceRepository and rejects unsafe identities', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-source-repo-'))
+
+  try {
+    const resourcesPath = path.join(tempRoot, 'resources')
+    fs.mkdirSync(resourcesPath, { recursive: true })
+    fs.writeFileSync(
+      path.join(resourcesPath, 'internal-desktop-harness.json'),
+      JSON.stringify({ schemaVersion: 1, profile: 'internal', sourceRepository: 'DangLemon/hermes-agent', ui: { agents: false, cron: true, messaging: false, terminal: true, webhooks: false } }),
+      'utf8'
+    )
+
+    assert.equal(resolveBootstrapSourceRepository({ resourcesPath, env: {} }), 'DangLemon/hermes-agent')
+
+    fs.writeFileSync(
+      path.join(resourcesPath, 'internal-desktop-harness.json'),
+      JSON.stringify({ schemaVersion: 1, profile: 'internal', sourceRepository: 'https://github.com/DangLemon/hermes-agent', ui: { agents: false, cron: true, messaging: false, terminal: true, webhooks: false } }),
+      'utf8'
+    )
+    assert.throws(() => resolveBootstrapSourceRepository({ resourcesPath, env: {} }), /sourceRepository/)
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
   }
 })
 

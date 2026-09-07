@@ -2,6 +2,8 @@ import { useStore } from '@nanostores/react'
 import { type ComponentProps, memo, type ReactNode, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 
+import type { InternalCompanyRouteState } from '@/app/internal-company/capabilities'
+import { $internalCompanyCapabilities } from '@/app/internal-company/store'
 import {
   ContextMenu,
   ContextMenuCheckboxItem,
@@ -24,6 +26,8 @@ import {
   setStatusbarItemVisible,
   toggleStatusbarVisible
 } from '@/store/statusbar-prefs'
+
+import { internalCompanyRouteAllowed } from '../routes'
 
 // Shared chrome styling for interactive statusbar items (button / link / menu
 // trigger). The 'text' variant intentionally omits hover/transition/disabled.
@@ -91,10 +95,13 @@ interface StatusbarControlsProps extends ComponentProps<'footer'> {
 
 export function StatusbarControls({ className, leftItems = [], items = [], ...props }: StatusbarControlsProps) {
   const navigate = useNavigate()
+  const internalCompany = useStore($internalCompanyCapabilities)
   const hiddenIds = useStore($statusbarHiddenIds)
 
   const visible = (item: StatusbarItem) =>
-    !item.hidden && (item.lockedVisible || !item.toggleLabel || !hiddenIds.includes(item.id))
+    !item.hidden &&
+    (!item.to || internalCompanyRouteAllowed(item.to, internalCompany)) &&
+    (item.lockedVisible || !item.toggleLabel || !hiddenIds.includes(item.id))
 
   return (
     <ContextMenu>
@@ -113,12 +120,22 @@ export function StatusbarControls({ className, leftItems = [], items = [], ...pr
               `truncate` their labels, so clipping is the right behavior. */}
           <div className="flex min-w-0 items-stretch gap-0.5 overflow-x-clip">
             {leftItems.filter(visible).map(item => (
-              <StatusbarItemView item={item} key={`left:${item.id}`} navigate={navigate} />
+              <StatusbarItemView
+                internalCompany={internalCompany}
+                item={item}
+                key={`left:${item.id}`}
+                navigate={navigate}
+              />
             ))}
           </div>
           <div className="flex min-w-0 items-stretch gap-0.5 overflow-x-clip">
             {items.filter(visible).map(item => (
-              <StatusbarItemView item={item} key={`right:${item.id}`} navigate={navigate} />
+              <StatusbarItemView
+                internalCompany={internalCompany}
+                item={item}
+                key={`right:${item.id}`}
+                navigate={navigate}
+              />
             ))}
           </div>
         </footer>
@@ -218,9 +235,11 @@ function StatusbarHideHint() {
  *  of 2,174 during a five-tab streaming run. `navigate` is stable for the
  *  router's lifetime, so item identity is the only real input. */
 const StatusbarItemView = memo(function StatusbarItemView({
+  internalCompany,
   item,
   navigate
 }: {
+  internalCompany: InternalCompanyRouteState
   item: StatusbarItem
   navigate: ReturnType<typeof useNavigate>
 }) {
@@ -278,7 +297,10 @@ const StatusbarItemView = memo(function StatusbarItemView({
               ? item.menuContent(() => setMenuOpen(false))
               : item.menuContent
             : (item.menuItems ?? [])
-                .filter(menuItem => !menuItem.hidden)
+                .filter(
+                  menuItem =>
+                    !menuItem.hidden && (!menuItem.to || internalCompanyRouteAllowed(menuItem.to, internalCompany))
+                )
                 .map(menuItem => (
                   <DropdownMenuItem
                     className={cn('gap-2 text-foreground focus:bg-accent [&_svg]:size-4', menuItem.className)}
@@ -286,6 +308,10 @@ const StatusbarItemView = memo(function StatusbarItemView({
                     key={menuItem.id}
                     onSelect={() => {
                       if (menuItem.to) {
+                        if (!internalCompanyRouteAllowed(menuItem.to, internalCompany)) {
+                          return
+                        }
+
                         navigate(menuItem.to)
                       }
 
@@ -347,6 +373,10 @@ const StatusbarItemView = memo(function StatusbarItemView({
         disabled={item.disabled}
         onClick={event => {
           if (item.to) {
+            if (!internalCompanyRouteAllowed(item.to, internalCompany)) {
+              return
+            }
+
             navigate(item.to)
           }
 

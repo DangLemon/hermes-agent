@@ -12,11 +12,9 @@ import { Codicon } from '@/components/ui/codicon'
 import { Input } from '@/components/ui/input'
 import {
   addMcpServer,
-  authMcpServer,
-  cancelMcpOAuthFlow,
+  createMcpOAuthClient,
   getActionStatus,
   getMcpCatalog,
-  getMcpOAuthFlow,
   installMcpCatalogEntry,
   type McpCatalogEntry,
   removeMcpServer,
@@ -28,6 +26,7 @@ import { AlertCircle, CheckCircle2, Loader2 } from '@/lib/icons'
 import { brandFor, brandGlyphStyle } from '@/lib/mcp-brands'
 import { completeMcpDesktopOAuth, McpOAuthCancelled } from '@/lib/mcp-dashboard-oauth'
 import { directoryEntry } from '@/lib/mcp-directory'
+import { captureMcpOAuthScopeGuard } from '@/lib/mcp-oauth-scope'
 import { prettyName } from '@/lib/text'
 import { cn } from '@/lib/utils'
 import { $gateway } from '@/store/gateway'
@@ -272,12 +271,16 @@ function McpSetupPending({ args }: ToolCallMessagePartProps) {
       }
 
       if (action === 'authorize') {
+        const oauthScopeGuard = captureMcpOAuthScopeGuard()
+        const oauthClient = createMcpOAuthClient(undefined, oauthScopeGuard)
+
         const flow = await completeMcpDesktopOAuth({
           serverName: server,
-          start: authMcpServer,
-          status: getMcpOAuthFlow,
-          cancelled: () => cancelRef.current,
-          cancel: cancelMcpOAuthFlow,
+          start: oauthClient.start,
+          status: oauthClient.status,
+          cancelled: () => cancelRef.current || !oauthScopeGuard(),
+          cancel: oauthClient.cancel,
+          relayCallback: oauthClient.relayCallback,
           openExternal: url => window.hermesDesktop.openExternal(url)
         })
 
@@ -319,12 +322,15 @@ function McpSetupPending({ args }: ToolCallMessagePartProps) {
         let flow
 
         try {
+          const oauthScopeGuard = captureMcpOAuthScopeGuard()
+          const oauthClient = createMcpOAuthClient(undefined, oauthScopeGuard)
           flow = await completeMcpDesktopOAuth({
             serverName: known.name,
-            start: authMcpServer,
-            status: getMcpOAuthFlow,
-            cancelled: () => cancelRef.current,
-            cancel: cancelMcpOAuthFlow,
+            start: oauthClient.start,
+            status: oauthClient.status,
+            cancelled: () => cancelRef.current || !oauthScopeGuard(),
+            cancel: oauthClient.cancel,
+            relayCallback: oauthClient.relayCallback,
             openExternal: url => window.hermesDesktop.openExternal(url)
           })
         } catch (error) {

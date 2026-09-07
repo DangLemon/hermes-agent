@@ -4,9 +4,17 @@ import type { ReactNode } from 'react'
 import { noteActiveTreeGroup, revealTreePane } from '@/components/pane-shell/tree/store'
 import { registry } from '@/contrib/registry'
 
+import {
+  type InternalCompanyRouteState,
+  internalCompanyRouteAllowed as routeAllowedByInternalCompany
+} from './internal-company/capabilities'
+import { $internalCompanyCapabilities } from './internal-company/store'
+import { routePathname, routeSessionIdWithReserved } from './route-contract'
+
 type NavigateLike = (to: string, options?: { replace?: boolean }) => void
 
-export const SESSION_ROUTE_PREFIX = '/'
+export { routePathname, SESSION_ROUTE_PREFIX, sessionRoute } from './route-contract'
+
 export const NEW_CHAT_ROUTE = '/'
 export const SETTINGS_ROUTE = '/settings'
 export const COMMAND_CENTER_ROUTE = '/command-center'
@@ -136,32 +144,34 @@ export function isOverlayView(view: AppView): boolean {
   return OVERLAY_VIEWS.has(view)
 }
 
-/** The pathname of a router target. Every classifier below reasons about a
- *  PATH, but callers navigate to full targets (`/skills?tab=mcp`), and an
- *  unstripped query reaches the session-id parser — `/skills?tab=mcp` reads as
- *  the session `skills?tab=mcp`, so Capabilities classifies as a chat.
- *  `sessionRoute` percent-encodes ids, so `?`/`#` can only start a query or a
- *  hash. */
-export function routePathname(to: string): string {
-  const cut = to.search(/[?#]/)
-
-  return cut === -1 ? to : to.slice(0, cut)
-}
-
 export function isNewChatRoute(pathname: string): boolean {
   return routePathname(pathname) === NEW_CHAT_ROUTE
 }
 
-export function routeSessionId(pathname: string): string | null {
-  const path = routePathname(pathname)
+function reservedRoutePaths(): ReadonlySet<string> {
+  const reserved = new Set(RESERVED_PATHS)
 
-  if (!path.startsWith(SESSION_ROUTE_PREFIX) || RESERVED_PATHS.has(path) || isContributedPath(path)) {
-    return null
+  for (const route of contributedRoutes()) {
+    reserved.add(route.path)
   }
 
-  const id = path.slice(SESSION_ROUTE_PREFIX.length)
+  return reserved
+}
 
-  return id && !id.includes('/') ? decodeURIComponent(id) : null
+export function internalCompanyRealRoutes(): ReadonlySet<string> {
+  return reservedRoutePaths()
+}
+
+export function routeSessionId(pathname: string, extraReservedPaths?: ReadonlySet<string>): string | null {
+  const reserved = new Set(reservedRoutePaths())
+
+  if (extraReservedPaths) {
+    for (const path of extraReservedPaths) {
+      reserved.add(path)
+    }
+  }
+
+  return routeSessionIdWithReserved(pathname, reserved)
 }
 
 /**
@@ -179,10 +189,6 @@ export function primaryRouteSelectedSessionId(pathname: string, storeSelectedSes
   }
 
   return routeSessionId(pathname) ?? storeSelectedSessionId
-}
-
-export function sessionRoute(sessionId: string): string {
-  return `${SESSION_ROUTE_PREFIX}${encodeURIComponent(sessionId)}`
 }
 
 export function appViewForPath(pathname: string): AppView {
@@ -254,10 +260,33 @@ export function syncWorkspaceRoute(pathname: string): void {
  * imperative reveal brings the page back. Use it wherever a nav affordance can
  * be triggered from the page it targets.
  */
-export function navigateToWorkspacePage(navigate: NavigateLike, to: string, options?: { replace?: boolean }): void {
-  navigate(to, options)
+function internalCompanyRouteStateWithRealRoutes(state: InternalCompanyRouteState): InternalCompanyRouteState {
+  if (state.mode === 'upstream') {
+    return state
+  }
 
-  if (isWorkspacePageRoute(to)) {
+  const reservedRoutes = new Set(state.reservedRoutes ?? [])
+
+  for (const route of internalCompanyRealRoutes()) {
+    reservedRoutes.add(route)
+  }
+
+  return { ...state, reservedRoutes }
+}
+
+export function internalCompanyRouteAllowed(
+  to: string,
+  state: InternalCompanyRouteState = $internalCompanyCapabilities.get()
+): boolean {
+  return routeAllowedByInternalCompany(to, internalCompanyRouteStateWithRealRoutes(state))
+}
+
+export function navigateToWorkspacePage(navigate: NavigateLike, to: string, options?: { replace?: boolean }): void {
+  const target = internalCompanyRouteAllowed(to) ? to : NEW_CHAT_ROUTE
+
+  navigate(target, options)
+
+  if (isWorkspacePageRoute(target)) {
     revealWorkspacePane()
   }
 }

@@ -5,9 +5,13 @@ import { MemoryRouter } from 'react-router'
 import type * as ReactRouterDom from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { initialInternalCompanyCapabilities } from '@/app/internal-company/capabilities'
+import { resetInternalCompanyCapabilitiesForTest, setInternalCompanyCapabilitiesForTest } from '@/app/internal-company/store'
 import type * as HermesApi from '@/hermes'
 import { queryClient } from '@/lib/query-client'
+import type * as SlashCompletionCache from '@/lib/slash-completion-cache'
 import type * as HubActions from '@/store/hub-actions'
+import type * as NotificationsStore from '@/store/notifications'
 
 const getSkills = vi.fn()
 const getToolsets = vi.fn()
@@ -19,6 +23,16 @@ const getUsageAnalytics = vi.fn()
 const getProfiles = vi.fn()
 const getSkillContent = vi.fn()
 const getOfficialSkills = vi.fn()
+const createSkill = vi.fn()
+
+const slashMocks = vi.hoisted(() => ({
+  invalidateSlashCompletions: vi.fn()
+}))
+
+const notificationMocks = vi.hoisted(() => ({
+  notify: vi.fn(),
+  notifyError: vi.fn()
+}))
 
 // Partial mock: keep the real module (SkillsView pulls in @/store/profile,
 // whose import-time subscription calls setApiRequestProfile) and stub only the
@@ -36,13 +50,21 @@ vi.mock('@/hermes', async importOriginal => ({
   getUsageAnalytics: (days: number, profile?: null | string) => getUsageAnalytics(days, profile),
   getProfiles: () => getProfiles(),
   getSkillContent: (name: string, profile?: null | string) => getSkillContent(name, profile),
-  getOfficialSkills: (profile?: null | string) => getOfficialSkills(profile)
+  getOfficialSkills: (profile?: null | string) => getOfficialSkills(profile),
+  createSkill: (name: string, content: string, category?: null | string, profile?: HermesApi.ProfileScope) =>
+    createSkill(name, content, category, profile)
+}))
+
+vi.mock('@/lib/slash-completion-cache', async importOriginal => ({
+  ...(await importOriginal<typeof SlashCompletionCache>()),
+  invalidateSlashCompletions: () => slashMocks.invalidateSlashCompletions()
 }))
 
 // Notifications hit nanostores/timers we don't care about here.
-vi.mock('@/store/notifications', () => ({
-  notify: vi.fn(),
-  notifyError: vi.fn()
+vi.mock('@/store/notifications', async importOriginal => ({
+  ...(await importOriginal<typeof NotificationsStore>()),
+  notify: notificationMocks.notify,
+  notifyError: notificationMocks.notifyError
 }))
 
 // The catalog Install button routes through the hub action pipeline — stub the
@@ -99,6 +121,10 @@ beforeEach(() => {
   getToolsetConfig.mockResolvedValue({ has_category: true, active_provider: null, providers: [] })
   getUsageAnalytics.mockResolvedValue({ tools: [] })
   getOfficialSkills.mockResolvedValue({ skills: [] })
+  createSkill.mockResolvedValue({ success: true, name: 'daily-review' })
+  slashMocks.invalidateSlashCompletions.mockClear()
+  notificationMocks.notify.mockClear()
+  notificationMocks.notifyError.mockClear()
   getSkillContent.mockResolvedValue({
     name: 'web-research',
     path: '/skills/web-research/SKILL.md',
@@ -114,6 +140,7 @@ afterEach(() => {
   vi.clearAllMocks()
   // Shared singleton client — drop cached skills/toolsets so each test refetches.
   queryClient.clear()
+  resetInternalCompanyCapabilitiesForTest()
 })
 
 // SkillsView is a heavy module: the first test pays the whole dynamic-import
@@ -122,6 +149,32 @@ afterEach(() => {
 // (2× in a row on PR #93612, plus a main run the same hour). Give this file
 // headroom; the tests are not slow individually.
 describe('SkillsView toolset management', { timeout: 60_000 }, () => {
+  it('hides toolset and Hub install surfaces in the internal harness while preserving personal Skills', async () => {
+    setInternalCompanyCapabilitiesForTest(initialInternalCompanyCapabilities(true))
+    getSkills.mockResolvedValue([{ name: 'daily-review', description: 'Daily review', category: 'general', enabled: true, usage: 0, provenance: 'agent' }])
+    getOfficialSkills.mockResolvedValue({
+      skills: [{ category: 'general', description: 'Official', identifier: 'official/general/web', installed: false, name: 'web', tags: [] }]
+    })
+
+    const { SkillsView } = await import('./index')
+    await act(async () => {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={['/skills?tab=toolsets']}>
+            <SkillsView />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    })
+
+    await screen.findByRole('button', { name: 'New skill' })
+
+    expect(screen.queryByRole('button', { name: /Tools/ })).toBeNull()
+    expect(screen.queryByText('Official')).toBeNull()
+    expect(document.querySelector('iframe')).toBeNull()
+    expect(getOfficialSkills).not.toHaveBeenCalled()
+  })
+
   it('renders a switch for each toolset and toggles it off', async () => {
     await renderSkills()
 
@@ -522,4 +575,636 @@ describe('SkillsView toolset management', { timeout: 60_000 }, () => {
       expect(vi.mocked(installHubSkill)).toHaveBeenCalledWith('official/gifs/gif-search', expect.anything())
     )
   })
+
+  it('creates a scoped personal skill with complete SKILL.md content', async () => {
+    Element.prototype.scrollIntoView = vi.fn()
+    getProfiles.mockResolvedValue({
+      profiles: [
+        { name: 'default', is_default: true },
+        { name: 'researcher', is_default: false }
+      ]
+    })
+    let created = false
+    getSkills.mockImplementation((profile?: null | string) =>
+      Promise.resolve(
+        created && profile === 'researcher'
+          ? [
+              {
+                name: 'daily-review',
+                description: 'Summarize the day',
+                category: 'planning',
+                enabled: true,
+                usage: 0,
+                provenance: 'agent'
+              }
+            ]
+          : []
+      )
+    )
+    createSkill.mockImplementation(async () => {
+      created = true
+
+      return { name: 'daily-review', success: true }
+    })
+
+    const { SkillsView } = await import('./index')
+    await act(async () => {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={['/skills?tab=skills']}>
+            <SkillsView />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    })
+
+    const trigger = await screen.findByRole('combobox')
+    await act(async () => {
+      fireEvent.click(trigger)
+    })
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('option', { name: 'researcher' }))
+    })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'New skill' }))
+    })
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('Skill name'), { target: { value: 'daily-review' } })
+      fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'planning' } })
+      fireEvent.change(screen.getByLabelText('SKILL.md'), {
+        target: {
+          value: '---\nname: daily-review\ndescription: Summarize the day\n---\n\n# Daily Review\n\nSummarize the day.'
+        }
+      })
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create skill' }))
+    })
+
+    await waitFor(() => expect(createSkill).toHaveBeenCalled())
+    expect(createSkill).toHaveBeenCalledWith(
+      'daily-review',
+      '---\nname: daily-review\ndescription: Summarize the day\n---\n\n# Daily Review\n\nSummarize the day.',
+      'planning',
+      'researcher'
+    )
+    await waitFor(() => expect(screen.getAllByText('daily-review').length).toBeGreaterThanOrEqual(2))
+    expect(screen.queryByLabelText('SKILL.md')).toBeNull()
+    expect(slashMocks.invalidateSlashCompletions).toHaveBeenCalled()
+    expect(notificationMocks.notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Use /daily-review in a new session.',
+        title: 'Skill created'
+      })
+    )
+  })
+
+  it('keeps the create draft on validation and API errors without adding an optimistic row', async () => {
+    createSkill.mockRejectedValueOnce(new Error('name already exists'))
+    getSkills.mockResolvedValue([])
+
+    const { SkillsView } = await import('./index')
+    await act(async () => {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={['/skills?tab=skills']}>
+            <SkillsView />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    })
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'New skill' }))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create skill' }))
+    })
+    expect(await screen.findByText('Skill name is required.')).toBeTruthy()
+    expect(createSkill).not.toHaveBeenCalled()
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('Skill name'), { target: { value: 'daily-review' } })
+      fireEvent.change(screen.getByLabelText('SKILL.md'), {
+        target: {
+          value: '---\nname: daily-review\ndescription: Summarize the day\n---\n\n# Daily Review'
+        }
+      })
+      fireEvent.click(screen.getByRole('button', { name: 'Create skill' }))
+    })
+
+    await waitFor(() => expect(createSkill).toHaveBeenCalled())
+    expect((screen.getByLabelText('Skill name') as HTMLInputElement).value).toBe('daily-review')
+    expect((screen.getByLabelText('SKILL.md') as HTMLTextAreaElement).value).toBe(
+      '---\nname: daily-review\ndescription: Summarize the day\n---\n\n# Daily Review'
+    )
+    expect(screen.queryByText('daily-review')).toBeNull()
+  })
+
+  it('closes create editor on scope changes and ignores stale create responses', async () => {
+    Element.prototype.scrollIntoView = vi.fn()
+    getProfiles.mockResolvedValue({
+      profiles: [
+        { name: 'default', is_default: true },
+        { name: 'researcher', is_default: false }
+      ]
+    })
+    let resolveCreate: (value: unknown) => void = () => undefined
+    createSkill.mockReturnValue(new Promise(resolve => void (resolveCreate = resolve)))
+    getSkills.mockResolvedValue([])
+
+    const { SkillsView } = await import('./index')
+    await act(async () => {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={['/skills?tab=skills']}>
+            <SkillsView />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    })
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'New skill' }))
+    })
+    await screen.findByLabelText('Skill name')
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('Skill name'), { target: { value: 'daily-review' } })
+      fireEvent.change(screen.getByLabelText('SKILL.md'), {
+        target: {
+          value: '---\nname: daily-review\ndescription: Summarize the day\n---\n\n# Daily Review'
+        }
+      })
+      fireEvent.click(screen.getByRole('button', { name: 'Create skill' }))
+    })
+
+    const trigger = await screen.findByRole('combobox')
+    await act(async () => {
+      fireEvent.click(trigger)
+    })
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('option', { name: 'researcher' }))
+    })
+
+    expect(screen.queryByLabelText('SKILL.md')).toBeNull()
+
+    await act(async () => {
+      resolveCreate({ success: true, name: 'daily-review' })
+    })
+
+    expect(screen.queryByText('daily-review')).toBeNull()
+    expect(screen.queryByText('Use /daily-review in a new session.')).toBeNull()
+  })
+
+  it('keeps generated SKILL.md frontmatter synchronized with the full typed name until content is edited', async () => {
+    getSkills.mockResolvedValue([])
+
+    const { SkillsView } = await import('./index')
+    await act(async () => {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={['/skills?tab=skills']}>
+            <SkillsView />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    })
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'New skill' }))
+    })
+
+    const input = await screen.findByLabelText('Skill name')
+
+    for (let i = 1; i <= 'daily-review'.length; i += 1) {
+      await act(async () => {
+        fireEvent.change(input, { target: { value: 'daily-review'.slice(0, i) } })
+      })
+    }
+
+    expect((screen.getByLabelText('SKILL.md') as HTMLTextAreaElement).value).toContain('name: daily-review')
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('SKILL.md'), {
+        target: { value: '---\nname: manual-name\n---\n\n# Manual body' }
+      })
+      fireEvent.change(input, { target: { value: 'weekly-review' } })
+    })
+
+    expect((screen.getByLabelText('SKILL.md') as HTMLTextAreaElement).value).toBe(
+      '---\nname: manual-name\n---\n\n# Manual body'
+    )
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create skill' }))
+    })
+
+    await waitFor(() => expect(createSkill).toHaveBeenCalled())
+    expect(createSkill.mock.calls[0]?.[0]).toBe('weekly-review')
+    expect(createSkill.mock.calls[0]?.[1]).toBe('---\nname: manual-name\n---\n\n# Manual body')
+  })
+
+  it('does not let an in-flight create mutate UI or notify after the create pane is closed', async () => {
+    let resolveCreate: (value: unknown) => void = () => undefined
+    createSkill.mockReturnValue(
+      new Promise(resolve => {
+        resolveCreate = value => {
+          created = true
+          resolve(value)
+        }
+      })
+    )
+    let created = false
+    getSkills.mockImplementation(() =>
+      Promise.resolve(
+        created ? [{ name: 'daily-review', description: 'Summarize the day', enabled: true, usage: 0, provenance: 'agent' }] : []
+      )
+    )
+
+    const { SkillsView } = await import('./index')
+    await act(async () => {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={['/skills?tab=skills']}>
+            <SkillsView />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    })
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'New skill' }))
+    })
+    await screen.findByLabelText('Skill name')
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('Skill name'), { target: { value: 'daily-review' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Create skill' }))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    })
+
+    await act(async () => {
+      resolveCreate({ success: true })
+    })
+
+    expect(notificationMocks.notify).not.toHaveBeenCalled()
+    expect(screen.queryByText('daily-review')).toBeNull()
+  })
+
+  it('does not notify or mutate UI when an in-flight create resolves after unmount', async () => {
+    let resolveCreate: (value: unknown) => void = () => undefined
+    createSkill.mockReturnValue(new Promise(resolve => void (resolveCreate = resolve)))
+    getSkills.mockResolvedValue([
+      { name: 'daily-review', description: 'Summarize the day', enabled: true, usage: 0, provenance: 'agent' }
+    ])
+
+    const { SkillsView } = await import('./index')
+    let rendered: ReturnType<typeof render>
+    await act(async () => {
+      rendered = render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={['/skills?tab=skills']}>
+            <SkillsView />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    })
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'New skill' }))
+    })
+    await screen.findByLabelText('Skill name')
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('Skill name'), { target: { value: 'daily-review' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Create skill' }))
+    })
+    await act(async () => {
+      rendered.unmount()
+    })
+
+    await act(async () => {
+      resolveCreate({ success: true })
+    })
+
+    expect(notificationMocks.notify).not.toHaveBeenCalled()
+  })
+
+  it('closes and invalidates create work when leaving the Skills tab for Tools or MCP', async () => {
+    getSkills.mockResolvedValue([])
+
+    const { SkillsView } = await import('./index')
+    await act(async () => {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={['/skills?tab=skills']}>
+            <SkillsView />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    })
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'New skill' }))
+    })
+    expect(await screen.findByLabelText('SKILL.md')).toBeTruthy()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Tools/ }))
+    })
+    expect(screen.queryByLabelText('SKILL.md')).toBeNull()
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole('button', { name: /Skills/ })[0])
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'New skill' }))
+    })
+    expect(await screen.findByLabelText('SKILL.md')).toBeTruthy()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'MCP' }))
+    })
+    expect(screen.queryByLabelText('SKILL.md')).toBeNull()
+  })
+
+  it('does not revive a stale create response after scope changes from A to B and back to A', async () => {
+    Element.prototype.scrollIntoView = vi.fn()
+    getProfiles.mockResolvedValue({
+      profiles: [
+        { name: 'default', is_default: true },
+        { name: 'researcher', is_default: false }
+      ]
+    })
+    let resolveCreate: (value: unknown) => void = () => undefined
+    createSkill.mockReturnValue(new Promise(resolve => void (resolveCreate = resolve)))
+    getSkills.mockResolvedValue([])
+
+    const { SkillsView } = await import('./index')
+    await act(async () => {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={['/skills?tab=skills']}>
+            <SkillsView />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    })
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'New skill' }))
+    })
+    await screen.findByLabelText('Skill name')
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('Skill name'), { target: { value: 'daily-review' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Create skill' }))
+    })
+
+    const trigger = await screen.findByRole('combobox')
+    await act(async () => {
+      fireEvent.click(trigger)
+    })
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('option', { name: 'researcher' }))
+    })
+    const triggerAgain = await screen.findByRole('combobox')
+    await act(async () => {
+      fireEvent.click(triggerAgain)
+    })
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('option', { name: 'Hermes (default)' }))
+    })
+
+    await act(async () => {
+      resolveCreate({ success: true, name: 'daily-review' })
+    })
+
+    expect(screen.queryByText('daily-review')).toBeNull()
+    expect(notificationMocks.notify).not.toHaveBeenCalled()
+  })
+
+  it('renders FastAPI create validation detail cleanly and preserves the draft', async () => {
+    createSkill.mockRejectedValueOnce(new Error('400: {"detail":"A skill named daily-review already exists."}'))
+    getSkills.mockResolvedValue([])
+
+    const { SkillsView } = await import('./index')
+    await act(async () => {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={['/skills?tab=skills']}>
+            <SkillsView />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    })
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'New skill' }))
+    })
+    await screen.findByLabelText('Skill name')
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('Skill name'), { target: { value: 'daily-review' } })
+      fireEvent.change(screen.getByLabelText('SKILL.md'), {
+        target: { value: '---\nname: daily-review\n---\n\n# Daily Review' }
+      })
+      fireEvent.click(screen.getByRole('button', { name: 'Create skill' }))
+    })
+
+    expect(await screen.findByText('A skill named daily-review already exists.')).toBeTruthy()
+    expect(screen.queryByText(/400:/)).toBeNull()
+    expect((screen.getByLabelText('Skill name') as HTMLInputElement).value).toBe('daily-review')
+    expect((screen.getByLabelText('SKILL.md') as HTMLTextAreaElement).value).toBe(
+      '---\nname: daily-review\n---\n\n# Daily Review'
+    )
+  })
+
+  it('reports backend create success without claiming availability when discovery does not return the created skill', async () => {
+    createSkill.mockResolvedValueOnce({ success: true })
+    getSkills.mockResolvedValue([])
+
+    const { SkillsView } = await import('./index')
+    await act(async () => {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={['/skills?tab=skills']}>
+            <SkillsView />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    })
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'New skill' }))
+    })
+    await screen.findByLabelText('Skill name')
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('Skill name'), { target: { value: 'daily-review' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Create skill' }))
+    })
+
+    await waitFor(() => expect(createSkill).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByLabelText('SKILL.md')).toBeNull())
+    expect(notificationMocks.notifyError).not.toHaveBeenCalled()
+    expect(screen.queryByText('daily-review')).toBeNull()
+    expect(notificationMocks.notify).not.toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Use /daily-review in a new session.' })
+    )
+    expect(notificationMocks.notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'success',
+        message: 'Skill saved, but discovery did not return it yet. Refresh Skills before using it in a new session.',
+        title: 'Skill created'
+      })
+    )
+  })
+
+
+  it('announces create validation and API errors with a stable alert and field associations', async () => {
+    createSkill.mockRejectedValueOnce(new Error('400: {"detail":"A skill named daily-review already exists."}'))
+    getSkills.mockResolvedValue([])
+
+    const { SkillsView } = await import('./index')
+    await act(async () => {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={['/skills?tab=skills']}>
+            <SkillsView />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    })
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'New skill' }))
+    })
+
+    const nameInput = (await screen.findByLabelText('Skill name')) as HTMLInputElement
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create skill' }))
+    })
+
+    const validationAlert = await screen.findByRole('alert')
+    const validationAlertId = validationAlert.getAttribute('id')
+    expect(validationAlert.textContent).toBe('Skill name is required.')
+    expect(validationAlertId).toBeTruthy()
+    expect(nameInput.getAttribute('aria-invalid')).toBe('true')
+    expect(nameInput.getAttribute('aria-describedby')).toContain(validationAlertId)
+
+    await act(async () => {
+      fireEvent.change(nameInput, { target: { value: 'daily-review' } })
+      fireEvent.change(screen.getByLabelText('SKILL.md'), {
+        target: { value: '---\nname: daily-review\n---\n\n# Daily Review' }
+      })
+      fireEvent.click(screen.getByRole('button', { name: 'Create skill' }))
+    })
+
+    const apiAlert = await screen.findByRole('alert')
+    expect(apiAlert.getAttribute('id')).toBe(validationAlertId)
+    expect(apiAlert.textContent).toBe('A skill named daily-review already exists.')
+    expect(nameInput.getAttribute('aria-invalid')).toBe('true')
+    expect(nameInput.getAttribute('aria-describedby')).toContain(validationAlertId)
+  })
+
+  it('uses semantic form submit from text inputs without submitting on textarea Enter', async () => {
+    getSkills.mockResolvedValue([])
+
+    const { SkillsView } = await import('./index')
+    await act(async () => {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={['/skills?tab=skills']}>
+            <SkillsView />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    })
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'New skill' }))
+    })
+
+    const nameInput = (await screen.findByLabelText('Skill name')) as HTMLInputElement
+    const categoryInput = screen.getByLabelText('Category') as HTMLInputElement
+    const textarea = screen.getByLabelText('SKILL.md') as HTMLTextAreaElement
+    const createButton = screen.getByRole('button', { name: 'Create skill' }) as HTMLButtonElement
+    const form = nameInput.form
+
+    expect(form).toBeTruthy()
+    expect(categoryInput.form).toBe(form)
+    expect(textarea.form).toBe(form)
+    expect(createButton.type).toBe('submit')
+
+    await act(async () => {
+      fireEvent.change(nameInput, { target: { value: 'daily-review' } })
+      fireEvent.change(textarea, { target: { value: '---\nname: daily-review\n---\n\n# Daily Review' } })
+      fireEvent.keyDown(textarea, { key: 'Enter' })
+    })
+    expect(createSkill).not.toHaveBeenCalled()
+
+    await act(async () => {
+      fireEvent.submit(form!)
+    })
+    await waitFor(() => expect(createSkill).toHaveBeenCalled())
+  })
+
+  it('restores focus to New skill after user close, cancel, and confirmed create on the active Skills tab', async () => {
+    let created = false
+    getSkills.mockImplementation(() =>
+      Promise.resolve(
+        created ? [{ name: 'daily-review', description: 'Summarize the day', enabled: true, usage: 0, provenance: 'agent' }] : []
+      )
+    )
+    createSkill.mockImplementation(async () => {
+      created = true
+
+      return { success: true, name: 'daily-review' }
+    })
+
+    const { SkillsView } = await import('./index')
+    await act(async () => {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={['/skills?tab=skills']}>
+            <SkillsView />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    })
+
+    const trigger = await screen.findByRole('button', { name: 'New skill' })
+    await act(async () => {
+      fireEvent.click(trigger)
+    })
+    await screen.findByLabelText('Skill name')
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    })
+    expect(trigger.ownerDocument.activeElement).toBe(trigger)
+
+    await act(async () => {
+      fireEvent.click(trigger)
+    })
+    await screen.findByLabelText('Skill name')
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    })
+    expect(trigger.ownerDocument.activeElement).toBe(trigger)
+
+    await act(async () => {
+      fireEvent.click(trigger)
+    })
+    await screen.findByLabelText('Skill name')
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('Skill name'), { target: { value: 'daily-review' } })
+      fireEvent.change(screen.getByLabelText('SKILL.md'), {
+        target: { value: '---\nname: daily-review\n---\n\n# Daily Review' }
+      })
+      fireEvent.click(screen.getByRole('button', { name: 'Create skill' }))
+    })
+
+    await waitFor(() => expect(notificationMocks.notify).toHaveBeenCalled())
+    expect(trigger.ownerDocument.activeElement).toBe(trigger)
+  })
+
 })

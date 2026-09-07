@@ -11,6 +11,7 @@ vi.mock('@/hermes', () => ({
   getStatus: vi.fn()
 }))
 
+
 type GatewayRequester = <T = unknown>(method: string, params?: Record<string, unknown>) => Promise<T>
 
 async function flushAsync() {
@@ -184,6 +185,60 @@ describe('useStatusSnapshot', () => {
       await vi.advanceTimersByTimeAsync(0)
     })
     expect(result.current.inferenceStatus).toMatchObject({ ready: true, source: 'runtime_check' })
+  })
+
+  it('updates internal-company harness provisioning from scoped runtime readiness without a status endpoint', async () => {
+    const { $internalCompanyCapabilities, setInternalCompanyCapabilitiesForTest } = await import('@/app/internal-company/store')
+    const { initialInternalCompanyCapabilities } = await import('@/app/internal-company/capabilities')
+
+    setInternalCompanyCapabilitiesForTest(initialInternalCompanyCapabilities(true))
+
+    let source = 'work'
+    const workRuntime = deferred<unknown>()
+    const workSetup = deferred<unknown>()
+    const homeRuntime = deferred<unknown>()
+    const homeSetup = deferred<unknown>()
+
+    const requestGateway = vi.fn((method: string) => {
+      if (source === 'work') {
+        return method === 'setup.runtime_check' ? workRuntime.promise : workSetup.promise
+      }
+
+      return method === 'setup.runtime_check' ? homeRuntime.promise : homeSetup.promise
+    }) as unknown as GatewayRequester
+
+    const { rerender } = renderHook(({ scope }) => useStatusSnapshot('open', requestGateway, scope), {
+      initialProps: { scope: 'work\0default' }
+    })
+
+    await flushAsync()
+    expect($internalCompanyCapabilities.get().provisioning.state).toBe('unknown')
+
+    source = 'home'
+    rerender({ scope: 'home\0default' })
+    await flushAsync()
+    expect($internalCompanyCapabilities.get().provisioning.state).toBe('unknown')
+
+    await act(async () => {
+      workRuntime.resolve({ error: 'stale backend', ok: false })
+      workSetup.resolve({ provider_configured: false })
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect($internalCompanyCapabilities.get().provisioning.state).toBe('unknown')
+
+    await act(async () => {
+      homeRuntime.resolve({ error: 'No usable credentials found for nous.', ok: false })
+      homeSetup.resolve({ provider_configured: true })
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    expect($internalCompanyCapabilities.get().mode).toBe('harness')
+    expect($internalCompanyCapabilities.get().provisioning).toMatchObject({
+      detail: expect.stringContaining('No usable credentials found for nous.'),
+      missing: ['inference'],
+      state: 'incomplete'
+    })
+    expect($internalCompanyCapabilities.get().allowedRoutes.has('/skills')).toBe(true)
   })
 
   it('waits for a slow refresh to settle before scheduling another one', async () => {

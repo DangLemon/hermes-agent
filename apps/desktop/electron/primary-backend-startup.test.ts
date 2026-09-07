@@ -6,6 +6,7 @@ import { createFirstRunSetupGate } from './first-run-setup-gate'
 import {
   createPrimaryRemoteConnection,
   FirstRunSetupResetError,
+  resolvePrimaryHarnessLaunchScope,
   runPrimaryBackendStartup
 } from './primary-backend-startup'
 
@@ -172,4 +173,39 @@ test('reset rejects with a typed error and never enters either backend', async (
   await assert.rejects(pending, error => error instanceof FirstRunSetupResetError && error.firstRunSetupReset)
   assert.equal(options.connectRemote.mock.calls.length, 0)
   assert.equal(options.ensureLocalRuntime.mock.calls.length, 0)
+})
+
+
+test('internal harness force-local mode ignores saved and applied remote backends', async () => {
+  const options = startupOptions({
+    forceLocalBackend: true,
+    resolveRemote: vi.fn(async () => ({ baseUrl: 'https://remote.test' })),
+    waitForDecision: vi.fn(async () => 'remote-applied' as const)
+  })
+
+  assert.deepEqual(await runPrimaryBackendStartup(options), {
+    kind: 'local',
+    backend: { ...bootstrapBackend, command: 'hermes' }
+  })
+  assert.equal(options.connectRemote.mock.calls.length, 0)
+  assert.equal(options.resolveRemote.mock.calls.length, 0)
+})
+
+
+test('internal harness force-local mode skips first-run decision wait', async () => {
+  const options = startupOptions({ forceLocalBackend: true })
+  await runPrimaryBackendStartup(options)
+  assert.equal(options.waitForDecision.mock.calls.length, 0)
+})
+
+
+test('internal harness launch scope uses default profile and omits persisted profile arg', () => {
+  assert.deepEqual(
+    resolvePrimaryHarnessLaunchScope({ harnessRequested: true, persistedProfile: 'remote-worker' }),
+    { primaryProfile: 'default', backendArgs: ['serve', '--host', '127.0.0.1', '--port', '0'] }
+  )
+  assert.deepEqual(
+    resolvePrimaryHarnessLaunchScope({ harnessRequested: false, persistedProfile: 'remote-worker' }),
+    { primaryProfile: 'remote-worker', backendArgs: ['--profile', 'remote-worker', 'serve', '--host', '127.0.0.1', '--port', '0'] }
+  )
 })

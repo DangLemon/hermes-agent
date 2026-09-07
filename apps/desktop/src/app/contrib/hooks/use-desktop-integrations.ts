@@ -2,9 +2,10 @@ import { useEffect, useRef } from 'react'
 
 import { closeActiveTab } from '@/app/chat/close-tab'
 import { commandFocusedPreview } from '@/app/chat/right-rail/preview-nav'
+import { $internalCompanyCapabilities } from '@/app/internal-company/store'
 import { openSession } from '@/app/open-session'
 import { resolveDeepLinkAction } from '@/lib/deeplink-routes'
-import { pathFromHermesDeepLink, resolveHermesOpenPath } from '@/lib/hermes-open-target'
+import { pathFromHermesDeepLink, resolveInternalCompanyOpenPath } from '@/lib/hermes-open-target'
 import { storedSessionIdForNotification } from '@/lib/session-ids'
 import { requestMcpInstallFromDeepLink } from '@/store/mcp-deeplink-install'
 import { startMcpHealthChecker, stopMcpHealthChecker } from '@/store/mcp-health'
@@ -243,7 +244,7 @@ export function useDesktopIntegrations({
         // Defense-in-depth: re-resolve at the IPC boundary rather than trusting
         // the pre-IPC validation — any future hermesDesktop.notify caller gets
         // funneled through the same resolver.
-        const path = resolveHermesOpenPath(payload.activate)
+        const path = resolveInternalCompanyOpenPath(payload.activate, $internalCompanyCapabilities.get())
 
         if (path) {
           navigate(path)
@@ -307,7 +308,8 @@ export function useDesktopIntegrations({
       // Not a core action — treat as a plugin-scoped or open/ navigation deep
       // link (hermes://index-network/intent/1, hermes://open/…). The resolver
       // rejects reserved kinds and unsafe paths.
-      const path = pathFromHermesDeepLink(payload.kind, payload.name || '', payload.params || {})
+      const resolved = pathFromHermesDeepLink(payload.kind, payload.name || '', payload.params || {})
+      const path = resolved ? resolveInternalCompanyOpenPath(resolved, $internalCompanyCapabilities.get()) : null
 
       if (path) {
         navigate(path)

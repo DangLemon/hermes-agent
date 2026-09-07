@@ -13,6 +13,8 @@ import {
   HUD_SURFACE,
   HUD_TEXT
 } from '@/app/floating-hud'
+import type { InternalCompanyRouteState } from '@/app/internal-company/capabilities'
+import { $internalCompanyCapabilities } from '@/app/internal-company/store'
 import { codiconIcon } from '@/components/ui/codicon'
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { HighlightMatches } from '@/components/ui/highlight-matches'
@@ -94,6 +96,7 @@ import {
   ARTIFACTS_ROUTE,
   COMMAND_CENTER_ROUTE,
   CRON_ROUTE,
+  internalCompanyRouteAllowed,
   MESSAGING_ROUTE,
   navigateToWorkspacePage,
   NEW_CHAT_ROUTE,
@@ -103,7 +106,11 @@ import {
   STARMAP_ROUTE
 } from '../routes'
 import { SECTIONS } from '../settings/constants'
-import { type SettingsSearchEntry, settingsSearchTargetQuery } from '../settings/settings-search'
+import {
+  filterCompanyManagedSettingsSearchEntries,
+  type SettingsSearchEntry,
+  settingsSearchTargetQuery
+} from '../settings/settings-search'
 import { useSettingsSearchCatalog } from '../settings/use-settings-search'
 
 import { usePaletteContributions } from './contrib'
@@ -170,6 +177,122 @@ interface SessionEntry {
   id: string
   preview?: string
   title: string
+}
+
+const COMPANY_MANAGED_BLOCKED_ACTIONS = new Set([
+  'composer.modelPicker',
+  'profile.default',
+  'profile.next',
+  'profile.prev',
+  'profile.toggleAll',
+  'profile.create'
+])
+
+const COMPANY_MANAGED_ROUTE_BY_ACTION: Record<string, string> = {
+  'nav.agents': AGENTS_ROUTE,
+  'nav.commandCenter': COMMAND_CENTER_ROUTE,
+  'nav.cron': CRON_ROUTE,
+  'nav.messaging': MESSAGING_ROUTE,
+  'nav.profiles': PROFILES_ROUTE,
+  'nav.settings': SETTINGS_ROUTE,
+  'nav.skills': SKILLS_ROUTE,
+  'nav.starmap': STARMAP_ROUTE
+}
+
+const COMPANY_MANAGED_ROUTE_BY_ID_PREFIX: ReadonlyArray<[string, string]> = [
+  ['nav-agents', AGENTS_ROUTE],
+  ['nav-cron', CRON_ROUTE],
+  ['nav-messaging', MESSAGING_ROUTE],
+  ['nav-profiles', PROFILES_ROUTE],
+  ['nav-settings', SETTINGS_ROUTE],
+  ['nav-skills', SKILLS_ROUTE],
+  ['nav-starmap', STARMAP_ROUTE]
+]
+
+const COMPANY_MANAGED_TERMINAL_ACTIONS = new Set([
+  'view.showTerminal',
+  'view.newTerminal',
+  'view.nextTerminal',
+  'view.prevTerminal',
+  'view.closeTerminal'
+])
+
+const COMPANY_MANAGED_ALLOWED_SETTINGS_TABS = new Set([
+  'about',
+  'config:appearance',
+  'config:browser',
+  'config:chat',
+  'config:memory',
+  'config:safety',
+  'config:voice',
+  'config:workspace',
+  'keybinds',
+  'notifications',
+  'sessions'
+])
+
+function companyManagedSettingsItemAllowed(id: string): boolean {
+  if (id.startsWith('set-config-')) {
+    return COMPANY_MANAGED_ALLOWED_SETTINGS_TABS.has(`config:${id.slice('set-config-'.length)}`)
+  }
+
+  if (id.startsWith('sp-config-')) {
+    return COMPANY_MANAGED_ALLOWED_SETTINGS_TABS.has(`config:${id.slice('sp-config-'.length)}`)
+  }
+
+  for (const prefix of ['set-', 'sp-']) {
+    if (id.startsWith(prefix)) {
+      const tab = id.slice(prefix.length).split('&')[0]
+
+      return COMPANY_MANAGED_ALLOWED_SETTINGS_TABS.has(tab)
+    }
+  }
+
+  return true
+}
+
+function companyManagedPaletteItemAllowed(item: PaletteItem, state: InternalCompanyRouteState): boolean {
+  if (state.mode === 'upstream') {
+    return true
+  }
+
+  if (item.action && COMPANY_MANAGED_BLOCKED_ACTIONS.has(item.action)) {
+    return false
+  }
+
+  if (item.action && COMPANY_MANAGED_TERMINAL_ACTIONS.has(item.action)) {
+    return 'terminalAllowed' in state && state.terminalAllowed === true
+  }
+
+  if (item.action && COMPANY_MANAGED_ROUTE_BY_ACTION[item.action]) {
+    return internalCompanyRouteAllowed(COMPANY_MANAGED_ROUTE_BY_ACTION[item.action], state)
+  }
+
+  for (const [prefix, route] of COMPANY_MANAGED_ROUTE_BY_ID_PREFIX) {
+    if (item.id === prefix || item.id.startsWith(`${prefix}-`)) {
+      return internalCompanyRouteAllowed(route, state)
+    }
+  }
+
+  if (item.id.startsWith('set-') || item.id.startsWith('sp-')) {
+    return companyManagedSettingsItemAllowed(item.id)
+  }
+
+  if (item.id.startsWith('cc-') || item.id.startsWith('mcp-')) {
+    return false
+  }
+
+  return true
+}
+
+function filterCompanyManagedPaletteGroups(groups: PaletteGroup[], state: InternalCompanyRouteState): PaletteGroup[] {
+  if (state.mode === 'upstream') {
+    return groups
+  }
+
+  return groups
+    .map(group => ({ ...group, items: group.items.filter(item => companyManagedPaletteItemAllowed(item, state)) }))
+    .filter(group => group.items.length > 0)
 }
 
 // Ranking happens in React, not cmdk. We score, sort, and prune the groups
@@ -561,6 +684,8 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
   const { availableThemes, clearThemePreview, mode, previewTheme, resolvedMode, setMode, setTheme, themeName } =
     useTheme()
 
+  const internalCompany = useStore($internalCompanyCapabilities)
+
   // Mode rows preview like theme rows do: paint the committed skin at the
   // highlighted brightness. `system` has to be resolved here — previewTheme
   // paints a concrete light/dark.
@@ -696,7 +821,14 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
     }
   }, [pendingSeed])
 
-  const go = useCallback((path: string) => () => navigateToWorkspacePage(navigate, path), [navigate])
+  const go = useCallback(
+    (path: string) => () => {
+      if (internalCompanyRouteAllowed(path, internalCompany)) {
+        navigateToWorkspacePage(navigate, path)
+      }
+    },
+    [internalCompany, navigate]
+  )
 
   // Sessions: plain select = open beside what's already loaded (focus existing
   // tile/main, else a new tab — main only when it's a blank draft);
@@ -1179,27 +1311,35 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
       })
     }
 
-    const fieldItems = [...settingsCatalog.appearanceEntries, ...settingsCatalog.configEntries].map(settingsEntryItem)
+    const searchEntries =
+      internalCompany.mode === 'upstream'
+        ? [...settingsCatalog.appearanceEntries, ...settingsCatalog.configEntries]
+        : filterCompanyManagedSettingsSearchEntries([
+            ...settingsCatalog.appearanceEntries,
+            ...settingsCatalog.configEntries
+          ])
+
+    const fieldItems = searchEntries.map(settingsEntryItem)
 
     if (fieldItems.length > 0) {
       result.push({ heading: t.commandCenter.settingsFields, items: fieldItems })
     }
 
-    if (settingsCatalog.pluginEntries.length > 0) {
+    if (internalCompany.mode === 'upstream' && settingsCatalog.pluginEntries.length > 0) {
       result.push({
         heading: t.settings.nav.plugins,
         items: settingsCatalog.pluginEntries.map(settingsEntryItem)
       })
     }
 
-    if (settingsCatalog.credentialEntries.length > 0) {
+    if (internalCompany.mode === 'upstream' && settingsCatalog.credentialEntries.length > 0) {
       result.push({
         heading: t.settings.nav.apiKeys,
         items: settingsCatalog.credentialEntries.map(settingsEntryItem)
       })
     }
 
-    if (mcpServers.length > 0) {
+    if (internalCompany.mode === 'upstream' && mcpServers.length > 0) {
       result.push({
         heading: t.commandCenter.mcpServers,
         items: mcpServers.map(name => ({
@@ -1212,7 +1352,7 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
       })
     }
 
-    if (archivedSessions.length > 0) {
+    if (internalCompany.mode === 'upstream' && archivedSessions.length > 0) {
       result.push({
         heading: t.commandCenter.archivedChats,
         items: archivedSessions.map(session => ({
@@ -1235,6 +1375,7 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
   }, [
     archivedSessions,
     availableThemes,
+    internalCompany.mode,
     go,
     goSession,
     mcpServers,
@@ -1257,8 +1398,8 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
   // likely thing meant. Everything above is either always-present chrome or a
   // list the search itself asked for.
   const groups = useMemo(
-    () => [...baseGroups, ...searchGroups, ...branchGroup],
-    [baseGroups, branchGroup, searchGroups]
+    () => filterCompanyManagedPaletteGroups([...baseGroups, ...searchGroups, ...branchGroup], internalCompany),
+    [baseGroups, branchGroup, internalCompany, searchGroups]
   )
 
   // Settings-scoped page (⌘K on the Settings overlay, or its search pill):
@@ -1294,17 +1435,23 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
     if (search.trim()) {
       result.push({
         heading: cc.settingsFields,
-        items: [...settingsCatalog.appearanceEntries, ...settingsCatalog.configEntries].map(settingsEntryItem)
+        items: (internalCompany.mode === 'upstream'
+          ? [...settingsCatalog.appearanceEntries, ...settingsCatalog.configEntries]
+          : filterCompanyManagedSettingsSearchEntries([
+              ...settingsCatalog.appearanceEntries,
+              ...settingsCatalog.configEntries
+            ])
+        ).map(settingsEntryItem)
       })
 
-      if (settingsCatalog.pluginEntries.length > 0) {
+      if (internalCompany.mode === 'upstream' && settingsCatalog.pluginEntries.length > 0) {
         result.push({
           heading: t.settings.nav.plugins,
           items: settingsCatalog.pluginEntries.map(settingsEntryItem)
         })
       }
 
-      if (settingsCatalog.credentialEntries.length > 0) {
+      if (internalCompany.mode === 'upstream' && settingsCatalog.credentialEntries.length > 0) {
         result.push({
           heading: t.settings.nav.apiKeys,
           items: settingsCatalog.credentialEntries.map(settingsEntryItem)
@@ -1312,8 +1459,8 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
       }
     }
 
-    return result
-  }, [go, search, settingsCatalog, settingsEntryItem, settingsSectionLabel, t])
+    return filterCompanyManagedPaletteGroups(result, internalCompany)
+  }, [go, internalCompany, search, settingsCatalog, settingsEntryItem, settingsSectionLabel, t])
 
   // Nested palette pages (VS Code-style submenus). Reusable: add an entry here
   // and point a root item at it via `to`.

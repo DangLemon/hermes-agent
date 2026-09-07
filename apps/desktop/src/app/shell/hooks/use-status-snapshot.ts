@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react'
 
+import {
+  resetInternalCompanyCapabilities,
+  updateInternalCompanyRuntimeReadiness
+} from '@/app/internal-company/store'
 import { getStatus } from '@/hermes'
 import { evaluateRuntimeReadiness, type RuntimeReadinessResult } from '@/lib/runtime-readiness'
 import type { StatusResponse } from '@/types/hermes'
@@ -32,8 +36,11 @@ export function useStatusSnapshot(
     // A closed/connecting gateway cannot have an authoritative live-runtime
     // result. Clear readiness before starting the REST status leg so a hung
     // getStatus() cannot leave a stale "ready" state visible after disconnect.
+    updateInternalCompanyRuntimeReadiness(null)
+
     if (gatewayState !== 'open') {
       setInferenceStatus(null)
+      resetInternalCompanyCapabilities()
     }
 
     const scheduleRefresh = () => {
@@ -75,6 +82,7 @@ export function useStatusSnapshot(
 
           if (inference === null) {
             setInferenceStatus(null)
+            updateInternalCompanyRuntimeReadiness(null)
           } else if (inference.source !== 'fallback') {
             // runtime_check/setup_status returned an authoritative boolean.
             // A fallback means both RPCs failed or returned no boolean, so it
@@ -82,6 +90,7 @@ export function useStatusSnapshot(
             // became unconfigured. Keep the last authoritative result instead
             // of flashing "Inference not ready" during a gateway flap.
             setInferenceStatus(inference)
+            updateInternalCompanyRuntimeReadiness(inference)
           }
         }
       } finally {

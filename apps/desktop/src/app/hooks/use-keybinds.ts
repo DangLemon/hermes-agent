@@ -1,11 +1,13 @@
+import { useStore } from '@nanostores/react'
 import { useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
 import { closeActiveTab } from '@/app/chat/close-tab'
 import { hudTargetSessionId } from '@/app/hud/handoff'
+import { $internalCompanyCapabilities } from '@/app/internal-company/store'
 import { setTerminalTakeover } from '@/app/right-sidebar/store'
 import { closeActiveTerminal, createTerminal, cycleTerminal } from '@/app/right-sidebar/terminal/terminals'
-import { appViewForPath, isOverlayView } from '@/app/routes'
+import { appViewForPath, internalCompanyRouteAllowed, isOverlayView } from '@/app/routes'
 import {
   activateTreeTabSlot,
   cycleTreeTabInFocusedZone,
@@ -105,6 +107,9 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
   const navigate = useNavigate()
   const location = useLocation()
   const { resolvedMode, setMode } = useTheme()
+  const internalCompany = useStore($internalCompanyCapabilities)
+  const unrestrictedDesktop = internalCompany.mode === 'upstream'
+  const routeAllowed = (to: string) => internalCompanyRouteAllowed(to, internalCompany)
 
   // Keep the latest closures without re-subscribing the listener.
   const handlersRef = useRef<HandlerMap>({})
@@ -134,7 +139,7 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
 
       if (pane) {
         leavePageForWorkspaceChat(pane)
-      } else {
+      } else if (unrestrictedDesktop) {
         switchProfileToSlot(slot)
       }
     }
@@ -182,12 +187,16 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
   }
 
   handlersRef.current = {
-    'keybinds.openPanel': () => navigate(`${SETTINGS_ROUTE}?tab=keybinds`),
+    'keybinds.openPanel': () => routeAllowed(`${SETTINGS_ROUTE}?tab=keybinds`) && navigate(`${SETTINGS_ROUTE}?tab=keybinds`),
 
     'composer.focus': () => requestComposerFocus('active'),
     // Toggle the composer pill's live model dropdown (pane under the pointer,
     // else active composer); no chat surface on screen → the full dialog.
     'composer.modelPicker': () => {
+      if (!unrestrictedDesktop) {
+        return
+      }
+
       if (!requestModelMenuToggle()) {
         setModelPickerOpen(true)
       }
@@ -197,6 +206,10 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
     // On the Settings overlay, ⌘K scopes to settings search; the second press
     // (or Esc) still closes as usual via toggle.
     'nav.commandPalette': () => {
+      if (!routeAllowed(location.pathname)) {
+        return
+      }
+
       if (!$commandPaletteOpen.get() && appViewForPath(location.pathname) === 'settings') {
         openCommandPalettePage('settings')
 
@@ -205,14 +218,14 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
 
       toggleCommandPalette()
     },
-    'nav.commandCenter': deps.toggleCommandCenter,
-    'nav.settings': () => navigate(SETTINGS_ROUTE),
-    'nav.profiles': () => navigate(PROFILES_ROUTE),
-    'nav.skills': () => navigateToWorkspacePage(navigate, SKILLS_ROUTE),
-    'nav.messaging': () => navigateToWorkspacePage(navigate, MESSAGING_ROUTE),
-    'nav.artifacts': () => navigateToWorkspacePage(navigate, ARTIFACTS_ROUTE),
-    'nav.cron': () => navigate(CRON_ROUTE),
-    'nav.agents': () => navigate(AGENTS_ROUTE),
+    'nav.commandCenter': () => routeAllowed('/command-center') && deps.toggleCommandCenter(),
+    'nav.settings': () => routeAllowed(SETTINGS_ROUTE) && navigate(SETTINGS_ROUTE),
+    'nav.profiles': () => routeAllowed(PROFILES_ROUTE) && navigate(PROFILES_ROUTE),
+    'nav.skills': () => routeAllowed(SKILLS_ROUTE) && navigateToWorkspacePage(navigate, SKILLS_ROUTE),
+    'nav.messaging': () => routeAllowed(MESSAGING_ROUTE) && navigateToWorkspacePage(navigate, MESSAGING_ROUTE),
+    'nav.artifacts': () => routeAllowed(ARTIFACTS_ROUTE) && navigateToWorkspacePage(navigate, ARTIFACTS_ROUTE),
+    'nav.cron': () => routeAllowed(CRON_ROUTE) && navigate(CRON_ROUTE),
+    'nav.agents': () => routeAllowed(AGENTS_ROUTE) && navigate(AGENTS_ROUTE),
 
     'session.new': () => {
       // Match the sidebar New Session button. A plain keyboard new chat should
@@ -235,37 +248,54 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
     // here, so the key works from a detached session that sits inside a
     // project, and not only from a session with a repo. When no repo is in
     // reach, openWorktreeDialog does nothing.
-    'workspace.newWorktree': () => void openWorktreeDialog(),
+    'workspace.newWorktree': () => {
+      if (unrestrictedDesktop) {
+        void openWorktreeDialog()
+      }
+    },
     // ⌘O: native folder picker → open the folder as a project (upsert) with a
     // fresh session anchored there.
-    'workspace.openFolder': () => void openFolderAsProject(),
+    'workspace.openFolder': () => {
+      if (unrestrictedDesktop) {
+        void openFolderAsProject()
+      }
+    },
 
     // Narrow-viewport reveal is handled inside the store toggles now.
     'view.toggleSidebar': toggleSidebarOpen,
     // ⌘J toggles the right sidebar — but a layout with no right side (e.g.
     // terminal-on-bottom) would leave it a dead key, so it falls back to the
     // terminal there. The single "secondary panel" toggle.
-    'view.toggleRightSidebar': () =>
-      layoutHasRootSide('right') ? toggleFileBrowserOpen() : togglePaneVisible('terminal'),
+    'view.toggleRightSidebar': () => {
+      if (layoutHasRootSide('right')) {
+        toggleFileBrowserOpen()
+      } else if (internalCompany.terminalAllowed) {
+        togglePaneVisible('terminal')
+      }
+    },
     'view.toggleReview': toggleReview,
     'view.toggleStatusbar': toggleStatusbarVisible,
     'view.toggleTabStrip': () => void toggleTargetZoneTabStrip(),
     'view.showFiles': showFiles,
     'view.showBrowser': openBrowserTab,
     'view.toggleHud': () => toggleHud(hudTargetSessionId()),
-    'view.showTerminal': () => togglePaneVisible('terminal'),
+    'view.showTerminal': () => internalCompany.terminalAllowed && togglePaneVisible('terminal'),
     // Create first so the pane's open-effect ensure sees a non-empty set and
     // doesn't also spawn one — net effect is exactly one fresh terminal.
     'view.newTerminal': () => {
+      if (!internalCompany.terminalAllowed) {
+        return
+      }
+
       createTerminal()
       setTerminalTakeover(true)
     },
     // Switch / close only act while the terminal is actually ON SCREEN — ask
     // the tree, not the toggle store (which stays true behind a stacked
     // sibling tab or a minimized zone).
-    'view.nextTerminal': () => isPaneVisible('terminal') && cycleTerminal(1),
-    'view.prevTerminal': () => isPaneVisible('terminal') && cycleTerminal(-1),
-    'view.closeTerminal': () => isPaneVisible('terminal') && closeActiveTerminal(),
+    'view.nextTerminal': () => internalCompany.terminalAllowed && isPaneVisible('terminal') && cycleTerminal(1),
+    'view.prevTerminal': () => internalCompany.terminalAllowed && isPaneVisible('terminal') && cycleTerminal(-1),
+    'view.closeTerminal': () => internalCompany.terminalAllowed && isPaneVisible('terminal') && closeActiveTerminal(),
     'view.flipPanes': togglePanesFlipped,
     // ⌘W: close the focused tab (terminal / preview target / zone tree tab).
     // On the main tab with session tabs stacked, it shifts the next one in —
@@ -278,7 +308,7 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
     'view.findInPage': () => {
       // Suppress on overlay routes so it doesn't collide with overlay-specific
       // search surfaces (e.g. Settings search bar).
-      if (!isOverlayView(appViewForPath(location.pathname))) {
+      if (routeAllowed(location.pathname) && !isOverlayView(appViewForPath(location.pathname))) {
         openFindBar()
       }
     },
@@ -292,12 +322,12 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
 
     'appearance.toggleMode': () => setMode(resolvedMode === 'dark' ? 'light' : 'dark'),
 
-    'profile.default': switchToDefaultProfile,
+    'profile.default': () => unrestrictedDesktop && switchToDefaultProfile(),
     ...profileSwitchHandlers,
-    'profile.next': () => cycleProfile(1),
-    'profile.prev': () => cycleProfile(-1),
-    'profile.toggleAll': toggleShowAllProfiles,
-    'profile.create': requestProfileCreate
+    'profile.next': () => unrestrictedDesktop && cycleProfile(1),
+    'profile.prev': () => unrestrictedDesktop && cycleProfile(-1),
+    'profile.toggleAll': () => unrestrictedDesktop && toggleShowAllProfiles(),
+    'profile.create': () => unrestrictedDesktop && requestProfileCreate()
   }
 
   // A keyboard-driven overlay closing hands typing back to the composer: Radix

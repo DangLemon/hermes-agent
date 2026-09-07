@@ -262,6 +262,43 @@ test('registry sources: ssh backends are read natively and rows tagged with conn
   assert.ok(rows.every(row => (row as any).is_default_profile === false))
 })
 
+test('registry sources: ssh backends split oversized windows into API-safe pages', async () => {
+  const calls: string[] = []
+  const sourceRows = Array.from({ length: 150 }, (_, index) => ({ id: `ssh-${index}` }))
+
+  const rows = await fetchRegistrySessionRows(
+    [
+      {
+        connectionId: 'gw-ssh',
+        kind: 'ssh',
+        backends: [{ descriptor: 'ssh-desc', profileLabel: 'work' }]
+      }
+    ],
+    new URLSearchParams({ limit: '150', offset: '0', profile: 'all' }),
+    async (_descriptor, path) => {
+      calls.push(path)
+      const url = new URL(path, 'http://desktop.test')
+      const limit = Number(url.searchParams.get('limit'))
+      const offset = Number(url.searchParams.get('offset'))
+
+      assert.ok(limit <= 100)
+
+      return {
+        limit,
+        offset,
+        sessions: sourceRows.slice(offset, offset + limit),
+        total: sourceRows.length
+      }
+    }
+  )
+
+  assert.deepEqual(calls, ['/api/sessions?limit=100&offset=0', '/api/sessions?limit=50&offset=100'])
+  assert.deepEqual(
+    rows.map(row => [(row as any).id, (row as any).connection_id, (row as any).profile]),
+    sourceRows.map(row => [row.id, 'gw-ssh', 'work'])
+  )
+})
+
 test('registry sources: shared remote hosts read the cross-profile aggregate once', async () => {
   const calls: string[] = []
 
@@ -364,6 +401,46 @@ test('registry sources: an older shared host without the aggregator falls back t
   assert.deepEqual(
     rows.map(row => [(row as any).id, (row as any).profile]),
     [['legacy-1', 'default']]
+  )
+})
+
+test('registry sources: older shared-host fallback also splits oversized windows', async () => {
+  const calls: string[] = []
+  const sourceRows = Array.from({ length: 120 }, (_, index) => ({ id: `legacy-${index}` }))
+
+  const rows = await fetchRegistrySessionRows(
+    [{ connectionId: 'gw-old', kind: 'remote', backends: [{ descriptor: 'old-desc', profileLabel: null }] }],
+    new URLSearchParams({ limit: '120', offset: '0' }),
+    async (_descriptor, path) => {
+      calls.push(path)
+
+      if (path.startsWith('/api/profiles/sessions')) {
+        throw new Error('404: No such API endpoint')
+      }
+
+      const url = new URL(path, 'http://desktop.test')
+      const limit = Number(url.searchParams.get('limit'))
+      const offset = Number(url.searchParams.get('offset'))
+
+      assert.ok(limit <= 100)
+
+      return {
+        limit,
+        offset,
+        sessions: sourceRows.slice(offset, offset + limit),
+        total: sourceRows.length
+      }
+    }
+  )
+
+  assert.deepEqual(calls, [
+    '/api/profiles/sessions?limit=120&offset=0&profile=all',
+    '/api/sessions?limit=100&offset=0',
+    '/api/sessions?limit=20&offset=100'
+  ])
+  assert.deepEqual(
+    rows.map(row => [(row as any).id, (row as any).connection_id, (row as any).profile]),
+    sourceRows.map(row => [row.id, 'gw-old', 'default'])
   )
 })
 

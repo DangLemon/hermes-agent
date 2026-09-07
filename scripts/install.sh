@@ -43,8 +43,10 @@ NC='\033[0m' # No Color
 BOLD='\033[1m'
 
 # Configuration
-REPO_URL_SSH="git@github.com:NousResearch/hermes-agent.git"
-REPO_URL_HTTPS="https://github.com/NousResearch/hermes-agent.git"
+DEFAULT_REPOSITORY="NousResearch/hermes-agent"
+REPOSITORY="${HERMES_INSTALL_REPOSITORY:-$DEFAULT_REPOSITORY}"
+REPO_URL_SSH=""
+REPO_URL_HTTPS=""
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 # INSTALL_DIR is resolved AFTER arg parsing and OS detection so we can pick an
 # FHS-style layout for root installs.  Track whether the user gave us an
@@ -74,6 +76,7 @@ SKIP_COMPUTER_USE=false
 NO_SKILLS=false
 BRANCH="main"
 INSTALL_COMMIT=""
+INSTALL_TAG=""
 FORCE_COMMIT=false
 ENSURE_DEPS=""
 
@@ -123,9 +126,17 @@ while [[ $# -gt 0 ]]; do
             INSTALL_COMMIT="$2"
             shift 2
             ;;
+        --tag|-Tag)
+            INSTALL_TAG="$2"
+            shift 2
+            ;;
         --force-commit|-ForceCommit)
             FORCE_COMMIT=true
             shift
+            ;;
+        --repo|--repository|-Repository)
+            REPOSITORY="$2"
+            shift 2
             ;;
         --manifest|-Manifest)
             MANIFEST_MODE=true
@@ -177,7 +188,9 @@ while [[ $# -gt 0 ]]; do
             echo "  --branch NAME  Git branch to install (default: main)"
             echo "  --commit SHA   Pin checkout to a specific commit after clone/update"
             echo "                   (ignored when it would roll an existing install back)"
+            echo "  --tag NAME     Pin checkout to a specific tag after clone/update"
             echo "  --force-commit Apply --commit even if it rolls the install backwards"
+            echo "  --repo OWNER/REPO  GitHub source repository (default: NousResearch/hermes-agent)"
             echo "  --manifest     Print desktop bootstrap stage manifest as JSON"
             echo "  --stage NAME   Run one desktop bootstrap stage"
             echo "  --json         Print a JSON result frame for --stage"
@@ -247,6 +260,189 @@ json_escape() {
     printf '%s' "$1" | tr '\n' ' ' | sed \
         -e 's/\\/\\\\/g' \
         -e 's/"/\\"/g'
+}
+
+configure_repository_urls() {
+    if ! printf '%s' "$REPOSITORY" | grep -qE '^[A-Za-z0-9][A-Za-z0-9-]{0,37}[A-Za-z0-9]?/[A-Za-z0-9][A-Za-z0-9._-]{0,98}[A-Za-z0-9]?$'; then
+        log_error "--repo expects a GitHub owner/repo identity, got: $REPOSITORY"
+        exit 1
+    fi
+    case "$REPOSITORY" in *..*|*.git|*/*/*|http:*|https:*|git@*)
+        log_error "--repo must be a safe GitHub owner/repo identity, got: $REPOSITORY"
+        exit 1
+        ;;
+    esac
+
+    REPO_URL_SSH="git@github.com:${REPOSITORY}.git"
+    REPO_URL_HTTPS="https://github.com/${REPOSITORY}.git"
+}
+
+configure_repository_urls
+
+github_repository_identity_from_url() {
+    local url="$1"
+    local repo=""
+
+    case "$url" in
+        https://github.com/*|http://github.com/*)
+            repo="${url#*://github.com/}"
+            ;;
+        git@github.com:*)
+            repo="${url#git@github.com:}"
+            ;;
+        ssh://git@github.com/*)
+            repo="${url#ssh://git@github.com/}"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    repo="${repo%%\?*}"
+    repo="${repo%%#*}"
+    repo="${repo%.git}"
+
+    if ! printf '%s' "$repo" | grep -qE '^[A-Za-z0-9][A-Za-z0-9-]{0,37}[A-Za-z0-9]?/[A-Za-z0-9][A-Za-z0-9._-]{0,98}[A-Za-z0-9]?$'; then
+        return 1
+    fi
+    case "$repo" in *..*|*.git|*/*/*|http:*|https:*|git@*)
+        return 1
+        ;;
+    esac
+
+    printf '%s\n' "$repo"
+}
+
+repository_identity_key() {
+    printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+ensure_managed_origin() {
+    local current_url=""
+    current_url="$(git config --get remote.origin.url 2>/dev/null || true)"
+
+    if [ -z "$current_url" ]; then
+        log_info "Adding managed origin for $REPOSITORY..."
+        if git remote add origin "$REPO_URL_HTTPS" 2>/dev/null || git remote set-url origin "$REPO_URL_HTTPS"; then
+            return 0
+        fi
+        log_error "Could not configure git origin for $REPOSITORY."
+        log_info "Set it manually with: git remote set-url origin $REPO_URL_HTTPS"
+        return 1
+    fi
+
+    local current_repo=""
+    current_repo="$(github_repository_identity_from_url "$current_url" || true)"
+    if [ -z "$current_repo" ]; then
+        log_error "Existing checkout origin is not a supported GitHub URL: $current_url"
+        log_info "This installer will not fetch until origin matches selected --repo $REPOSITORY."
+        log_info "Set it manually with: git remote set-url origin $REPO_URL_HTTPS"
+        return 1
+    fi
+
+    if [ "$(repository_identity_key "$current_repo")" != "$(repository_identity_key "$REPOSITORY")" ]; then
+        log_error "Existing checkout origin $current_repo does not match selected --repo $REPOSITORY."
+        log_info "No fetch was attempted, and local edits were left untouched."
+        log_info "Use --repo $current_repo to update this checkout, or move it aside before installing $REPOSITORY."
+        return 1
+    fi
+
+    if [ "$current_url" != "$REPO_URL_HTTPS" ]; then
+        log_info "Normalizing managed origin URL to $REPO_URL_HTTPS..."
+        if ! git remote set-url origin "$REPO_URL_HTTPS"; then
+            log_error "Could not normalize git origin for $REPOSITORY."
+            log_info "Set it manually with: git remote set-url origin $REPO_URL_HTTPS"
+            return 1
+        fi
+    fi
+}
+
+archive_ref_url_and_label() {
+    if [ -n "$INSTALL_COMMIT" ]; then
+        ARCHIVE_URL="https://github.com/${REPOSITORY}/archive/${INSTALL_COMMIT}.zip"
+        ARCHIVE_LABEL="$INSTALL_COMMIT"
+        ARCHIVE_FETCH_REF="$INSTALL_COMMIT"
+        ARCHIVE_DETACH=true
+    elif [ -n "$INSTALL_TAG" ]; then
+        ARCHIVE_URL="https://github.com/${REPOSITORY}/archive/refs/tags/${INSTALL_TAG}.zip"
+        ARCHIVE_LABEL="$INSTALL_TAG"
+        ARCHIVE_FETCH_REF="refs/tags/${INSTALL_TAG}"
+        ARCHIVE_DETACH=true
+    else
+        ARCHIVE_URL="https://github.com/${REPOSITORY}/archive/refs/heads/${BRANCH}.zip"
+        ARCHIVE_LABEL="$BRANCH"
+        ARCHIVE_FETCH_REF="$BRANCH"
+        ARCHIVE_DETACH=false
+    fi
+}
+
+download_archive_checkout() {
+    archive_ref_url_and_label
+
+    if ! command -v curl >/dev/null 2>&1; then
+        log_warn "curl is not available; cannot use GitHub archive fallback."
+        return 1
+    fi
+    if ! command -v unzip >/dev/null 2>&1; then
+        log_warn "unzip is not available; cannot use GitHub archive fallback."
+        return 1
+    fi
+
+    local safe_label archive_tmp zip_path extracted_dir
+    safe_label="$(printf '%s' "$ARCHIVE_LABEL" | tr -c 'A-Za-z0-9._-' '-')"
+    archive_tmp="$(mktemp -d "${TMPDIR:-/tmp}/hermes-agent-archive.XXXXXX")"
+    zip_path="${archive_tmp}/hermes-agent-${safe_label}.zip"
+
+    log_info "Downloading GitHub archive for ${REPOSITORY}@${ARCHIVE_LABEL}..."
+    if ! curl -fL --retry 3 --connect-timeout 10 --max-time 120 -o "$zip_path" "$ARCHIVE_URL"; then
+        log_warn "GitHub archive download failed."
+        rm -rf "$archive_tmp" 2>/dev/null || true
+        return 1
+    fi
+
+    if ! unzip -q "$zip_path" -d "$archive_tmp"; then
+        log_warn "GitHub archive extraction failed."
+        rm -rf "$archive_tmp" "$INSTALL_DIR" 2>/dev/null || true
+        return 1
+    fi
+
+    extracted_dir="$(find "$archive_tmp" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+    if [ -z "$extracted_dir" ]; then
+        log_warn "GitHub archive did not contain an extracted repository directory."
+        rm -rf "$archive_tmp" "$INSTALL_DIR" 2>/dev/null || true
+        return 1
+    fi
+
+    mkdir -p "$(dirname "$INSTALL_DIR")"
+    rm -rf "$INSTALL_DIR" 2>/dev/null || true
+    if ! mv "$extracted_dir" "$INSTALL_DIR"; then
+        log_warn "Could not move extracted archive into $INSTALL_DIR."
+        rm -rf "$archive_tmp" "$INSTALL_DIR" 2>/dev/null || true
+        return 1
+    fi
+
+    if ! (
+        cd "$INSTALL_DIR" || exit 1
+        git init >/dev/null || exit 1
+        git config core.autocrlf false 2>/dev/null || true
+        if ! git remote add origin "$REPO_URL_HTTPS" 2>/dev/null && ! git remote set-url origin "$REPO_URL_HTTPS"; then
+            exit 1
+        fi
+        git fetch --depth 1 origin "$ARCHIVE_FETCH_REF"
+        if [ "$ARCHIVE_DETACH" = true ]; then
+            git checkout -f --detach FETCH_HEAD
+        else
+            git checkout -f -B "$BRANCH" FETCH_HEAD
+        fi
+    ); then
+        log_warn "GitHub archive extracted but could not establish a managed git HEAD."
+        rm -rf "$archive_tmp" "$INSTALL_DIR" 2>/dev/null || true
+        return 1
+    fi
+
+    rm -rf "$archive_tmp" 2>/dev/null || true
+    log_success "Downloaded GitHub archive and initialized managed checkout"
+    return 0
 }
 
 # npm rewrites tracked package-lock.json files non-deterministically during
@@ -1489,7 +1685,10 @@ clone_repo() {
             log_info "Existing installation found, updating..."
             cd "$INSTALL_DIR"
 
+            ensure_managed_origin || return 1
+
             local autostash_ref=""
+            local update_failed=""
             discard_update_lockfile_churn "$INSTALL_DIR"
             if [ -n "$(git status --porcelain)" ]; then
                 # A previously interrupted update can leave the index with
@@ -1521,11 +1720,12 @@ clone_repo() {
             git checkout "$BRANCH"
             # Managed installs should follow origin/$BRANCH exactly. If the
             # checkout has diverged (or has local-only commits), ff-only pull
-            # cannot succeed — mirror ``hermes update`` and reset to the
-            # fetched remote so bootstrap/install can recover.
+            # cannot succeed. Fail closed instead of resetting the checkout:
+            # local commits and restored worktree edits remain inspectable.
             if ! git pull --ff-only origin "$BRANCH"; then
-                log_warn "Fast-forward not possible; resetting managed install to origin/$BRANCH..."
-                git reset --hard "origin/$BRANCH"
+                log_error "Fast-forward update from origin/$BRANCH was not possible."
+                log_info "No destructive reset was performed. Resolve local commits manually, then re-run the installer."
+                update_failed="yes"
             fi
 
             if [ -n "$autostash_ref" ]; then
@@ -1582,6 +1782,10 @@ EOF
                     log_info "Your changes are still preserved in git stash."
                     log_info "Restore manually with: git stash apply $autostash_ref"
                 fi
+            fi
+
+            if [ "$update_failed" = "yes" ]; then
+                return 1
             fi
         else
             log_error "Directory exists but is not a git repository: $INSTALL_DIR"
@@ -1651,6 +1855,8 @@ EOF
             fi
             if [ "$clone_ok" = true ]; then
                 log_success "Cloned via HTTPS"
+            elif download_archive_checkout; then
+                clone_ok=true
             else
                 log_error "Failed to clone repository"
                 exit 1
@@ -1659,6 +1865,7 @@ EOF
     fi
 
     cd "$INSTALL_DIR"
+    ensure_managed_origin || return 1
 
     if [ -n "$INSTALL_COMMIT" ]; then
         # Validate the commit argument: must look like a hex SHA (full 40-char

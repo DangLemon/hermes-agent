@@ -1,6 +1,7 @@
-import { authMcpServer, cancelMcpOAuthFlow, getMcpOAuthFlow, listMcpServers } from '@/hermes'
+import { createMcpOAuthClient, listMcpServers } from '@/hermes'
 import { translateNow } from '@/i18n'
 import { completeMcpDesktopOAuth, McpOAuthCancelled } from '@/lib/mcp-dashboard-oauth'
+import { captureMcpOAuthScopeGuard } from '@/lib/mcp-oauth-scope'
 import { prettyName } from '@/lib/text'
 import { type ComposerSuggestion, offerSuggestions } from '@/store/composer-suggestions'
 import { $gateway } from '@/store/gateway'
@@ -38,12 +39,16 @@ const keyFor = (sessionId: string | null | undefined): string => sessionId ?? ''
 
 async function reconnect(server: string, sessionId: string | null, cancelled: () => boolean): Promise<void> {
   try {
+    const oauthScopeGuard = captureMcpOAuthScopeGuard()
+    const oauthClient = createMcpOAuthClient(undefined, oauthScopeGuard)
+
     await completeMcpDesktopOAuth({
       serverName: server,
-      start: authMcpServer,
-      status: getMcpOAuthFlow,
-      cancelled,
-      cancel: cancelMcpOAuthFlow,
+      start: oauthClient.start,
+      status: oauthClient.status,
+      cancelled: () => cancelled() || !oauthScopeGuard(),
+      cancel: oauthClient.cancel,
+      relayCallback: oauthClient.relayCallback,
       openExternal: url => window.hermesDesktop.openExternal(url)
     })
 

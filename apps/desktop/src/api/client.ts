@@ -136,6 +136,10 @@ export function capabilityScoped(scope?: ProfileScope): { connectionId?: string;
   return { ...profileScoped(scope), ...connectionScoped() }
 }
 
+export function captureCapabilityScope(scope?: ProfileScope): { connectionId?: string; profile?: string } {
+  return capabilityScoped(scope)
+}
+
 /** Stable cache-key for a capability scope: `profile` for the ambient/legacy
  *  path, `connectionId::profile` for ANY explicit pin — `local` included. An
  *  explicit "This device" pick and the ambient path are no longer guaranteed

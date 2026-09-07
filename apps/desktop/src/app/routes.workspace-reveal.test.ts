@@ -19,6 +19,7 @@ import {
   appViewForPath,
   ARTIFACTS_ROUTE,
   CRON_ROUTE,
+  internalCompanyRouteAllowed,
   MESSAGING_ROUTE,
   navigateToWorkspacePage,
   NEW_CHAT_ROUTE,
@@ -93,6 +94,56 @@ describe('classification of targets carrying a query', () => {
   ])('%s is not a session route', (to, view) => {
     expect(routeSessionId(to)).toBeNull()
     expect(appViewForPath(to)).toBe(view)
+  })
+})
+
+describe('internal company route policy', () => {
+  it('reserves contributed one-segment routes so harness mode does not treat them as session ids', () => {
+    const dispose = contributeRoute()
+
+    try {
+      expect(routeSessionId(CONTRIBUTED_ROUTE)).toBeNull()
+      expect(
+        internalCompanyRouteAllowed(CONTRIBUTED_ROUTE, { allowedRoutes: new Set(['/', '/skills']), mode: 'harness' })
+      ).toBe(false)
+      expect(
+        internalCompanyRouteAllowed(CONTRIBUTED_ROUTE, {
+          allowedRoutes: new Set(['/', CONTRIBUTED_ROUTE]),
+          mode: 'harness'
+        })
+      ).toBe(true)
+    } finally {
+      dispose()
+    }
+  })
+
+  it('preserves upstream routes, central session ids, and harness admin/runtime blocks', () => {
+    expect(internalCompanyRouteAllowed('/settings?tab=plugins', { mode: 'upstream' })).toBe(true)
+    expect(
+      internalCompanyRouteAllowed('/settings?tab=plugins', { allowedRoutes: new Set(['/settings']), mode: 'harness' })
+    ).toBe(true)
+    expect(
+      internalCompanyRouteAllowed('/skills?tab=mcp', { allowedRoutes: new Set(['/skills']), mode: 'harness' })
+    ).toBe(true)
+    expect(
+      internalCompanyRouteAllowed('/profiles', { allowedRoutes: new Set(['/', '/artifacts']), mode: 'harness' })
+    ).toBe(false)
+    expect(
+      internalCompanyRouteAllowed('/artifacts', { allowedRoutes: new Set(['/', '/artifacts']), mode: 'harness' })
+    ).toBe(true)
+
+    for (const route of [
+      sessionRoute('stored-A'),
+      sessionRoute('remembered-session'),
+      sessionRoute('sess-a'),
+      sessionRoute('550e8400-e29b-41d4-a716-446655440000'),
+      sessionRoute('a?b#c')
+    ]) {
+      expect(routeSessionId(route)).not.toBeNull()
+      expect(internalCompanyRouteAllowed(route, { allowedRoutes: new Set(['/', '/artifacts']), mode: 'harness' })).toBe(
+        true
+      )
+    }
   })
 })
 

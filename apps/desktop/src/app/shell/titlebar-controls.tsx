@@ -3,6 +3,7 @@ import { type ComponentProps, type MouseEvent, type ReactNode, useEffect, useSta
 import { useLocation, useNavigate } from 'react-router'
 
 import { hudTargetSessionId } from '@/app/hud/handoff'
+import { $internalCompanyCapabilities } from '@/app/internal-company/store'
 import { toggleLayoutEditMode } from '@/components/pane-shell/edit-mode'
 import { resetLayoutTree } from '@/components/pane-shell/tree/store'
 import { Badge } from '@/components/ui/badge'
@@ -25,7 +26,7 @@ import {
 } from '@/store/layout'
 import { $unreadSessionCount } from '@/store/session-dot-state'
 
-import { appViewForPath, isOverlayView } from '../routes'
+import { appViewForPath, internalCompanyRouteAllowed, isOverlayView } from '../routes'
 
 import {
   TITLEBAR_ICON_BADGE_SCALE,
@@ -135,6 +136,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
   const location = useLocation()
   const modHeld = useModifierHeld()
   const hapticsMuted = useStore($hapticsMuted)
+  const internalCompany = useStore($internalCompanyCapabilities)
   const fileBrowserOpen = useStore($fileBrowserOpen)
   const panesFlipped = useStore($panesFlipped)
   const sidebarOpen = useStore($sidebarOpen)
@@ -265,8 +267,11 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
     return null
   }
 
-  const visibleSystemTools = systemTools.filter(tool => !tool.hidden)
-  const visiblePaneTools = tools.filter(tool => !tool.hidden)
+  const toolVisible = (tool: TitlebarTool) =>
+    !tool.hidden && (!tool.to || internalCompanyRouteAllowed(tool.to, internalCompany))
+
+  const visibleSystemTools = systemTools.filter(toolVisible)
+  const visiblePaneTools = tools.filter(toolVisible)
 
   return (
     <>
@@ -280,7 +285,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
         {leftToolbarTools
           .filter(tool => !tool.hidden)
           .map(tool => (
-            <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
+            <TitlebarToolButton internalCompany={internalCompany} key={tool.id} navigate={navigate} tool={tool} />
           ))}
       </div>
 
@@ -301,7 +306,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
           )}
         >
           {visiblePaneTools.map(tool => (
-            <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
+            <TitlebarToolButton internalCompany={internalCompany} key={tool.id} navigate={navigate} tool={tool} />
           ))}
         </div>
       )}
@@ -311,15 +316,23 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
         className={cn(titlebarToolClusterClass, 'right-(--titlebar-tools-right) top-(--titlebar-controls-top)')}
       >
         {visibleSystemTools.map(tool => (
-          <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
+          <TitlebarToolButton internalCompany={internalCompany} key={tool.id} navigate={navigate} tool={tool} />
         ))}
-        <TitlebarToolButton navigate={navigate} tool={rightSidebarTool} />
+        <TitlebarToolButton internalCompany={internalCompany} navigate={navigate} tool={rightSidebarTool} />
       </div>
     </>
   )
 }
 
-function TitlebarToolButton({ navigate, tool }: { navigate: ReturnType<typeof useNavigate>; tool: TitlebarTool }) {
+function TitlebarToolButton({
+  internalCompany,
+  navigate,
+  tool
+}: {
+  internalCompany: Parameters<typeof internalCompanyRouteAllowed>[1]
+  navigate: ReturnType<typeof useNavigate>
+  tool: TitlebarTool
+}) {
   // Titlebar actions never show an active background — state reads from the
   // icon itself (e.g. the mute/unmute glyph). aria-pressed still carries it
   // for a11y.
@@ -360,6 +373,10 @@ function TitlebarToolButton({ navigate, tool }: { navigate: ReturnType<typeof us
         disabled={tool.disabled}
         onClick={event => {
           if (tool.to) {
+            if (!internalCompanyRouteAllowed(tool.to, internalCompany)) {
+              return
+            }
+
             navigate(tool.to)
           }
 

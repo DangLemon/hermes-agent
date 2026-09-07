@@ -12,6 +12,7 @@ import { useStore } from '@nanostores/react'
 import { useQuery } from '@tanstack/react-query'
 import { atom } from 'nanostores'
 
+import { $internalCompanyCapabilities } from '@/app/internal-company/store'
 import { RightSidebarPane } from '@/app/right-sidebar'
 import { ReviewPane } from '@/app/right-sidebar/review'
 import type { GroupSetter } from '@/app/shell/group-setter'
@@ -26,6 +27,8 @@ import { normalizeOrLocalPreviewTarget } from '@/lib/local-preview'
 import { cn } from '@/lib/utils'
 import { openPreview } from '@/store/preview'
 import { $currentCwd } from '@/store/session'
+
+import { internalCompanyRouteAllowed } from '../routes'
 
 // ---------------------------------------------------------------------------
 // Logs — live agent-log tail. ⌘K-only chrome: the pane contribution exists
@@ -121,28 +124,52 @@ export function ReviewPaneContent() {
  *  `data` payload is the StatusbarItem. */
 export function useStatusbarContributions(side: 'left' | 'right'): StatusbarItem[] {
   const items = useContributions(`statusBar.${side}`)
+  const internalCompany = useStore($internalCompanyCapabilities)
+  const harnessMode = internalCompany.mode === 'harness'
 
-  return items
-    .map(c =>
-      c.render
-        ? ({
-            id: c.id,
-            render: () => (
-              <ContribBoundary id={c.id} variant="chip">
-                <ContribRender render={c.render!} />
-              </ContribBoundary>
-            )
-          } satisfies StatusbarItem)
-        : (c.data as StatusbarItem)
-    )
-    .filter(Boolean)
+  return items.flatMap(c => {
+    if (harnessMode && (c.render || c.source !== 'core')) {
+      return []
+    }
+
+    const item: StatusbarItem | undefined = c.render
+      ? {
+          id: c.id,
+          render: () => (
+            <ContribBoundary id={c.id} variant="chip">
+              <ContribRender render={c.render!} />
+            </ContribBoundary>
+          )
+        }
+      : (c.data as StatusbarItem | undefined)
+
+    if (!item || (harnessMode && item.to && !internalCompanyRouteAllowed(item.to, internalCompany))) {
+      return []
+    }
+
+    return [item]
+  })
 }
 
 /** Collect TitlebarTool data contributions for one side of the titlebar. */
 export function useTitlebarToolContributions(side: 'left' | 'right'): TitlebarTool[] {
   const items = useContributions(`titleBar.tools.${side}`)
+  const internalCompany = useStore($internalCompanyCapabilities)
+  const harnessMode = internalCompany.mode === 'harness'
 
-  return items.map(c => c.data as TitlebarTool).filter(Boolean)
+  return items.flatMap(c => {
+    if (harnessMode && c.source !== 'core') {
+      return []
+    }
+
+    const tool = c.data as TitlebarTool | undefined
+
+    if (!tool || (harnessMode && tool.to && !internalCompanyRouteAllowed(tool.to, internalCompany))) {
+      return []
+    }
+
+    return [tool]
+  })
 }
 
 /**

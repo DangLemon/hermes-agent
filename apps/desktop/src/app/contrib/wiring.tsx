@@ -14,6 +14,8 @@ import { type CSSProperties, lazy, type ReactNode, Suspense, useCallback, useEff
 import { useLocation, useNavigate } from 'react-router'
 
 import { graftRefreshedTailOntoBackfill } from '@/app/chat/transcript-backfill'
+import { internalCompanyRouteAllowed } from '@/app/internal-company/capabilities'
+import { $internalCompanyCapabilities } from '@/app/internal-company/store'
 import { formatRefValue } from '@/components/assistant-ui/directive-text'
 import { BootFailureOverlay } from '@/components/boot-failure-overlay'
 import { ConfirmHost } from '@/components/confirm-host'
@@ -106,6 +108,7 @@ import { resetProjectTreeState } from '../right-sidebar/files/use-project-tree'
 import { PersistentTerminal } from '../right-sidebar/terminal/persistent'
 import { closeAllTerminals } from '../right-sidebar/terminal/terminals'
 import {
+  AGENTS_ROUTE,
   CRON_ROUTE,
   navigateToWorkspacePage,
   routeSessionId,
@@ -191,6 +194,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   const actionsRef = useRef<WiringActions | null>(null)
 
   const gatewayState = useStore($gatewayState)
+  const internalCompany = useStore($internalCompanyCapabilities)
   const activeSessionId = useStore($activeSessionId)
   const billingSettingsRequest = useStore($billingSettingsRequest)
   const cronReviewRequest = useStore($cronReviewRequest)
@@ -348,7 +352,11 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     requestGateway
   })
 
-  const openProviderSettings = useCallback(() => navigate(`${SETTINGS_ROUTE}?tab=providers`), [navigate])
+  const openProviderSettings = useCallback(() => {
+    if (internalCompany.mode === 'upstream') {
+      navigate(`${SETTINGS_ROUTE}?tab=providers`)
+    }
+  }, [internalCompany.mode, navigate])
 
   // Palette "Keyboard shortcuts" entry dispatches a custom event (contributions
   // don't have router access); listen and navigate to the settings keybinds tab.
@@ -1189,7 +1197,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
       {/* The full real overlay set (mirrors DesktopController's `overlays`). */}
       <RemoteDisplayBanner />
       {!isAuxiliaryWindow() && <DesktopInstallOverlay />}
-      {!isAuxiliaryWindow() && (
+      {!isAuxiliaryWindow() && internalCompany.mode === 'upstream' && (
         <DesktopOnboardingOverlay
           enabled={gatewayState === 'open'}
           onCompleted={() => {
@@ -1201,33 +1209,37 @@ export function ContribWiring({ children }: { children: ReactNode }) {
           requestGateway={requestGateway}
         />
       )}
-      <ModelPickerOverlay
-        gateway={gateway || undefined}
-        onSelect={selectModel}
-        ownerConnectionId={activeConnectionId || undefined}
-        profile={activeGatewayProfile}
-        requestGateway={requestGateway}
-      />
+      {internalCompany.mode === 'upstream' && (
+        <ModelPickerOverlay
+          gateway={gateway || undefined}
+          onSelect={selectModel}
+          ownerConnectionId={activeConnectionId || undefined}
+          profile={activeGatewayProfile}
+          requestGateway={requestGateway}
+        />
+      )}
       <SessionPickerOverlay onResume={sessionId => openSession(sessionId, navigate)} />
-      <ModelVisibilityOverlay
-        gateway={gateway || undefined}
-        onOpenProviders={openProviderSettings}
-        ownerConnectionId={activeConnectionId || undefined}
-        profile={activeGatewayProfile}
-      />
-      <UpdatesOverlay />
+      {internalCompany.mode === 'upstream' && (
+        <ModelVisibilityOverlay
+          gateway={gateway || undefined}
+          onOpenProviders={openProviderSettings}
+          ownerConnectionId={activeConnectionId || undefined}
+          profile={activeGatewayProfile}
+        />
+      )}
+      {internalCompany.mode === 'upstream' && <UpdatesOverlay />}
       <GatewayConnectingOverlay />
       <BootFailureOverlay />
       <CommandPalette />
-      <PluginInstallModal />
+      {internalCompany.mode === 'upstream' && <PluginInstallModal />}
       <PetGenerateOverlay />
       <SessionSwitcher />
       <FileActionDialogs />
-      <McpInstallDeepLinkDialog />
+      {internalCompany.mode === 'upstream' && <McpInstallDeepLinkDialog />}
       <RemoteFolderPicker />
       <FindBar />
 
-      {settingsOpen && (
+      {settingsOpen && internalCompanyRouteAllowed(SETTINGS_ROUTE, internalCompany) && (
         <Suspense fallback={null}>
           <SettingsView
             gateway={gateway}
@@ -1246,7 +1258,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
         </Suspense>
       )}
 
-      {commandCenterOpen && (
+      {commandCenterOpen && internalCompany.mode === 'upstream' && (
         <Suspense fallback={null}>
           <CommandCenterView
             initialSection={commandCenterInitialSection}
@@ -1258,13 +1270,13 @@ export function ContribWiring({ children }: { children: ReactNode }) {
         </Suspense>
       )}
 
-      {agentsOpen && (
+      {agentsOpen && internalCompanyRouteAllowed(AGENTS_ROUTE, internalCompany) && (
         <Suspense fallback={null}>
           <AgentsView onClose={closeOverlayToPreviousRoute} />
         </Suspense>
       )}
 
-      {cronOpen && (
+      {cronOpen && internalCompanyRouteAllowed(CRON_ROUTE, internalCompany) && (
         <Suspense fallback={null}>
           <CronView
             onClose={closeOverlayToPreviousRoute}
@@ -1273,19 +1285,19 @@ export function ContribWiring({ children }: { children: ReactNode }) {
         </Suspense>
       )}
 
-      {webhooksOpen && (
+      {webhooksOpen && internalCompanyRouteAllowed('/webhooks', internalCompany) && (
         <Suspense fallback={null}>
           <WebhooksView onClose={closeOverlayToPreviousRoute} />
         </Suspense>
       )}
 
-      {profilesOpen && (
+      {profilesOpen && internalCompany.mode === 'upstream' && (
         <Suspense fallback={null}>
           <ProfilesView onClose={closeOverlayToPreviousRoute} />
         </Suspense>
       )}
 
-      {starmapOpen && (
+      {starmapOpen && internalCompany.mode === 'upstream' && (
         <Suspense fallback={null}>
           <StarmapView onClose={closeOverlayToPreviousRoute} />
         </Suspense>
@@ -1312,7 +1324,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
 
       {/* Single persistent xterm host chasing the terminal pane's slot rect.
           The HUD has no terminal pane, so it has nothing to chase. */}
-      {!isHudWindow() && !isBrowserWindow() && (
+      {!isHudWindow() && !isBrowserWindow() && internalCompany.terminalAllowed && (
         <PersistentTerminal onAddSelectionToChat={composer.addTerminalSelectionAttachment} />
       )}
     </ContribWiringContext.Provider>

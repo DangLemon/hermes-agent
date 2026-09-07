@@ -16,6 +16,7 @@ param(
     [switch]$NoVenv,
     [switch]$SkipSetup,
     [switch]$SkipComputerUse,
+    [string]$Repository = $(if ($env:HERMES_INSTALL_REPOSITORY) { $env:HERMES_INSTALL_REPOSITORY } else { "NousResearch/hermes-agent" }),
     [string]$Branch = "main",
     # -Commit and -Tag are higher-precedence variants of -Branch for users
     # who need reproducible installs (desktop installer pinning, CI, release
@@ -383,8 +384,77 @@ $script:ResolvedPathReport = @{
 # Configuration
 # ============================================================================
 
-$RepoUrlSsh = "git@github.com:NousResearch/hermes-agent.git"
-$RepoUrlHttps = "https://github.com/NousResearch/hermes-agent.git"
+function Test-RepositoryIdentity {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
+    if ($Value -match "^(https?:|git@)") { return $false }
+    if ($Value -like "*.git") { return $false }
+    if ($Value -like "*..*") { return $false }
+    if (($Value.Split("/")).Count -ne 2) { return $false }
+    return ($Value -match "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$")
+}
+
+function Get-GitHubRepositoryIdentity {
+    param([string]$Url)
+    if ([string]::IsNullOrWhiteSpace($Url)) { return $null }
+
+    $repo = $null
+    if ($Url -match "^https?://github\.com/([^?#]+?)(?:\.git)?(?:[?#].*)?$") {
+        $repo = $Matches[1]
+    } elseif ($Url -match "^git@github\.com:([^?#]+?)(?:\.git)?$") {
+        $repo = $Matches[1]
+    } elseif ($Url -match "^ssh://git@github\.com/([^?#]+?)(?:\.git)?(?:[?#].*)?$") {
+        $repo = $Matches[1]
+    }
+
+    if ($repo -and (Test-RepositoryIdentity $repo)) { return $repo }
+    return $null
+}
+
+function Get-RepositoryIdentityKey {
+    param([string]$Value)
+    return $Value.ToLowerInvariant()
+}
+
+function Ensure-ManagedOrigin {
+    $currentUrl = (& git -c windows.appendAtomically=false config --get remote.origin.url 2>$null)
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($currentUrl)) {
+        Write-Info "Adding managed origin for $Repository..."
+        & git -c windows.appendAtomically=false remote add origin $RepoUrlHttps 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            & git -c windows.appendAtomically=false remote set-url origin $RepoUrlHttps
+            if ($LASTEXITCODE -ne 0) {
+                throw "Could not configure git origin for $Repository. Set it manually with: git remote set-url origin $RepoUrlHttps"
+            }
+        }
+        return
+    }
+
+    $currentUrl = ($currentUrl | Select-Object -First 1).ToString().Trim()
+    $currentRepo = Get-GitHubRepositoryIdentity $currentUrl
+    if (-not $currentRepo) {
+        throw "Existing checkout origin is not a supported GitHub URL: $currentUrl. This installer will not fetch until origin matches selected -Repository $Repository. Set it manually with: git remote set-url origin $RepoUrlHttps"
+    }
+
+    if ((Get-RepositoryIdentityKey $currentRepo) -ne (Get-RepositoryIdentityKey $Repository)) {
+        throw "Existing checkout origin $currentRepo does not match selected -Repository $Repository. No fetch was attempted, and local edits were left untouched. Use -Repository $currentRepo to update this checkout, or move it aside before installing $Repository."
+    }
+
+    if ($currentUrl -ne $RepoUrlHttps) {
+        Write-Info "Normalizing managed origin URL to $RepoUrlHttps..."
+        & git -c windows.appendAtomically=false remote set-url origin $RepoUrlHttps
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not normalize git origin for $Repository. Set it manually with: git remote set-url origin $RepoUrlHttps"
+        }
+    }
+}
+
+if (-not (Test-RepositoryIdentity $Repository)) {
+    throw "-Repository expects a safe GitHub owner/repo identity, got: $Repository"
+}
+
+$RepoUrlSsh = "git@github.com:$Repository.git"
+$RepoUrlHttps = "https://github.com/$Repository.git"
 $PythonVersion = "3.11"
 # Minor versions the installer accepts when the requested $PythonVersion isn't
 # available, in preference order. Only checkout-private uv-managed interpreters
@@ -2179,6 +2249,7 @@ function Install-Repository {
         if ($repoValid) {
             Write-Info "Existing installation found, updating..."
             Push-Location $InstallDir
+            Ensure-ManagedOrigin
             # Wrap the entire fetch+checkout block in EAP=Continue so git's
             # routine stderr output (e.g. 'From <url>' info lines emitted by
             # `git fetch`) doesn't terminate the script under the global
@@ -2186,6 +2257,7 @@ function Install-Repository {
             $prevEAP = $ErrorActionPreference
             $ErrorActionPreference = "Continue"
             $autostashRef = ""
+            $updateFailed = $false
             try {
                 # This is a MANAGED checkout, not a repo the user edits. Git for
                 # Windows defaults to core.autocrlf=true, which renormalizes the
@@ -2270,13 +2342,14 @@ function Install-Repository {
                     if ($LASTEXITCODE -ne 0) { throw "git checkout $Branch failed (exit $LASTEXITCODE)" }
                     # Managed installs should follow origin/$Branch exactly. If
                     # the checkout has diverged (or has local-only commits),
-                    # ff-only pull cannot succeed -- mirror ``hermes update`` and
-                    # reset to the fetched remote so bootstrap/install can recover.
+                    # ff-only pull cannot succeed. Fail closed instead of
+                    # resetting the checkout; local commits and restored worktree
+                    # edits remain inspectable.
                     git -c windows.appendAtomically=false pull --ff-only origin $Branch
                     if ($LASTEXITCODE -ne 0) {
-                        Write-Warn "Fast-forward not possible; resetting managed install to origin/$Branch..."
-                        git -c windows.appendAtomically=false reset --hard "origin/$Branch"
-                        if ($LASTEXITCODE -ne 0) { throw "git reset --hard origin/$Branch failed (exit $LASTEXITCODE)" }
+                        Write-Err "Fast-forward update from origin/$Branch was not possible."
+                        Write-Info "No destructive reset was performed. Resolve local commits manually, then re-run the installer."
+                        $updateFailed = $true
                     }
                 }
 
@@ -2343,6 +2416,9 @@ function Install-Repository {
                         Write-Info "Restore manually with: git stash apply $autostashRef"
                     }
                     $autostashRef = ""
+                }
+                if ($updateFailed) {
+                    throw "Fast-forward update from origin/$Branch was not possible; no destructive reset was performed."
                 }
             } finally {
                 if ($autostashRef) {
@@ -2417,13 +2493,13 @@ function Install-Repository {
                 # for.  GitHub supports archive URLs for commits, tags, and
                 # branches; we honour Commit > Tag > Branch.
                 if ($Commit) {
-                    $zipUrl = "https://github.com/NousResearch/hermes-agent/archive/$Commit.zip"
+                    $zipUrl = "https://github.com/$Repository/archive/$Commit.zip"
                     $zipLabel = $Commit
                 } elseif ($Tag) {
-                    $zipUrl = "https://github.com/NousResearch/hermes-agent/archive/refs/tags/$Tag.zip"
+                    $zipUrl = "https://github.com/$Repository/archive/refs/tags/$Tag.zip"
                     $zipLabel = $Tag
                 } else {
-                    $zipUrl = "https://github.com/NousResearch/hermes-agent/archive/refs/heads/$Branch.zip"
+                    $zipUrl = "https://github.com/$Repository/archive/refs/heads/$Branch.zip"
                     $zipLabel = $Branch
                 }
                 $zipPath = "$env:TEMP\hermes-agent-$zipLabel.zip"
@@ -2509,6 +2585,7 @@ function Install-Repository {
 
     # Set per-repo config (harmless if it fails)
     Push-Location $InstallDir
+    Ensure-ManagedOrigin
     git -c windows.appendAtomically=false config windows.appendAtomically false 2>$null
     # Pin autocrlf=false on the managed clone so git never renormalizes the
     # repo's LF text files to CRLF in the working tree. Without this, the very

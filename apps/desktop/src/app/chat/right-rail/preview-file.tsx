@@ -20,6 +20,7 @@ import { chunkTextLines, useFixedRowWindow } from '@/components/chat/fixed-row-w
 import { LazyShiki as ShikiHighlighter } from '@/components/chat/shiki-highlighter'
 import { PageLoader } from '@/components/page-loader'
 import { Tip } from '@/components/ui/tooltip'
+import type { HermesConnection } from '@/global'
 import { translateNow, useI18n } from '@/i18n'
 import {
   desktopFileDiff,
@@ -265,9 +266,9 @@ function dataUrlToBlob(dataUrl: string) {
   return new Blob([bytes], { type: 'application/pdf' })
 }
 
-async function readTextPreview(filePath: string) {
+async function readTextPreview(filePath: string, connection?: HermesConnection | null) {
   try {
-    return await readDesktopFileText(filePath)
+    return await readDesktopFileText(filePath, connection)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
 
@@ -684,6 +685,8 @@ export function LocalFilePreview({ reloadKey, target }: { reloadKey: number; tar
   const [saveError, setSaveError] = useState<null | string>(null)
   const [conflict, setConflict] = useState(false)
   const [selfReload, setSelfReload] = useState(0)
+  const saveGenerationRef = useRef(0)
+  const uiGenerationRef = useRef(0)
   // For the bare-`e` shortcut: the read-view root (to detect focus-within) and a
   // hover flag (no state — only the keydown handler reads it).
   const readViewRef = useRef<HTMLDivElement>(null)
@@ -696,6 +699,7 @@ export function LocalFilePreview({ reloadKey, target }: { reloadKey: number; tar
 
   // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
   useEffect(() => {
+    uiGenerationRef.current += 1
     setUserMode(null)
     setEditing(false)
     setDirty(false)
@@ -704,7 +708,7 @@ export function LocalFilePreview({ reloadKey, target }: { reloadKey: number; tar
     setConflict(false)
     draftRef.current = ''
     baselineRef.current = ''
-  }, [filePath, reloadKey])
+  }, [filePath, fsCacheKey, reloadKey])
 
   // HTML files are rendered as source code, not in a webview - so they take
   // the same path as plain text files. `previewKind === 'binary'` arrives
@@ -923,6 +927,17 @@ export function LocalFilePreview({ reloadKey, target }: { reloadKey: number; tar
       return
     }
 
+    const saveGeneration = saveGenerationRef.current + 1
+    saveGenerationRef.current = saveGeneration
+    const saveConnection = connection
+    const savePath = filePath
+    const saveDraft = draftRef.current
+    const saveBaseline = baselineRef.current
+    const saveUiGeneration = uiGenerationRef.current
+
+    const isCurrentSave = () => saveGenerationRef.current === saveGeneration
+    const canUpdateUi = () => isCurrentSave() && uiGenerationRef.current === saveUiGeneration
+
     setSaving(true)
     setSaveError(null)
 
@@ -933,11 +948,13 @@ export function LocalFilePreview({ reloadKey, target }: { reloadKey: number; tar
       // choice. `force` is the user picking "overwrite" from that banner.
       if (!force) {
         try {
-          const current = await readTextPreview(filePath)
+          const current = await readTextPreview(savePath, saveConnection)
 
-          if (!current.binary && (current.text ?? '') !== baselineRef.current) {
-            setConflict(true)
-            setSaving(false)
+          if (!current.binary && (current.text ?? '') !== saveBaseline) {
+            if (canUpdateUi()) {
+              setConflict(true)
+              setSaving(false)
+            }
 
             return
           }
@@ -946,17 +963,35 @@ export function LocalFilePreview({ reloadKey, target }: { reloadKey: number; tar
         }
       }
 
-      await writeDesktopFileText(filePath, draftRef.current)
-      baselineRef.current = draftRef.current
+      await writeDesktopFileText(savePath, saveDraft, saveConnection)
+
+      if (!canUpdateUi()) {
+        return
+      }
+
+      baselineRef.current = saveDraft
+
+      if (draftRef.current !== saveDraft) {
+        setDirty(true)
+        setConflict(false)
+        notifyWorkspaceChanged()
+
+        return
+      }
+
       setDirty(false)
       setConflict(false)
       setEditing(false)
       notifyWorkspaceChanged()
       setSelfReload(n => n + 1)
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : String(error))
+      if (canUpdateUi()) {
+        setSaveError(error instanceof Error ? error.message : String(error))
+      }
     } finally {
-      setSaving(false)
+      if (canUpdateUi()) {
+        setSaving(false)
+      }
     }
   }
 

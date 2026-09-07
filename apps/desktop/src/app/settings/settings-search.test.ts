@@ -7,6 +7,7 @@ import {
   buildConfigSearchEntries,
   buildCredentialSearchEntries,
   credentialSettingsView,
+  filterCompanyManagedSettingsSearchEntries,
   filterSettingsSearchEntries
 } from './settings-search'
 import { envVar } from './test-utils'
@@ -94,6 +95,42 @@ describe('settings search index', () => {
     expect(credentialSettingsView(envVar('messaging'))).toBe('settings')
     expect(credentialSettingsView(envVar('messaging', { channel_managed: true }))).toBeNull()
     expect(credentialSettingsView(envVar('provider'))).toBeNull()
+  })
+
+
+
+  it('filters company-managed blocked settings entries while preserving normal search entries', () => {
+    const schema: Record<string, ConfigFieldSchema> = {
+      'display.personality': { type: 'select' },
+      'models.default': { type: 'string' },
+      'gateway.url': { type: 'string' },
+      'providers.openai.api_key': { type: 'string' }
+    }
+
+    const config = {
+      display: { personality: 'default' },
+      gateway: { url: 'http://127.0.0.1:8765' },
+      models: { default: 'openai/gpt' },
+      providers: { openai: { api_key: '' } }
+    } as unknown as HermesConfigRecord
+
+    const configEntries = buildConfigSearchEntries(schema, config, searchCopy)
+
+    const credentialEntries = buildCredentialSearchEntries(
+      {
+        FUTURE_CRAWLER_API_KEY: envVar('tool'),
+        FUTURE_GATEWAY_URL: envVar('setting')
+      },
+      { settings: 'Settings', tools: 'Tools' },
+      { settings: Settings2, tools: Wrench }
+    )
+
+    expect(configEntries.some(entry => entry.id === 'config-field:display.personality')).toBe(true)
+    expect(credentialEntries).toHaveLength(2)
+
+    const managedEntries = filterCompanyManagedSettingsSearchEntries([...configEntries, ...credentialEntries])
+
+    expect(managedEntries.map(entry => entry.id)).toEqual(['config-field:display.personality'])
   })
 
   it('uses AND matching across labels, context, descriptions, and raw keys', () => {

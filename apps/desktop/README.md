@@ -85,6 +85,14 @@ npm run pack         # unpacked app under release/ (no installer)
 
 Installers are built and uploaded to GitHub Releases manually. macOS/Windows signing & notarization happen automatically when the relevant credentials are present in the environment (`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_*` for macOS, `WIN_CSC_*` for Windows).
 
+### Internal Desktop Harness
+
+Internal builds are selected with `HERMES_DESKTOP_HARNESS_CONFIG` and package the validated resource as `internal-desktop-harness.json`. The editable nonsecret template for the current internal build is [`internal-desktop-harness.config.json`](./internal-desktop-harness.config.json).
+
+That manifest pins the first-launch source repository to `DangLemon/hermes-agent`. The Desktop bootstrap runner downloads `scripts/install.sh` or `scripts/install.ps1` from that repository at the build stamp ref, then passes the same repository identity to every installer stage. Ordinary builds and direct installer runs still default to `NousResearch/hermes-agent`.
+
+Keep secrets outside the manifest. The provider key is represented only as `model.api_key: ${HERMES_COMPANY_API_KEY}`, and Amazon Ads OAuth client credentials are represented only as `${AMAZON_ADS_CLIENT_ID}` and `${AMAZON_ADS_CLIENT_SECRET}`. The MCP OAuth runtime uses `oauth.redirect_port`, so the Amazon callback port is stored as `oauth.redirect_port: 8000` with `oauth.redirect_uri: http://localhost:8000/auth/callback`.
+
 ### How it works
 
 The packaged app ships the Electron shell and a native React chat surface. On

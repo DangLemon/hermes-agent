@@ -9,10 +9,13 @@ import { CodeEditor } from '@/components/chat/code-editor'
 import { PageLoader } from '@/components/page-loader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { CountSkeleton } from '@/components/ui/skeleton'
+import { Textarea } from '@/components/ui/textarea'
 import type { DesktopRosterAgent } from '@/global'
 import {
+  createSkill,
   editLearningNode,
   getLearningNode,
   getOfficialSkills,
@@ -37,13 +40,14 @@ import { normalize } from '@/lib/text'
 import { useStoreSelector } from '@/lib/use-session-slice'
 import { $gateway, activeGatewayConnectionId } from '@/store/gateway'
 import { $hubActions, installHubSkill, OFFICIAL_SKILLS_KEY } from '@/store/hub-actions'
-import { notify, notifyError } from '@/store/notifications'
+import { notify, notifyError, readableError } from '@/store/notifications'
 import { $activeGatewayProfile, normalizeProfileKey } from '@/store/profile'
 import type { OfficialSkillInfo, SkillInfo, ToolsetInfo } from '@/types/hermes'
 
 import { useOnProfileSwitch } from '../hooks/use-on-profile-switch'
 import { useRefreshHotkey } from '../hooks/use-refresh-hotkey'
 import { useRouteEnumParam } from '../hooks/use-route-enum-param'
+import { $internalCompanyCapabilities } from '../internal-company/store'
 import {
   CapRow,
   DetailColumn,
@@ -74,6 +78,7 @@ import { $skillsSortDesc, $toolsetsSortDesc } from './store'
 // Skills tab now (EmbeddedHubPicker below the installed list). Legacy
 // `?tab=hub` links fall back to 'skills' via useRouteEnumParam.
 const SKILLS_MODES = ['skills', 'toolsets', 'mcp'] as const
+const HARNESS_SKILLS_MODES = ['skills', 'mcp'] as const
 
 // Skills + toolsets live in the RQ cache so switching tabs/pages paints the
 // cached lists instantly (no reload flash) and mount only fires a deduped
@@ -171,6 +176,18 @@ function filteredOfficial(skills: OfficialSkillInfo[], query: string): OfficialS
 const toolsetCalls = (toolset: ToolsetInfo, toolCalls: Record<string, number>): number =>
   toolNames(toolset).reduce((sum, name) => sum + (toolCalls[name] ?? 0), 0)
 
+function skillTemplate(name = 'my-skill'): string {
+  return `---
+name: ${name}
+description: Describe when to use this skill.
+---
+
+# ${prettyName(name)}
+
+Write the instructions this skill should load when it is used.
+`
+}
+
 function filteredToolsets(
   toolsets: ToolsetInfo[],
   query: string,
@@ -232,14 +249,18 @@ export function SkillsView({
   ...props
 }: SkillsViewProps) {
   const { t } = useI18n()
+  const internalCompany = useStore($internalCompanyCapabilities)
+  const harnessMode = internalCompany.mode === 'harness'
   // Both hooks run unconditionally (rules of hooks); embedded picks the local
   // one so tab clicks inside a dialog don't rewrite the page URL.
   const routeTab = useRouteEnumParam('tab', SKILLS_MODES, 'skills')
   const localTab = useState<(typeof SKILLS_MODES)[number]>('skills')
   const [mode, setMode] = embedded ? localTab : routeTab
+  const availableTabs = harnessMode ? HARNESS_SKILLS_MODES : SKILLS_MODES
+  const effectiveMode = harnessMode && mode === 'toolsets' ? 'skills' : mode
   // $gateway only feeds the MCP tab — gate the subscription so Skills/Toolsets
   // tabs don't re-render on connect/disconnect/reconnect.
-  const gateway = useStoreSelector($gateway, g => (mode === 'mcp' ? g : null))
+  const gateway = useStoreSelector($gateway, g => (effectiveMode === 'mcp' ? g : null))
 
   const [query, setQuery] = useState('')
 
@@ -248,9 +269,15 @@ export function SkillsView({
   // and then STAYS mounted but hidden across tab switches, so bouncing to
   // Tools/MCP and back never reloads the site. Derived-state pattern: flips
   // once, during render, never back.
-  const [hubMounted, setHubMounted] = useState(mode === 'skills')
+  const [hubMounted, setHubMounted] = useState(effectiveMode === 'skills')
 
-  if (mode === 'skills' && !hubMounted) {
+  useEffect(() => {
+    if (!(availableTabs as readonly string[]).includes(mode)) {
+      setMode('skills')
+    }
+  }, [availableTabs, mode, setMode])
+
+  if (effectiveMode === 'skills' && !hubMounted) {
     setHubMounted(true)
   }
 
@@ -342,6 +369,7 @@ export function SkillsView({
   const { data: officialData } = useQuery({
     queryKey: [...OFFICIAL_SKILLS_KEY, scopeKey],
     queryFn: () => getOfficialSkills(scopeProfile),
+    enabled: !harnessMode,
     staleTime: 60_000,
     retry: false
   })
@@ -402,7 +430,7 @@ export function SkillsView({
   // the first time Toolsets is shown, never on Skills or MCP, so it can't
   // starve the MCP tab's config load. Absent → toolsets sort A–Z until it lands.
   useEffect(() => {
-    if (mode !== 'toolsets' || toolCalls !== null) {
+    if (harnessMode || effectiveMode !== 'toolsets' || toolCalls !== null) {
       return
     }
 
@@ -418,7 +446,7 @@ export function SkillsView({
       .catch(() => live() && setToolCalls({}))
 
     return () => void (cancelled = true)
-  }, [mode, scopeKey, scopeProfile, toolCalls])
+  }, [effectiveMode, harnessMode, scopeKey, scopeProfile, toolCalls])
 
   // On an app-wide profile switch the analytics cache is scope-keyed, but our
   // local toolCalls state isn't — leaving it non-null would keep the lazy
@@ -447,10 +475,14 @@ export function SkillsView({
   // installed AND entries whose name already appears in the installed list
   // (covers installs from before the lock existed, or by hand).
   const visibleOfficial = useMemo(() => {
+    if (harnessMode) {
+      return []
+    }
+
     const catalog = (officialData?.skills ?? []).filter(s => !s.installed && !installedSkillNames.has(s.name))
 
     return filteredOfficial(catalog, query)
-  }, [installedSkillNames, officialData, query])
+  }, [harnessMode, installedSkillNames, officialData, query])
 
   // Identifiers with a hub install currently running — selected as a joined
   // string so $hubActions' per-log-line churn doesn't re-render the list.
@@ -477,7 +509,7 @@ export function SkillsView({
   // Rotating placeholder nudges from the user's own data — teach that search
   // understands categories and tool names, not just titles.
   const searchHints = useMemo(() => {
-    if (mode === 'skills' && skills?.length) {
+    if (effectiveMode === 'skills' && skills?.length) {
       const counts = new Map<string, number>()
 
       for (const skill of skills) {
@@ -491,7 +523,7 @@ export function SkillsView({
         .map(([category]) => t.common.tryHint(category.toLowerCase()))
     }
 
-    if (mode === 'toolsets' && toolsets?.length) {
+    if (effectiveMode === 'toolsets' && toolsets?.length) {
       return toolsets
         .filter(ts => isDesktopToolsetVisible(ts.name) && toolNames(ts).length > 0)
         .slice(0, 5)
@@ -499,7 +531,7 @@ export function SkillsView({
     }
 
     return undefined
-  }, [mode, skills, toolsets, t])
+  }, [effectiveMode, skills, toolsets, t])
 
   // Keep a valid selection: fall back to the first visible row when the
   // current selection is filtered out (or nothing is selected yet).
@@ -601,7 +633,7 @@ export function SkillsView({
 
       notify({ kind: 'success', title: t.skills.bulkUpdated(done), message: '' })
     } catch (err) {
-      notifyError(err, t.skills.failedToUpdate(mode === 'skills' ? t.skills.tabSkills : t.skills.tabToolsets))
+      notifyError(err, t.skills.failedToUpdate(effectiveMode === 'skills' ? t.skills.tabSkills : t.skills.tabToolsets))
     } finally {
       invalidateSlashCompletions()
       setBulkBusy(false)
@@ -609,7 +641,7 @@ export function SkillsView({
   }
 
   const bulkToggle = (enabled: boolean) =>
-    mode === 'skills'
+    effectiveMode === 'skills'
       ? bulkApply(
           bulkSkills.filter(row => row.enabled !== enabled),
           [],
@@ -668,10 +700,37 @@ export function SkillsView({
   const [skillEditor, setSkillEditor] = useState<null | { content: string; name: string }>(null)
   const [skillDraft, setSkillDraft] = useState('')
   const [skillSaving, setSkillSaving] = useState(false)
+  const [createEditorOpen, setCreateEditorOpen] = useState(false)
+  const [createSkillName, setCreateSkillName] = useState('')
+  const [createSkillCategory, setCreateSkillCategory] = useState('')
+  const [createSkillContent, setCreateSkillContent] = useState(() => skillTemplate())
+  const [createSkillError, setCreateSkillError] = useState<null | string>(null)
+  const [createSkillSaving, setCreateSkillSaving] = useState(false)
+  const createSkillErrorId = 'skill-create-error'
+  const newSkillButtonRef = useRef<HTMLButtonElement | null>(null)
+  const createGeneration = useRef(0)
+  const createContentGenerated = useRef(true)
   const [archiveTarget, setArchiveTarget] = useState<null | string>(null)
   // Bumped on profile switch so an in-flight openSkillEditor fetch from profile
   // A can't reopen the editor with A's content after switching to B.
   const skillEditorEpoch = useRef(0)
+
+  useEffect(
+    () => () => {
+      createGeneration.current += 1
+    },
+    []
+  )
+
+  const closeCreateEditor = useCallback(({ restoreFocus = false }: { restoreFocus?: boolean } = {}) => {
+    createGeneration.current += 1
+    setCreateEditorOpen(false)
+    setCreateSkillError(null)
+
+    if (restoreFocus) {
+      newSkillButtonRef.current?.focus()
+    }
+  }, [])
 
   // A profile switch swaps the backend under the open editor/archive dialog —
   // their targets belong to profile A, so a save/archive would hit B. Drop them
@@ -680,8 +739,26 @@ export function SkillsView({
     skillEditorEpoch.current += 1
     setSkillEditor(null)
     setSkillDraft('')
+    closeCreateEditor()
     setArchiveTarget(null)
   })
+
+  const openCreateEditor = () => {
+    skillEditorEpoch.current += 1
+    createGeneration.current += 1
+    const initialName = createSkillName.trim() || 'my-skill'
+    setSkillEditor(null)
+    setCreateSkillSaving(false)
+    setCreateEditorOpen(true)
+    setCreateSkillError(null)
+    setCreateSkillName(createSkillName)
+    setCreateSkillContent(current => {
+      const nextContent = current || skillTemplate(initialName)
+      createContentGenerated.current = nextContent === skillTemplate(initialName)
+
+      return nextContent
+    })
+  }
 
   const openSkillEditor = async (name: string) => {
     const epoch = skillEditorEpoch.current
@@ -723,6 +800,98 @@ export function SkillsView({
     }
   }
 
+  const saveNewSkill = async () => {
+    const name = createSkillName.trim()
+    const category = createSkillCategory.trim()
+    const content = createSkillContent.trim()
+
+    if (!name) {
+      setCreateSkillError('Skill name is required.')
+
+      return
+    }
+
+    if (!content) {
+      setCreateSkillError('SKILL.md content is required.')
+
+      return
+    }
+
+    if (!content.startsWith('---')) {
+      setCreateSkillError('SKILL.md must include YAML frontmatter.')
+
+      return
+    }
+
+    const epoch = skillEditorEpoch.current
+    const generation = createGeneration.current
+    const submittedScopeKey = scopeKey
+    const submittedScopeProfile = scopeProfile
+
+    setCreateSkillSaving(true)
+    setCreateSkillError(null)
+
+    try {
+      const created = await createSkill(name, createSkillContent, category || null, submittedScopeProfile)
+      const createdName = created.name || name
+
+      if (skillEditorEpoch.current !== epoch || createGeneration.current !== generation || scopeKey !== submittedScopeKey) {
+        return
+      }
+
+      let refreshedSkills: SkillInfo[] | null = null
+
+      try {
+        await refreshCapabilities()
+        refreshedSkills = await queryClient.fetchQuery({
+          queryKey: [...SKILLS_QUERY_KEY, submittedScopeKey],
+          queryFn: () => getSkills(submittedScopeProfile),
+          staleTime: 0
+        })
+      } catch {
+        refreshedSkills = null
+      }
+
+      if (skillEditorEpoch.current !== epoch || createGeneration.current !== generation || scopeKey !== submittedScopeKey) {
+        return
+      }
+
+      const createdSkillVisible = refreshedSkills?.some(skill => skill.name === createdName) ?? false
+
+      setSelectedOfficial(null)
+
+      if (createdSkillVisible) {
+        setSelectedSkill(createdName)
+      }
+
+      setCreateEditorOpen(false)
+      setCreateSkillName('')
+      setCreateSkillCategory('')
+      setCreateSkillContent(skillTemplate())
+      createContentGenerated.current = true
+      notify({
+        kind: 'success',
+        title: 'Skill created',
+        message: createdSkillVisible
+          ? `Use /${createdName} in a new session.`
+          : 'Skill saved, but discovery did not return it yet. Refresh Skills before using it in a new session.'
+      })
+
+      if (effectiveMode === 'skills') {
+        newSkillButtonRef.current?.focus()
+      }
+    } catch (err) {
+      if (skillEditorEpoch.current === epoch && createGeneration.current === generation && scopeKey === submittedScopeKey) {
+        setCreateSkillError(readableError(err, 'Failed to create skill.').message)
+        notifyError(err, name)
+      }
+    } finally {
+      if (skillEditorEpoch.current === epoch && createGeneration.current === generation && scopeKey === submittedScopeKey) {
+        setCreateSkillSaving(false)
+      }
+    }
+  }
+
   const skillEditorPane = skillEditor && (
     <DetailPane
       actions={
@@ -742,6 +911,90 @@ export function SkillsView({
         onChange={setSkillDraft}
         onSave={() => void saveSkillEdit()}
       />
+    </DetailPane>
+  )
+
+  const createNameInvalid = createSkillError === 'Skill name is required.' || Boolean(createSkillError?.toLowerCase().includes('skill named'))
+
+  const createContentInvalid =
+    createSkillError === 'SKILL.md content is required.' ||
+    createSkillError === 'SKILL.md must include YAML frontmatter.' ||
+    Boolean(createSkillError && !createNameInvalid)
+
+  const createSkillPane = createEditorOpen && (
+    <DetailPane
+      actions={
+        <>
+          <Button disabled={createSkillSaving} onClick={() => closeCreateEditor({ restoreFocus: true })} size="xs" type="button" variant="text">
+            {t.common.cancel}
+          </Button>
+          <Button disabled={createSkillSaving} form="skill-create-form" size="xs" type="submit">
+            {createSkillSaving ? t.common.saving : 'Create skill'}
+          </Button>
+        </>
+      }
+      id="skill-create-editor"
+      onClose={() => closeCreateEditor({ restoreFocus: true })}
+      title={<span className="text-[0.68rem] font-normal text-muted-foreground/60">New skill/SKILL.md</span>}
+    >
+      <form
+        className="flex h-full min-h-0 flex-col gap-2 p-3"
+        id="skill-create-form"
+        onSubmit={event => {
+          event.preventDefault()
+          void saveNewSkill()
+        }}
+      >
+        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(8rem,12rem)]">
+          <label className="grid gap-1 text-[0.68rem] font-medium text-(--ui-text-tertiary)">
+            Skill name
+            <Input
+              aria-describedby={createNameInvalid ? createSkillErrorId : undefined}
+              aria-invalid={createNameInvalid || undefined}
+              aria-label="Skill name"
+              autoFocus
+              onChange={event => {
+                const next = event.target.value
+                setCreateSkillName(next)
+                setCreateSkillContent(current => (createContentGenerated.current ? skillTemplate(next.trim() || 'my-skill') : current))
+              }}
+              placeholder="my-skill"
+              value={createSkillName}
+            />
+          </label>
+          <label className="grid gap-1 text-[0.68rem] font-medium text-(--ui-text-tertiary)">
+            Category
+            <Input
+              aria-label="Category"
+              onChange={event => setCreateSkillCategory(event.target.value)}
+              placeholder="general"
+              value={createSkillCategory}
+            />
+          </label>
+        </div>
+        <label className="grid min-h-0 flex-1 gap-1 text-[0.68rem] font-medium text-(--ui-text-tertiary)">
+          SKILL.md
+          <Textarea
+            aria-describedby={createContentInvalid ? createSkillErrorId : undefined}
+            aria-invalid={createContentInvalid || undefined}
+            aria-label="SKILL.md"
+            className="min-h-40 flex-1 resize-none font-mono text-xs leading-5"
+            onChange={event => {
+              createContentGenerated.current = false
+              setCreateSkillContent(event.target.value)
+            }}
+            value={createSkillContent}
+          />
+        </label>
+        {createSkillError && (
+          <p aria-live="assertive" className="text-[0.7rem] text-destructive" id={createSkillErrorId} role="alert">
+            {createSkillError}
+          </p>
+        )}
+        <p className="text-[0.65rem] leading-4 text-(--ui-text-quaternary)">
+          Use /{createSkillName.trim() || 'skill-name'} in a new session after it is created.
+        </p>
+      </form>
     </DetailPane>
   )
 
@@ -773,6 +1026,7 @@ export function SkillsView({
     skillEditorEpoch.current += 1
     setSkillEditor(null)
     setSkillDraft('')
+    closeCreateEditor()
     setArchiveTarget(null)
     setSelectedOfficial(null)
   }
@@ -842,18 +1096,33 @@ export function SkillsView({
   return (
     <PageSearchShell
       {...props}
-      activeTab={mode}
+      activeTab={effectiveMode}
       onSearchChange={setQuery}
-      onTabChange={id => setMode(id as (typeof SKILLS_MODES)[number])}
+      onTabChange={id => {
+        if (id !== 'skills') {
+          closeCreateEditor()
+        }
+
+        setMode(id as (typeof SKILLS_MODES)[number])
+      }}
       // MCP manages a handful of entries with the editor right there —
       // searching it is noise.
-      searchHidden={mode === 'mcp'}
+      searchHidden={effectiveMode === 'mcp'}
       searchHints={searchHints}
-      searchPlaceholder={mode === 'skills' ? t.skills.searchSkills : t.skills.searchToolsets}
+      searchPlaceholder={effectiveMode === 'skills' ? t.skills.searchSkills : t.skills.searchToolsets}
+      searchTrailingAction={
+        effectiveMode === 'skills' ? (
+          <Button onClick={openCreateEditor} ref={newSkillButtonRef} size="xs" variant="text">
+            New skill
+          </Button>
+        ) : undefined
+      }
       searchValue={query}
       tabs={[
         { id: 'skills', label: t.skills.tabSkills, meta: skills?.length ?? null },
-        { id: 'toolsets', label: t.skills.tabToolsets, meta: toolsets ? visibleToolsetCount(toolsets) : null },
+        ...(harnessMode
+          ? []
+          : [{ id: 'toolsets', label: t.skills.tabToolsets, meta: toolsets ? visibleToolsetCount(toolsets) : null }]),
         { id: 'mcp', label: t.skills.tabMcp }
       ]}
     >
@@ -863,14 +1132,19 @@ export function SkillsView({
       <div className="flex h-full flex-col">
         {profileScopeSelector}
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className={mode === 'skills' ? 'min-h-40 flex-1 overflow-hidden' : 'min-h-0 flex-1'}>
-            {mode === 'mcp' ? (
+          <div className={effectiveMode === 'skills' ? 'min-h-40 flex-1 overflow-hidden' : 'min-h-0 flex-1'}>
+            {effectiveMode === 'mcp' ? (
               // The gateway instance backs ONLY the live `reload.mcp` RPC, and
               // it is the ACTIVE gateway's socket — for a scope pinned to a
               // different backend that RPC would hot-reload the wrong
               // machine's MCP servers, so it is withheld (config edits still
               // apply on that backend's next session).
-              <McpTab gateway={crossBackendScope ? null : gateway} key={`mcp-${scopeKey}`} profile={scopeProfile} />
+              <McpTab
+                gateway={crossBackendScope ? null : gateway}
+                key={`mcp-${scopeKey}`}
+                profile={scopeProfile}
+                readOnly={harnessMode}
+              />
             ) : (skillsFailed || toolsetsFailed) && (!skills || !toolsets) ? (
               <PanelEmpty
                 action={
@@ -884,7 +1158,7 @@ export function SkillsView({
               />
             ) : !skills || !toolsets ? (
               <PageLoader label={t.skills.loading} />
-            ) : mode === 'skills' ? (
+            ) : effectiveMode === 'skills' ? (
               // Installed skills on top, the Skills Hub browser underneath —
               // discovery sits with management. The list region keeps a floor
               // (min-h-40, on the wrapper above) so a tall hub viewport or a
@@ -1047,10 +1321,11 @@ export function SkillsView({
               on purpose — the picker fetches nothing; scope rides the
               `profile` prop into each install call, and remounting on scope
               change would reload the whole site for no data benefit. */}
-          {hubMounted && (
-            <EmbeddedHubPicker hidden={mode !== 'skills'} installedNames={installedSkillNames} profile={scopeProfile} />
+          {!harnessMode && hubMounted && (
+            <EmbeddedHubPicker hidden={effectiveMode !== 'skills'} installedNames={installedSkillNames} profile={scopeProfile} />
           )}
         </div>
+        {createSkillPane}
       </div>
       {archiveTarget && (
         <ArchiveSkillConfirmDialog

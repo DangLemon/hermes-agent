@@ -1,6 +1,7 @@
 import { atom } from 'nanostores'
 
-import { type HermesOpenTarget, resolveHermesOpenPath } from '@/lib/hermes-open-target'
+import { $internalCompanyCapabilities } from '@/app/internal-company/store'
+import { type HermesOpenTarget, resolveInternalCompanyOpenPath } from '@/lib/hermes-open-target'
 import { persistString, storedString } from '@/lib/storage'
 
 import { $gateway } from './gateway'
@@ -307,11 +308,12 @@ export function clearPluginNotifyHandlers(notifyId?: string): void {
  *  user is away from Hermes — the in-app toast (`host.notify`) covers the
  *  foreground case. */
 export function dispatchPluginNativeNotification(pluginId: string, input: PluginNativeNotificationInput): void {
-  const activate = resolveHermesOpenPath(input.activate) ?? undefined
+  const internalCompany = $internalCompanyCapabilities.get()
+  const activate = resolveInternalCompanyOpenPath(input.activate, internalCompany) ?? undefined
   const notifyId = input.onActivate || input.actions?.some(a => a.onAction) ? mintNotifyId(pluginId) : undefined
 
   const actions: NativeNotificationAction[] | undefined = input.actions?.map(action => ({
-    activate: resolveHermesOpenPath(action.activate) ?? undefined,
+    activate: resolveInternalCompanyOpenPath(action.activate, internalCompany) ?? undefined,
     id: action.id,
     text: action.label
   }))
