@@ -9,7 +9,7 @@ import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { spawnSync } from "node:child_process"
 import { createRequire } from "node:module"
-import { HARNESS_RESOURCE_FILENAME, generateInternalDesktopHarnessResource } from "./internal-desktop-harness.mjs"
+import { generateInternalDesktopHarnessResource } from "./internal-desktop-harness.mjs"
 
 const require = createRequire(import.meta.url)
 
@@ -38,7 +38,7 @@ function electronBuilderCli() {
   return path.join(path.dirname(pkgJson), rel)
 }
 
-export function buildElectronBuilderArgs({ dist, harnessResourcePath, argv = process.argv.slice(2), fsExists = fs.existsSync } = {}) {
+export function buildElectronBuilderArgs({ dist, argv = process.argv.slice(2), fsExists = fs.existsSync } = {}) {
   // Local `hermes desktop` builds only ever package (--dir or dist), never
   // publish a GitHub release — no CI workflow drives this script. But the npm
   // lifecycle env sets CI=1 (so esbuild's postinstall doesn't try interactive
@@ -49,10 +49,6 @@ export function buildElectronBuilderArgs({ dist, harnessResourcePath, argv = pro
   // so it fails with "Cannot detect repository by .git/config". Pin publish to
   // "never" so electron-builder skips that lookup entirely.
   const args = ["--publish", "never"]
-  if (harnessResourcePath) {
-    args.push(`-c.extraResources.2.from=build/${HARNESS_RESOURCE_FILENAME}`)
-    args.push(`-c.extraResources.2.to=${HARNESS_RESOURCE_FILENAME}`)
-  }
   if (dist && fsExists(distBinary(dist))) {
     args.push(`-c.electronDist=${dist}`)
   }
@@ -66,8 +62,8 @@ export function shouldWarnMissingElectronDist(dist, fsExists = fs.existsSync) {
 
 function main() {
   const dist = electronDistDir()
-  const harness = generateInternalDesktopHarnessResource()
-  const args = buildElectronBuilderArgs({ dist, harnessResourcePath: harness.resourcePath })
+  generateInternalDesktopHarnessResource()
+  const args = buildElectronBuilderArgs({ dist })
   if (shouldWarnMissingElectronDist(dist)) {
     console.warn(
       "[run-electron-builder] no local electron dist; electron-builder will fetch " +
