@@ -110,3 +110,34 @@ test('appIconCandidates keeps the documented precedence ladder', () => {
     'all three PNG rungs remain after the ico rungs'
   )
 })
+
+test('appIconCandidates selects Lemon runtime icons for the internal harness with Hermes fallbacks', () => {
+  const mac = appIconCandidates({
+    internalHarness: true,
+    isWindows: false,
+    appRoot: '/Applications/Hermes.app/Contents/Resources',
+    unpackedPathFor: p => `${p}.unpacked`
+  })
+
+  assert.deepEqual(mac, [
+    path.join('/Applications/Hermes.app/Contents/Resources', 'public', 'lemon-apple-touch-icon.png'),
+    path.join('/Applications/Hermes.app/Contents/Resources', 'dist', 'lemon-apple-touch-icon.png'),
+    path.join('/Applications/Hermes.app/Contents/Resources.unpacked', 'dist', 'lemon-apple-touch-icon.png'),
+    path.join('/Applications/Hermes.app/Contents/Resources', 'public', 'apple-touch-icon.png'),
+    path.join('/Applications/Hermes.app/Contents/Resources', 'dist', 'apple-touch-icon.png'),
+    path.join('/Applications/Hermes.app/Contents/Resources.unpacked', 'dist', 'apple-touch-icon.png')
+  ])
+
+  const win = appIconCandidates({
+    internalHarness: true,
+    isWindows: true,
+    appRoot: 'C:\\app',
+    resourcesPath: 'C:\\resources',
+    unpackedPathFor: p => `${p}\\unpacked`
+  })
+
+  assert.equal(win[0], path.join('C:\\resources', 'icon.ico'))
+  assert.equal(win[1], path.join('C:\\app', 'assets', 'lemon-icon.ico'))
+  assert.equal(win.filter(c => c.endsWith('lemon-apple-touch-icon.png')).length, 3)
+  assert.equal(win.filter(c => c.endsWith('apple-touch-icon.png')).length, 6)
+})

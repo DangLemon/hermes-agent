@@ -34,6 +34,23 @@ const stackedTree = {
   ]
 }
 
+const tabbedTreeWithForcedStrip = {
+  type: 'split',
+  id: 'root',
+  orientation: 'row',
+  weights: [1, 3],
+  children: [
+    {
+      type: 'group',
+      id: 'g-sessions',
+      panes: ['sessions', 'hermes-bots:pane'],
+      active: 'hermes-bots:pane',
+      tabStrip: 'always'
+    },
+    { type: 'group', id: 'g-main', panes: ['workspace'], active: 'workspace' }
+  ]
+}
+
 describe('enforced dock (stacked Bots pane → sessions-zone tab, every boot)', () => {
   beforeEach(() => {
     window.localStorage.clear()
@@ -92,6 +109,22 @@ describe('enforced dock (stacked Bots pane → sessions-zone tab, every boot)', 
   async function setup() {
     return setupTree(stackedTree)
   }
+
+  it('prunes a persisted Bots pane in the internal harness so sessions remains the only sidebar tab', async () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+    const { model, tree } = await setupTree(tabbedTreeWithForcedStrip)
+
+    tree.watchContributedPanes()
+
+    const sessionsGroup = model.findGroupOfPane(tree.$layoutTree.get()!, 'sessions')!
+
+    expect(model.allPaneIds(tree.$layoutTree.get()!)).toEqual(['sessions', 'workspace'])
+    expect(sessionsGroup.active).toBe('sessions')
+    expect(sessionsGroup.tabStrip).toBeUndefined()
+    expect(JSON.stringify(JSON.parse(window.localStorage.getItem(TREE_KEY)!))).not.toContain('hermes-bots:pane')
+
+    vi.unstubAllGlobals()
+  })
 
   it('re-homes a stacked bots pane into the sessions tab strip, keeping sessions active', async () => {
     const { model, tree } = await setup()

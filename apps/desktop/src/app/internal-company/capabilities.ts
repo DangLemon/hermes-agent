@@ -33,11 +33,22 @@ export interface InternalCompanyRouteState {
   reservedRoutes?: ReadonlySet<string>
 }
 
-interface HarnessEnv {
+export interface HarnessEnv {
   readonly [key: string]: unknown
 }
 
+export interface HarnessBuildConstants {
+  harness: string
+  showAgents: string
+  showCron: string
+  showMessaging: string
+  showTerminal: string
+  showWebhooks: string
+}
+
 const BASE_ALLOWED_ROUTES = ['/', '/artifacts', '/settings', '/skills'] as const
+const INTERNAL_HARNESS_EXCLUDED_PANES = new Set(['hermes-bots:pane'])
+
 const SESSION_RESERVED_ROUTES = [
   ...BASE_ALLOWED_ROUTES,
   '/agents',
@@ -63,6 +74,28 @@ function envBoolean(env: HarnessEnv, key: string, fallback: boolean): boolean {
   }
 
   return value === '1' || value === 'true' || value === 'yes' || value === 'on'
+}
+
+export function harnessEnvFromBuildConstants(constants: Partial<HarnessBuildConstants> = {}): HarnessEnv {
+  return {
+    VITE_HERMES_DESKTOP_HARNESS: constants.harness ?? '',
+    VITE_HERMES_HARNESS_SHOW_AGENTS: constants.showAgents ?? 'false',
+    VITE_HERMES_HARNESS_SHOW_CRON: constants.showCron ?? 'true',
+    VITE_HERMES_HARNESS_SHOW_MESSAGING: constants.showMessaging ?? 'false',
+    VITE_HERMES_HARNESS_SHOW_TERMINAL: constants.showTerminal ?? 'true',
+    VITE_HERMES_HARNESS_SHOW_WEBHOOKS: constants.showWebhooks ?? 'false'
+  }
+}
+
+export function internalCompanyBuildEnv(): HarnessEnv {
+  return harnessEnvFromBuildConstants({
+    harness: typeof __HERMES_DESKTOP_HARNESS__ === 'string' ? __HERMES_DESKTOP_HARNESS__ : '',
+    showAgents: typeof __HERMES_HARNESS_SHOW_AGENTS__ === 'string' ? __HERMES_HARNESS_SHOW_AGENTS__ : 'false',
+    showCron: typeof __HERMES_HARNESS_SHOW_CRON__ === 'string' ? __HERMES_HARNESS_SHOW_CRON__ : 'true',
+    showMessaging: typeof __HERMES_HARNESS_SHOW_MESSAGING__ === 'string' ? __HERMES_HARNESS_SHOW_MESSAGING__ : 'false',
+    showTerminal: typeof __HERMES_HARNESS_SHOW_TERMINAL__ === 'string' ? __HERMES_HARNESS_SHOW_TERMINAL__ : 'true',
+    showWebhooks: typeof __HERMES_HARNESS_SHOW_WEBHOOKS__ === 'string' ? __HERMES_HARNESS_SHOW_WEBHOOKS__ : 'false'
+  })
 }
 
 export function internalCompanyExpectedFromEnv(env: HarnessEnv): boolean {
@@ -103,7 +136,10 @@ function buildAllowedRoutes(ui: HarnessUiFlags): ReadonlySet<string> {
   return routes
 }
 
-export function initialInternalCompanyCapabilities(expected: boolean, ui: HarnessUiFlags = harnessUiFlagsFromEnv({})): InternalCompanyCapabilityState {
+export function initialInternalCompanyCapabilities(
+  expected: boolean,
+  ui: HarnessUiFlags = harnessUiFlagsFromEnv({})
+): InternalCompanyCapabilityState {
   if (!expected) {
     return {
       allowedRoutes: new Set(),
@@ -140,10 +176,12 @@ export function updateInternalCompanyProvisioning(
   return { ...current, provisioning }
 }
 
-export function harnessProvisioningFromRuntimeReadiness(status: {
-  ready: boolean
-  reason: null | string
-} | null): HarnessProvisioning {
+export function harnessProvisioningFromRuntimeReadiness(
+  status: {
+    ready: boolean
+    reason: null | string
+  } | null
+): HarnessProvisioning {
   if (status === null) {
     return { missing: [], state: 'unknown' }
   }
@@ -173,9 +211,10 @@ export function internalCompanyRouteAllowed(to: string, state: InternalCompanyRo
   return routeSessionIdWithReserved(path, state.reservedRoutes ?? new Set(SESSION_RESERVED_ROUTES)) !== null
 }
 
-export function filterInternalCompanyRoutes(
-  routes: readonly string[],
-  state: InternalCompanyRouteState
-): string[] {
+export function filterInternalCompanyRoutes(routes: readonly string[], state: InternalCompanyRouteState): string[] {
   return routes.filter(route => internalCompanyRouteAllowed(route, state))
+}
+
+export function internalCompanyPaneAllowed(paneId: string, state: InternalCompanyRouteState): boolean {
+  return state.mode !== 'harness' || !INTERNAL_HARNESS_EXCLUDED_PANES.has(paneId)
 }

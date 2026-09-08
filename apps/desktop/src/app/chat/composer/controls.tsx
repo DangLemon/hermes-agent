@@ -38,6 +38,7 @@ export function ComposerControls({
   canSubmit,
   compactModelPill = false,
   conversation,
+  internalWorkspace = false,
   disabled,
   foldVoice = false,
   hasComposerPayload,
@@ -57,6 +58,7 @@ export function ComposerControls({
   disabled: boolean
   foldVoice?: boolean
   hasComposerPayload: boolean
+  internalWorkspace?: boolean
   minimal?: boolean
   state: ChatBarState
   voiceStatus: VoiceStatus
@@ -66,6 +68,8 @@ export function ComposerControls({
 }) {
   const { t } = useI18n()
   const c = t.composer
+  const internalComposer = t.internalWorkspace.composer
+  const internalVoiceLabel = c.voiceControls
   const hudMode = useStore($hudMode)
 
   if (conversation.active) {
@@ -102,6 +106,56 @@ export function ComposerControls({
       <WakeWordButton disabled={disabled} />
     </>
   )
+
+  if (internalWorkspace) {
+    return (
+      <div className="ml-auto flex min-w-0 shrink items-center gap-2">
+        {minimal ? null : (
+          <VoiceMenu
+            autoSpeak={autoSpeak}
+            disabled={disabled}
+            label={internalVoiceLabel}
+            onDictate={onDictate}
+            onStartConversation={conversation.onStart}
+            onToggleAutoSpeak={onToggleAutoSpeak}
+            showLabel
+            state={state}
+            voiceStatus={voiceStatus}
+          />
+        )}
+        {showQueueButton ? (
+          <Tip label={<TipKeybindLabel actionId="composer.queue" text={c.queueMessage} />}>
+            <Button
+              aria-label={c.queueMessage}
+              className={GHOST_ICON_BTN}
+              disabled={disabled}
+              onClick={onQueue}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              <Layers3 className={iconSize.sm} />
+            </Button>
+          </Tip>
+        ) : null}
+        <Tip label={<TipKeybindLabel actionId="composer.send" text={showStop ? c.stop : internalComposer.send} />}>
+          <Button
+            aria-label={showStop ? c.stop : internalComposer.send}
+            className={cn(
+              'h-9 shrink-0 rounded-lg px-4 text-sm font-semibold',
+              'bg-[#322b29] text-white hover:bg-[#403734]',
+              'disabled:bg-[#d9d4cb] disabled:text-white disabled:opacity-100 dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90'
+            )}
+            disabled={disabled || !canSubmit}
+            type="submit"
+          >
+            {showStop ? <span className="block size-2.5 rounded-[0.1875rem] bg-current" /> : internalComposer.send}
+          </Button>
+        </Tip>
+        {hudMode ? <HudWindowButtons /> : null}
+      </div>
+    )
+  }
 
   return (
     <div className="ml-auto flex min-w-0 shrink items-center gap-(--composer-control-gap)">

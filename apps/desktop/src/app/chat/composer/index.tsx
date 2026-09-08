@@ -8,6 +8,7 @@ import { composerFill, composerFloatingStrip, composerSurfaceGlass } from '@/com
 import { Button } from '@/components/ui/button'
 import { Slot as ContribSlot } from '@/contrib/react/slot'
 import { useI18n } from '@/i18n'
+import { appBrand } from '@/lib/app-brand'
 import { chatMessageText } from '@/lib/chat-messages'
 import { PR_COMMENT_URL_RE } from '@/lib/chat-runtime'
 import { sanitizeComposerInput } from '@/lib/composer-input-sanitize'
@@ -93,6 +94,7 @@ export function ChatBar({
   disabled,
   focusKey,
   gateway,
+  homeLayout = false,
   maxRecordingSeconds = 120,
   queueSessionKey,
   sessionId,
@@ -392,6 +394,12 @@ export function ChatBar({
   // Resting / reconnecting / starting placeholder text, re-rolled only on a real
   // conversation change.
   const placeholder = useComposerPlaceholder({ disabled, reconnecting, sessionId })
+
+  const internalWorkspaceComposer = appBrand().mode === 'internal-harness'
+  const internalWorkspaceDockedComposer = internalWorkspaceComposer && !poppedOut
+
+  const composerPlaceholder =
+    internalWorkspaceComposer && !disabled ? t.internalWorkspace.composer.placeholder : placeholder
 
   // Trigger / completion engine: @// detection, the adapter-driven item list,
   // popover selection, and chip insertion. The keydown nav block below consumes
@@ -996,6 +1004,7 @@ export function ChatBar({
 
   const contextMenu = (
     <ContextMenu
+      label={internalWorkspaceComposer ? t.internalWorkspace.composer.attach : undefined}
       onInsertText={insertText}
       onOpenUrlDialog={openUrlDialog}
       onPasteClipboardImage={onPasteClipboardImage}
@@ -1026,6 +1035,7 @@ export function ChatBar({
       disabled={disabled}
       foldVoice={foldVoice}
       hasComposerPayload={hasComposerPayload}
+      internalWorkspace={internalWorkspaceComposer}
       minimal={minimal}
       onDictate={dictate}
       onQueue={queueDraft}
@@ -1036,7 +1046,12 @@ export function ChatBar({
   )
 
   const input = (
-    <div className={cn('relative', stacked ? 'w-full' : 'min-w-(--composer-input-inline-min-width) flex-1')}>
+    <div
+      className={cn(
+        'relative',
+        stacked || internalWorkspaceComposer ? 'w-full' : 'min-w-(--composer-input-inline-min-width) flex-1'
+      )}
+    >
       <div
         aria-disabled={inputDisabled ? true : undefined}
         aria-label={t.composer.message}
@@ -1045,15 +1060,16 @@ export function ChatBar({
         className={cn(
           'min-h-[1.625rem] min-h-(--composer-input-min-height) max-h-(--composer-input-max-height) cursor-text overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] bg-transparent pb-1 pr-1 pt-1 leading-normal text-foreground outline-none disabled:cursor-not-allowed',
           '**:data-ref-text:cursor-default',
-          stacked && 'pl-3',
-          stacked ? 'w-full' : 'min-w-(--composer-input-inline-min-width) flex-1',
+          stacked && !internalWorkspaceComposer && 'pl-3',
+          internalWorkspaceComposer && 'min-h-16 text-[0.95rem] leading-6',
+          stacked || internalWorkspaceComposer ? 'w-full' : 'min-w-(--composer-input-inline-min-width) flex-1',
           // Inside the native Wayland HUD drag region: a drag region swallows
           // the page's mouse input whole, so the input must opt back out or it
           // becomes unclickable. Buttons use the global no-drag rule.
           hudNativeDrag && '[-webkit-app-region:no-drag]'
         )}
         contentEditable={!inputDisabled}
-        data-placeholder={placeholder}
+        data-placeholder={composerPlaceholder}
         data-slot={RICH_INPUT_SLOT}
         onBeforeInput={handleEditorBeforeInput}
         onBlur={() => {
@@ -1163,7 +1179,9 @@ export function ChatBar({
         <div
           className={cn(
             'z-30 flex flex-col',
-            poppedOut ? 'fixed max-w-[calc(100vw-1.5rem)]' : 'absolute bottom-0 left-1/2 max-w-full -translate-x-1/2'
+            poppedOut
+              ? 'fixed max-w-[calc(100vw-1.5rem)]'
+              : cn('absolute left-1/2 max-w-full -translate-x-1/2', homeLayout ? 'bottom-6' : 'bottom-0')
           )}
           data-popped-out={poppedOut ? '' : undefined}
           data-slot="composer-dock"
@@ -1180,7 +1198,14 @@ export function ChatBar({
                   // A compact one-sentence width when floating.
                   ['--composer-popout-width' as string]: `${POPOUT_WIDTH_REM}rem`
                 }
-              : undefined
+              : homeLayout
+                ? {
+                    ['--composer-width' as string]: 'min(48rem, calc(100vw - 4rem))',
+                    ['--composer-control-size' as string]: '2rem',
+                    ['--composer-surface-pad-x' as string]: '0.875rem',
+                    ['--composer-surface-pad-y' as string]: '0.75rem'
+                  }
+                : undefined
           }
         >
           {/* Aligned to the composer SURFACE, which sits inside the composer's
@@ -1303,6 +1328,7 @@ export function ChatBar({
                   // the input/controls row) laid out against that phantom width
                   // and got clipped by overflow-hidden, send button first.
                   'group/composer-surface relative z-4 isolate grid grid-cols-[minmax(0,1fr)] grid-rows-[auto_1fr] overflow-hidden rounded-[inherit] border border-[color-mix(in_srgb,var(--dt-composer-ring)_calc(18%*var(--composer-ring-strength)),var(--dt-input))]',
+                  internalWorkspaceDockedComposer && 'min-h-[7.5rem] shadow-[0_18px_50px_rgba(50,43,41,0.12)]',
                   COMPOSER_DROP_FADE_CLASS,
                   dragActive && COMPOSER_DROP_ACTIVE_CLASS
                 )}
@@ -1334,7 +1360,8 @@ export function ChatBar({
                 />
                 <div
                   className={cn(
-                    'relative z-1 flex min-h-0 w-full flex-col gap-(--composer-row-gap) overflow-hidden rounded-[inherit] px-(--composer-surface-pad-x) py-(--composer-surface-pad-y) transition-opacity duration-200 ease-out',
+                    'relative z-1 flex min-h-0 w-full flex-col overflow-hidden rounded-[inherit] px-(--composer-surface-pad-x) py-(--composer-surface-pad-y) transition-opacity duration-200 ease-out',
+                    internalWorkspaceComposer ? 'gap-3' : 'gap-(--composer-row-gap)',
                     scrolledUp
                       ? 'opacity-30 group-hover/composer:opacity-100 group-focus-within/composer-surface:opacity-100'
                       : 'opacity-100'
@@ -1375,12 +1402,17 @@ export function ChatBar({
                   <div
                     className={cn(
                       'grid w-full',
-                      stacked
-                        ? 'grid-cols-[auto_1fr] gap-(--composer-row-gap) [grid-template-areas:"input_input"_"menu_controls"]'
+                      stacked || internalWorkspaceComposer
+                        ? 'grid-cols-[auto_1fr] gap-3 [grid-template-areas:"input_input"_"menu_controls"]'
                         : 'grid-cols-[auto_1fr_auto] items-center gap-(--composer-control-gap) [grid-template-areas:"menu_input_controls"]'
                     )}
                   >
-                    <div className="flex translate-y-[3px] items-start gap-(--composer-control-gap) self-start [grid-area:menu]">
+                    <div
+                      className={cn(
+                        'flex items-start gap-(--composer-control-gap) self-start [grid-area:menu]',
+                        internalWorkspaceComposer ? 'translate-y-0' : 'translate-y-[3px]'
+                      )}
+                    >
                       {contextMenu}
                       <ContribSlot area={COMPOSER_AREAS.leading} />
                     </div>

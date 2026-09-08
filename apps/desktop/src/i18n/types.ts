@@ -7,7 +7,7 @@
 
 import type { TipId } from '@/lib/tips/catalog'
 
-export type Locale = 'en' | 'zh' | 'zh-hant' | 'ja' | 'ar' | 'ru'
+export type Locale = 'en' | 'zh' | 'zh-hant' | 'ja' | 'ar' | 'ru' | 'vi'
 
 export type ToolTitleKey =
   | 'browser_click'
@@ -2126,6 +2126,64 @@ export interface Translations {
       done: string
     }
     markAllRead: string
+  }
+
+  internalWorkspace: {
+    brand: {
+      name: string
+      tagline: string
+    }
+    nav: {
+      chat: string
+      skills: string
+      documents: string
+      schedule: string
+      settings: string
+    }
+    actions: {
+      newConversation: string
+      openSettings: string
+    }
+    home: {
+      heading: string
+      supporting: string
+    }
+    starters: {
+      writeContent: { title: string; description: string; draft: string }
+      summarizeDocument: { title: string; description: string; draft: string }
+      analyzeReport: { title: string; description: string; draft: string }
+      planWork: { title: string; description: string; draft: string }
+    }
+    composer: {
+      placeholder: string
+      send: string
+      attach: string
+      fast: string
+      deep: string
+    }
+    skills: {
+      title: string
+      description: string
+      skillsTab: string
+      connectionsTab: string
+      createSkill: string
+      searchPlaceholder: string
+      defaultSummary: string
+      enabledLabel: string
+      technicalDetails: string
+      connect: string
+      signIn: string
+      retry: string
+    }
+    sidebar: {
+      recent: string
+      emptyRecent: string
+      searchPlaceholder: string
+      noMatches: (query: string) => string
+      pinnedHint: string
+      emptyProject: string
+    }
+    technicalDetails: string
   }
 
   composer: {

@@ -7,6 +7,7 @@ import { useLocation } from 'react-router'
 
 import { $internalCompanyCapabilities } from '@/app/internal-company/store'
 import { PlatformAvatar } from '@/app/messaging/platform-icon'
+import { BrandMark } from '@/components/brand-mark'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
@@ -26,6 +27,7 @@ import { Tip, TipKeybindLabel } from '@/components/ui/tooltip'
 import { useContributions } from '@/contrib/react/use-contributions'
 import { searchSessions, type SessionInfo, type SessionSearchResult } from '@/hermes'
 import { useI18n } from '@/i18n'
+import { appBrand } from '@/lib/app-brand'
 import { comboTokens } from '@/lib/keybinds/combo'
 import { resolveProfileColor } from '@/lib/profile-color'
 import { sessionMatchesSearch } from '@/lib/session-search'
@@ -141,6 +143,8 @@ import {
   CRON_ROUTE,
   internalCompanyRouteAllowed,
   MESSAGING_ROUTE,
+  NEW_CHAT_ROUTE,
+  SETTINGS_ROUTE,
   SIDEBAR_NAV_AREA,
   type SidebarNavContribution,
   SKILLS_ROUTE
@@ -192,6 +196,80 @@ const NON_SESSION_LOAD_STEP = 10
 // screen — has the connection to itself first.
 const PROJECT_TREE_WARM_MS = 2_000
 
+function HarnessSidebarHeader({
+  onNewSessionClick,
+  onNewSessionPointerDown
+}: {
+  onNewSessionClick: () => void
+  onNewSessionPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => void
+}) {
+  const brand = appBrand()
+  const { t } = useI18n()
+  const [markFailed, setMarkFailed] = useState(false)
+
+  if (brand.mode !== 'internal-harness') {
+    return null
+  }
+
+  return (
+    <div className="lemon-workspace-sidebar-header [-webkit-app-region:no-drag]">
+      <div className="flex min-w-0 items-center gap-2.5">
+        {!markFailed && brand.markSrc ? (
+          <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-md bg-transparent">
+            <img alt="" className="size-full object-contain" onError={() => setMarkFailed(true)} src={brand.markSrc} />
+          </span>
+        ) : (
+          <BrandMark className="size-8 rounded-md" />
+        )}
+        <div className="min-w-0">
+          <div className="truncate text-[0.9375rem] leading-5 font-semibold text-[var(--lemon-workspace-ink)]">
+            {t.internalWorkspace.brand.name}
+          </div>
+          <div className="truncate text-[0.75rem] leading-4 text-[var(--lemon-workspace-ink-muted)]">
+            {t.internalWorkspace.brand.tagline}
+          </div>
+        </div>
+      </div>
+      <Button
+        className="mt-4 h-10 w-full justify-start rounded-lg bg-[var(--lemon-workspace-brand)] px-3 text-[0.875rem] font-semibold text-[var(--lemon-workspace-brand-ink)] hover:bg-[var(--lemon-workspace-brand-hover)] hover:text-[var(--lemon-workspace-brand-ink)] focus-visible:ring-[var(--lemon-workspace-focus)]"
+        onClick={onNewSessionClick}
+        onPointerDown={onNewSessionPointerDown}
+        type="button"
+      >
+        <Codicon name="add" size="0.875rem" />
+        {t.internalWorkspace.actions.newConversation}
+      </Button>
+    </div>
+  )
+}
+
+function HarnessBrandLockup() {
+  const brand = appBrand()
+  const [lockupFailed, setLockupFailed] = useState(false)
+
+  if (brand.mode !== 'internal-harness') {
+    return null
+  }
+
+  return (
+    <div className="mb-2 flex h-10 w-fit items-center gap-2 rounded-md bg-[var(--lemon-brand-primary)] px-3 text-[var(--lemon-brand-primary-foreground)] [-webkit-app-region:no-drag]">
+      {!lockupFailed && brand.lockupSrc ? (
+        <img
+          alt={brand.displayName}
+          className="h-7 w-auto max-w-[10rem] object-contain"
+          onError={() => setLockupFailed(true)}
+          src={brand.lockupSrc}
+        />
+      ) : (
+        <>
+          <BrandMark className="size-6 rounded-sm" />
+          <span className="truncate text-[0.74rem] font-semibold uppercase tracking-[0.16em]">{brand.displayName}</span>
+        </>
+      )}
+    </div>
+  )
+}
+
 const SIDEBAR_NAV: SidebarNavItem[] = [
   {
     id: 'new-session',
@@ -227,6 +305,43 @@ const SIDEBAR_NAV: SidebarNavItem[] = [
     icon: props => <Codicon name="watch" {...props} />,
     route: CRON_ROUTE,
     keybindActionId: 'nav.cron'
+  }
+]
+
+const HARNESS_SIDEBAR_NAV: SidebarNavItem[] = [
+  {
+    id: 'chat',
+    label: '',
+    icon: props => <Codicon name="comment-discussion" {...props} />,
+    route: NEW_CHAT_ROUTE
+  },
+  {
+    id: 'skills',
+    label: '',
+    icon: props => <Codicon name="symbol-misc" {...props} />,
+    route: SKILLS_ROUTE,
+    keybindActionId: 'nav.skills'
+  },
+  {
+    id: 'documents',
+    label: '',
+    icon: props => <Codicon name="files" {...props} />,
+    route: ARTIFACTS_ROUTE,
+    keybindActionId: 'nav.artifacts'
+  },
+  {
+    id: 'schedule',
+    label: '',
+    icon: props => <Codicon name="calendar" {...props} />,
+    route: CRON_ROUTE,
+    keybindActionId: 'nav.cron'
+  },
+  {
+    id: 'settings',
+    label: '',
+    icon: props => <Codicon name="settings-gear" {...props} />,
+    route: SETTINGS_ROUTE,
+    keybindActionId: 'nav.settings'
   }
 ]
 
@@ -338,6 +453,7 @@ export function ChatSidebar({
   // Contributed nav rows (plugins pairing a page with a sidebar entry) render
   // below the built-ins with the same chrome; active = at their route.
   const internalCompany = useStore($internalCompanyCapabilities)
+  const harnessMode = internalCompany.mode === 'harness'
   const navContributions = useContributions(SIDEBAR_NAV_AREA)
 
   const contributedNav = useMemo<SidebarNavItem[]>(
@@ -1474,6 +1590,21 @@ export function ChatSidebar({
       })
     )
 
+  const navItems = harnessMode ? HARNESS_SIDEBAR_NAV : SIDEBAR_NAV
+  const harnessNavCopy = t.internalWorkspace.nav
+
+  const handlePlainNewSession = () => {
+    $newChatProfile.set(null)
+    onNavigate(SIDEBAR_NAV[0]!)
+  }
+
+  const handleNewSessionPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+    startNewSessionDrag(placement => {
+      $newChatProfile.set(null)
+      onNewSessionSplit(placement.dir, { anchor: placement.anchor, before: placement.before })
+    }, event)
+  }
+
   return (
     <Sidebar
       className={cn(
@@ -1488,20 +1619,37 @@ export function ChatSidebar({
       data-tip-region=""
       data-tour="sessions-sidebar"
     >
-      <SidebarContent className="gap-0 overflow-hidden bg-transparent px-2.5">
-        <SidebarGroup className="shrink-0 p-0 pb-2 pt-[calc(var(--titlebar-height)+0.375rem)]">
+      <SidebarContent className={cn('gap-0 overflow-hidden bg-transparent px-2.5', harnessMode && 'px-3')}>
+        <SidebarGroup
+          className={cn(
+            'shrink-0 p-0 pb-2 pt-[calc(var(--titlebar-height)+0.375rem)]',
+            harnessMode && 'pb-3 pt-[calc(var(--titlebar-height)+0.75rem)]'
+          )}
+        >
           <SidebarGroupContent>
-            <SidebarMenu className="gap-px">
-              {[...SIDEBAR_NAV, ...contributedNav]
+            {harnessMode ? (
+              <HarnessSidebarHeader
+                onNewSessionClick={handlePlainNewSession}
+                onNewSessionPointerDown={handleNewSessionPointerDown}
+              />
+            ) : (
+              <HarnessBrandLockup />
+            )}
+            <SidebarMenu className={cn('gap-px', harnessMode && 'mt-3 gap-1')}>
+              {[...navItems, ...contributedNav]
                 .filter(item => !item.route || internalCompanyRouteAllowed(item.route, internalCompany))
                 .map(item => {
                   const isInteractive = Boolean(item.action) || Boolean(item.route)
 
                   const active =
+                    (item.id === 'chat' && currentView === 'chat') ||
                     (item.id === 'skills' && currentView === 'skills') ||
                     (item.id === 'messaging' && currentView === 'messaging') ||
                     (item.id === 'artifacts' && currentView === 'artifacts') ||
+                    (item.id === 'documents' && currentView === 'artifacts') ||
                     (item.id === 'cron' && currentView === 'cron') ||
+                    (item.id === 'schedule' && currentView === 'cron') ||
+                    (item.id === 'settings' && currentView === 'settings') ||
                     // Contributed rows light up at their own route.
                     (Boolean(item.route) && pathname === item.route)
 
@@ -1519,8 +1667,12 @@ export function ChatSidebar({
                         // top rows. Same carve-out as USER_BUBBLE_BASE_CLASS in
                         // thread.tsx.
                         'flex h-7 w-full justify-start gap-2 rounded-md border border-transparent px-2 text-left text-[0.8125rem] font-medium text-(--ui-text-secondary) transition-colors duration-100 ease-out [-webkit-app-region:no-drag] hover:bg-(--ui-control-hover-background) hover:text-foreground hover:transition-none',
+                        harnessMode &&
+                          'h-9 rounded-lg px-2.5 text-[0.875rem] text-[var(--lemon-workspace-ink-muted)] hover:bg-[var(--lemon-workspace-control-hover)] hover:text-[var(--lemon-workspace-ink)]',
                         active &&
-                          'border-(--ui-stroke-tertiary) bg-(--ui-control-active-background) text-foreground shadow-none hover:border-(--ui-stroke-tertiary)!',
+                          (harnessMode
+                            ? 'border-[var(--lemon-workspace-selected-border)] bg-[var(--lemon-workspace-selected)] text-[var(--lemon-workspace-ink)] shadow-none hover:border-[var(--lemon-workspace-selected-border)]! hover:bg-[var(--lemon-workspace-selected)]'
+                            : 'border-(--ui-stroke-tertiary) bg-(--ui-control-active-background) text-foreground shadow-none hover:border-(--ui-stroke-tertiary)!'),
                         !isInteractive &&
                           'cursor-default hover:border-transparent hover:bg-transparent hover:text-inherit'
                       )}
@@ -1558,13 +1710,15 @@ export function ChatSidebar({
                         }, event)
                       }}
                       tooltip={
-                        item.keybindActionId
+                        item.keybindActionId && !harnessMode
                           ? {
                               children: (
                                 <TipKeybindLabel actionId={item.keybindActionId} text={s.nav[item.id] ?? item.label} />
                               )
                             }
-                          : (s.nav[item.id] ?? item.label)
+                          : harnessMode
+                            ? (harnessNavCopy[item.id as keyof typeof harnessNavCopy] ?? s.nav[item.id] ?? item.label)
+                            : (s.nav[item.id] ?? item.label)
                       }
                       type="button"
                     >
@@ -1579,7 +1733,9 @@ export function ChatSidebar({
                         Its own `sidebar-nav-` namespace: the overlay nav owns
                         `nav-<id>`, and both are on screen with Settings open. */}
                       <span className="min-w-0 truncate" data-tip-arrow-only="" data-tour={`sidebar-nav-${item.id}`}>
-                        {s.nav[item.id] ?? item.label}
+                        {harnessMode
+                          ? (harnessNavCopy[item.id as keyof typeof harnessNavCopy] ?? s.nav[item.id] ?? item.label)
+                          : (s.nav[item.id] ?? item.label)}
                       </span>
                       {isNewSession && (
                         <KbdGroup
@@ -1598,7 +1754,15 @@ export function ChatSidebar({
                       {isNewSession || item.route ? (
                         <ContextMenu>
                           <ContextMenuTrigger asChild>{button}</ContextMenuTrigger>
-                          <ContextMenuContent aria-label={s.nav[item.id] ?? item.label}>
+                          <ContextMenuContent
+                            aria-label={
+                              harnessMode
+                                ? (harnessNavCopy[item.id as keyof typeof harnessNavCopy] ??
+                                  s.nav[item.id] ??
+                                  item.label)
+                                : (s.nav[item.id] ?? item.label)
+                            }
+                          >
                             <SplitSubmenu
                               kit={CONTEXT_SPLIT_KIT}
                               label={s.row.openInSplit}
@@ -1628,7 +1792,7 @@ export function ChatSidebar({
               aria-label={s.searchAria}
               inputRef={searchInputRef}
               onChange={setSearchQuery}
-              placeholder={s.searchPlaceholder}
+              placeholder={harnessMode ? t.internalWorkspace.sidebar.searchPlaceholder : s.searchPlaceholder}
               value={searchQuery}
             />
           </div>
@@ -1649,11 +1813,11 @@ export function ChatSidebar({
                     <SidebarSessionSkeletons />
                   ) : (
                     <div className="wrap-anywhere grid min-h-24 place-items-center rounded-lg px-2 text-center text-xs text-(--ui-text-tertiary)">
-                      {s.noMatch(trimmedQuery)}
+                      {harnessMode ? t.internalWorkspace.sidebar.noMatches(trimmedQuery) : s.noMatch(trimmedQuery)}
                     </div>
                   )
                 }
-                label={s.results}
+                label={harnessMode ? t.sidebar.results : s.results}
                 onArchiveSession={onArchiveSession}
                 onBranchSession={onBranchSession}
                 onDeleteSession={onDeleteSession}
@@ -1675,7 +1839,7 @@ export function ChatSidebar({
                 contentClassName="flex flex-col gap-px rounded-lg pb-2 pt-1"
                 dndSensors={dndSensors}
                 emptyState={<SidebarPinnedEmptyState />}
-                label={s.pinned}
+                label={harnessMode ? t.sidebar.pinned : s.pinned}
                 onArchiveSession={onArchiveSession}
                 onBranchSession={onBranchSession}
                 onDeleteSession={onDeleteSession}
@@ -1728,7 +1892,9 @@ export function ChatSidebar({
                           ? s.noFilterMatches
                           : pinnedSessions.length > 0
                             ? s.allPinned
-                            : s.noSessions}
+                            : harnessMode
+                              ? t.internalWorkspace.sidebar.emptyRecent
+                              : s.noSessions}
                     </div>
                   )
                 }
@@ -1845,7 +2011,7 @@ export function ChatSidebar({
                     )}
                   </div>
                 }
-                label={sessionsLabel}
+                label={harnessMode ? t.internalWorkspace.sidebar.recent : sessionsLabel}
                 labelMeta={
                   worktreeGroupingActive ? (
                     reposScanning && !projectsSkeletonVisible ? (
@@ -1949,7 +2115,7 @@ export function ChatSidebar({
 
         {!showSessionSections && <SidebarBlankState onNewProject={openProjectCreate} />}
 
-        <div className="shrink-0 px-0.5 pb-1 pt-0.5">
+        <div className={cn('shrink-0 px-0.5 pb-1 pt-0.5', harnessMode && 'hidden')}>
           <ProfileRail />
         </div>
       </SidebarContent>

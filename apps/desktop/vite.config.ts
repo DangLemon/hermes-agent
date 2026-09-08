@@ -31,31 +31,67 @@ const real = (p: string): string | null => {
   }
 }
 
-
 const HARNESS_UI_KEYS = ['agents', 'cron', 'messaging', 'terminal', 'webhooks'] as const
 
+const HARNESS_DEFINE_BY_UI_KEY = {
+  agents: '__HERMES_HARNESS_SHOW_AGENTS__',
+  cron: '__HERMES_HARNESS_SHOW_CRON__',
+  messaging: '__HERMES_HARNESS_SHOW_MESSAGING__',
+  terminal: '__HERMES_HARNESS_SHOW_TERMINAL__',
+  webhooks: '__HERMES_HARNESS_SHOW_WEBHOOKS__'
+} as const
+
+const DEFAULT_HARNESS_UI = {
+  agents: false,
+  cron: true,
+  messaging: false,
+  terminal: true,
+  webhooks: false
+} as const
+
+function defaultHarnessViteDefines() {
+  return {
+    __HERMES_DESKTOP_HARNESS__: JSON.stringify(''),
+    __HERMES_HARNESS_SHOW_AGENTS__: JSON.stringify(String(DEFAULT_HARNESS_UI.agents)),
+    __HERMES_HARNESS_SHOW_CRON__: JSON.stringify(String(DEFAULT_HARNESS_UI.cron)),
+    __HERMES_HARNESS_SHOW_MESSAGING__: JSON.stringify(String(DEFAULT_HARNESS_UI.messaging)),
+    __HERMES_HARNESS_SHOW_TERMINAL__: JSON.stringify(String(DEFAULT_HARNESS_UI.terminal)),
+    __HERMES_HARNESS_SHOW_WEBHOOKS__: JSON.stringify(String(DEFAULT_HARNESS_UI.webhooks))
+  }
+}
+
 function harnessViteDefines(env: Record<string, string | undefined>) {
+  const define: Record<string, string> = defaultHarnessViteDefines()
   const selected = String(env.HERMES_DESKTOP_HARNESS_CONFIG || '').trim()
 
-  if (!selected) {return {}}
+  if (!selected) {
+    return define
+  }
 
   try {
     const resource = JSON.parse(fs.readFileSync(path.resolve(selected), 'utf8'))
 
-    if (resource?.schemaVersion !== 1 || resource?.profile !== 'internal' || !resource?.ui) {return {}}
-
-    const define: Record<string, string> = {
-      'import.meta.env.VITE_HERMES_DESKTOP_HARNESS': JSON.stringify('internal')
+    if (resource?.schemaVersion !== 1 || resource?.profile !== 'internal' || !resource?.ui) {
+      return define
     }
 
+    define.__HERMES_DESKTOP_HARNESS__ = JSON.stringify('internal')
+    define['import.meta.env.VITE_HERMES_DESKTOP_HARNESS'] = JSON.stringify('internal')
+
     for (const key of HARNESS_UI_KEYS) {
-      if (typeof resource.ui[key] !== 'boolean') {return {}}
-      define[`import.meta.env.VITE_HERMES_HARNESS_SHOW_${key.toUpperCase()}`] = JSON.stringify(String(resource.ui[key]))
+      if (typeof resource.ui[key] !== 'boolean') {
+        return defaultHarnessViteDefines()
+      }
+
+      const value = JSON.stringify(String(resource.ui[key]))
+
+      define[HARNESS_DEFINE_BY_UI_KEY[key]] = value
+      define[`import.meta.env.VITE_HERMES_HARNESS_SHOW_${key.toUpperCase()}`] = value
     }
 
     return define
   } catch {
-    return {}
+    return define
   }
 }
 
@@ -112,9 +148,15 @@ const emojibaseAssets = () => ({
     server.middlewares.use('/emojibase', (req, res, next) => {
       const rel = (req.url ?? '').split('?')[0].replace(/^\/+/, '')
 
-      if (!emojibaseDir || !EMOJIBASE_PATH.test(rel)) {return next()}
+      if (!emojibaseDir || !EMOJIBASE_PATH.test(rel)) {
+        return next()
+      }
+
       fs.readFile(path.join(emojibaseDir, rel), (err: unknown, buf: Buffer) => {
-        if (err) {return next()}
+        if (err) {
+          return next()
+        }
+
         res.setHeader('Content-Type', 'application/json')
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
         res.end(buf)
@@ -122,7 +164,9 @@ const emojibaseAssets = () => ({
     })
   },
   generateBundle(this: { emitFile: (asset: { type: 'asset'; fileName: string; source: Uint8Array }) => void }) {
-    if (!emojibaseDir) {return}
+    if (!emojibaseDir) {
+      return
+    }
 
     for (const rel of ['en/data.json', 'en/messages.json', 'en/shortcodes/emojibase.json']) {
       this.emitFile({

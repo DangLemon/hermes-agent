@@ -934,7 +934,12 @@ const BOOT_FAKE_STEP_MS = (() => {
   return Math.max(120, raw)
 })()
 
-const APP_NAME = process.env.HERMES_DESKTOP_APP_NAME || 'Hermes'
+const APP_NAME = process.env.HERMES_DESKTOP_APP_NAME || (INTERNAL_DESKTOP_HARNESS.requested ? 'Lemon AI' : 'Hermes')
+
+const APP_COPYRIGHT = INTERNAL_DESKTOP_HARNESS.requested
+  ? 'Copyright © 2026 Lemon Digital'
+  : 'Copyright © 2026 Nous Research'
+
 const HUD_WINDOW_TITLE = `${APP_NAME} HUD`
 const TITLEBAR_HEIGHT = 34
 const MACOS_TRAFFIC_LIGHTS_HEIGHT = 14
@@ -957,6 +962,7 @@ const WINDOW_BUTTON_POSITION = {
 // resolveAppIcon (decoding probe): existence alone is not proof the bytes
 // decode, and an undecodable icon must never take the main process down.
 const APP_ICON_PATHS = appIconCandidates({
+  internalHarness: INTERNAL_DESKTOP_HARNESS.requested,
   isWindows: IS_WINDOWS,
   appRoot: APP_ROOT,
   resourcesPath: process.resourcesPath,
@@ -1357,7 +1363,7 @@ if (IS_WINDOWS) {
 app.setAboutPanelOptions({
   applicationName: APP_NAME,
   applicationVersion: resolveHermesVersion(),
-  copyright: 'Copyright © 2026 Nous Research'
+  copyright: APP_COPYRIGHT
 })
 
 // Custom scheme for streaming audio/video into the renderer. Local paths read
@@ -17531,7 +17537,7 @@ function showAboutPanelFresh() {
       applicationVersion: skew.outOfSync
         ? `${resolveHermesVersion()} — app build out of date, update the desktop app`
         : resolveHermesVersion(),
-      copyright: 'Copyright © 2026 Nous Research'
+      copyright: APP_COPYRIGHT
     })
     app.showAboutPanel()
   })

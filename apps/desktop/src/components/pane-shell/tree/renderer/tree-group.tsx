@@ -12,6 +12,8 @@
 import { useStore } from '@nanostores/react'
 import { type CSSProperties, Fragment, type ReactNode, type RefObject, useEffect, useRef, useState } from 'react'
 
+import { internalCompanyPaneAllowed } from '@/app/internal-company/capabilities'
+import { $internalCompanyCapabilities } from '@/app/internal-company/store'
 import { ActionsContextMenu, type MenuKit, renderActionItem } from '@/components/ui/actions-menu'
 import { Codicon } from '@/components/ui/codicon'
 import { DecodeText } from '@/components/ui/decode-text'
@@ -239,7 +241,8 @@ export function TreeGroup({
   // missing on an inactive tile tab whose zone-active was the uncloseable
   // workspace).
   const [menuPane, setMenuPane] = useState<string | undefined>(undefined)
-  const panes = useContributions('panes')
+  const internalCompany = useStore($internalCompanyCapabilities)
+  const panes = useContributions('panes').filter(pane => internalCompanyPaneAllowed(pane.id, internalCompany))
   // Coarse drag flag only (set once at drag start/end). The per-frame drop
   // HINT lives in ZoneDropOverlay so a moving pointer re-renders the tiny
   // overlay, not every zone's header/body (and not the menuDirections walk).
@@ -328,13 +331,17 @@ export function TreeGroup({
   // it is the resolver's call, not this component's — see strip-visibility.ts
   // for the precedence. The same resolver answers for the toggle command, so
   // the keystroke and the screen always agree about which way "toggle" points.
-  const stripVisible = tabStripVisibleForZone({
-    active: activeId,
-    isCollapsePane,
-    mode: node.tabStrip,
-    paneFor,
-    shown
-  })
+  const internalSessionsSingleton = internalCompany.mode === 'harness' && shown.length === 1 && shown[0] === 'sessions'
+
+  const stripVisible =
+    !internalSessionsSingleton &&
+    tabStripVisibleForZone({
+      active: activeId,
+      isCollapsePane,
+      mode: node.tabStrip,
+      paneFor,
+      shown
+    })
 
   // A group collapses ALONG its parent split's axis. In a row that means the
   // WIDTH collapses — a full-width horizontal header would strand a tall

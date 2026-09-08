@@ -40,9 +40,16 @@ async def get_config_raw(profile: Optional[str] = None):
     def _run():
         with _profile_scope(profile):
             path = get_config_path()
+            raw_config = read_raw_config()
+        display = raw_config.get("display") if isinstance(raw_config, dict) else None
+        explicit_display_language = isinstance(display, dict) and "language" in display
         if not path.exists():
-            return {"yaml": "", "path": str(path)}
-        return {"yaml": path.read_text(encoding="utf-8"), "path": str(path)}
+            return {"yaml": "", "path": str(path), "explicit_display_language": explicit_display_language}
+        return {
+            "yaml": path.read_text(encoding="utf-8"),
+            "path": str(path),
+            "explicit_display_language": explicit_display_language,
+        }
 
     return await asyncio.to_thread(_run)
 

@@ -2484,6 +2484,80 @@ export const en: Translations = {
     markAllRead: 'Mark all as read'
   },
 
+  internalWorkspace: {
+    brand: {
+      name: 'Lemon AI',
+      tagline: 'Work assistant'
+    },
+    nav: {
+      chat: 'Chat',
+      skills: 'Skills',
+      documents: 'Documents',
+      schedule: 'Work calendar',
+      settings: 'Settings'
+    },
+    actions: {
+      newConversation: 'New conversation',
+      openSettings: 'Open settings'
+    },
+    home: {
+      heading: 'What do you need help with today?',
+      supporting: 'Write content, find information, or handle documents — start with a request.'
+    },
+    starters: {
+      writeContent: {
+        title: 'Write content',
+        description: 'Draft a post, email, or short announcement.',
+        draft: 'Help me write content for '
+      },
+      summarizeDocument: {
+        title: 'Summarize a document',
+        description: 'Pull out the main points and next actions.',
+        draft: 'Summarize this document and list the key points: '
+      },
+      analyzeReport: {
+        title: 'Analyze a report',
+        description: 'Review numbers, risks, and what changed.',
+        draft: 'Analyze this report and point out the important changes: '
+      },
+      planWork: {
+        title: 'Plan work',
+        description: 'Turn an idea into steps, owners, and timing.',
+        draft: 'Create a work plan for '
+      }
+    },
+    composer: {
+      placeholder: 'Enter your request…',
+      send: 'Send',
+      attach: 'Attach',
+      fast: 'Fast',
+      deep: 'Deep work'
+    },
+    skills: {
+      title: 'Skills',
+      description: 'Choose skills that help Lemon AI work with you.',
+      skillsTab: 'Skills',
+      connectionsTab: 'Connections',
+      createSkill: 'Create skill',
+      searchPlaceholder: 'Search skills…',
+      defaultSummary: 'Select a skill to view its summary and actions.',
+      enabledLabel: 'Enabled',
+      technicalDetails: 'Technical details',
+      connect: 'Connect',
+      signIn: 'Sign in',
+      retry: 'Retry'
+    },
+    sidebar: {
+      recent: 'Recent',
+      emptyRecent: 'No conversations yet',
+      searchPlaceholder: 'Search conversations…',
+      noMatches: query => `No conversations match “${query}”.`,
+      pinnedHint: 'Pin an important conversation',
+      emptyProject: 'No conversations yet'
+    },
+    technicalDetails: 'Technical details'
+  },
+
   composer: {
     message: 'Message',
     wakingProfile: profile => `Waking up ${profile}…`,

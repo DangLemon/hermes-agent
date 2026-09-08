@@ -6,13 +6,16 @@ import {
   harnessProvisioningFromRuntimeReadiness,
   harnessUiFlagsFromEnv,
   initialInternalCompanyCapabilities,
+  internalCompanyBuildEnv,
   type InternalCompanyCapabilityState,
   internalCompanyExpectedFromEnv,
   updateInternalCompanyProvisioning
 } from './capabilities'
 
-export const internalCompanyExpectedFromBuild = internalCompanyExpectedFromEnv(import.meta.env)
-export const internalCompanyUiFlagsFromBuild = harnessUiFlagsFromEnv(import.meta.env)
+const internalCompanyEnvFromBuild = internalCompanyBuildEnv()
+
+export const internalCompanyExpectedFromBuild = internalCompanyExpectedFromEnv(internalCompanyEnvFromBuild)
+export const internalCompanyUiFlagsFromBuild = harnessUiFlagsFromEnv(internalCompanyEnvFromBuild)
 
 export const $internalCompanyCapabilities = atom<InternalCompanyCapabilityState>(
   initialInternalCompanyCapabilities(internalCompanyExpectedFromBuild, internalCompanyUiFlagsFromBuild)
@@ -23,7 +26,9 @@ export function setInternalCompanyCapabilitiesForTest(state: InternalCompanyCapa
 }
 
 export function resetInternalCompanyCapabilities(): void {
-  $internalCompanyCapabilities.set(initialInternalCompanyCapabilities(internalCompanyExpectedFromBuild, internalCompanyUiFlagsFromBuild))
+  $internalCompanyCapabilities.set(
+    initialInternalCompanyCapabilities(internalCompanyExpectedFromBuild, internalCompanyUiFlagsFromBuild)
+  )
 }
 
 export const resetInternalCompanyCapabilitiesForTest = resetInternalCompanyCapabilities

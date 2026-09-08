@@ -3,6 +3,7 @@ import { normalize } from '@/lib/text'
 import type { Locale } from './types'
 
 export const DEFAULT_LOCALE: Locale = 'en'
+export const INTERNAL_WORKSPACE_DEFAULT_LOCALE: Locale = 'vi'
 
 export const LOCALE_OPTIONS = [
   {
@@ -40,6 +41,12 @@ export const LOCALE_OPTIONS = [
     name: 'Русский',
     englishName: 'Russian',
     configValue: 'ru'
+  },
+  {
+    id: 'vi',
+    name: 'Tiếng Việt',
+    englishName: 'Vietnamese',
+    configValue: 'vi'
   }
 ] as const satisfies readonly { configValue: string; englishName: string; id: Locale; name: string }[]
 
@@ -94,7 +101,13 @@ const LOCALE_ALIASES: Record<string, Locale> = {
   russian: 'ru',
   'russian-russian': 'ru',
   русский: 'ru',
-  руский: 'ru'
+  руский: 'ru',
+  vi: 'vi',
+  'vi-vn': 'vi',
+  vi_vn: 'vi',
+  vietnamese: 'vi',
+  'tiếng việt': 'vi',
+  'tieng viet': 'vi'
 }
 
 export function isLocale(value: unknown): value is Locale {
@@ -102,11 +115,15 @@ export function isLocale(value: unknown): value is Locale {
 }
 
 export function normalizeLocale(value: unknown): Locale {
+  return normalizeLocaleWithDefault(value, DEFAULT_LOCALE)
+}
+
+export function normalizeLocaleWithDefault(value: unknown, fallback: Locale): Locale {
   if (typeof value !== 'string') {
-    return DEFAULT_LOCALE
+    return fallback
   }
 
-  return LOCALE_ALIASES[normalize(value)] ?? DEFAULT_LOCALE
+  return LOCALE_ALIASES[normalize(value)] ?? fallback
 }
 
 export function isSupportedLocaleValue(value: unknown): boolean {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// set-exe-identity.mjs — stamp the Hermes icon + version metadata onto the
+// set-exe-identity.mjs - stamp the selected icon + version metadata onto the
 // built Hermes.exe using rcedit, completely decoupled from electron-builder's
 // signing path.
 //
@@ -35,41 +35,59 @@
 // (after-pack.mjs) swallows the rejection so a stamp failure never fails an
 // otherwise-good build (worst case: stock icon, not a broken app).
 
-import { resolve, join } from 'node:path'
+import { resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 
 import { rcedit } from 'rcedit'
 
 import { isMain } from './utils.mjs'
+import { exeIdentityForMode, resolveDesktopBuildMode } from './desktop-build-identity.mjs'
 
-// Stamp the Hermes icon + identity onto `exe`. Resolves on success, throws on
+function stampOptions(options) {
+  if (typeof options === 'string') {
+    return { desktopRoot: options }
+  }
+  return options ?? {}
+}
+
+export function resolveExeIdentity({ desktopRoot = resolve(import.meta.dirname, '..'), env = process.env, harnessResource } = {}) {
+  return exeIdentityForMode(resolveDesktopBuildMode({ env, harnessResource }), desktopRoot)
+}
+
+// Stamp the selected icon + identity onto `exe`. Resolves on success, throws on
 // failure. `desktopRoot` defaults to this script's package root so the icon and
 // the rcedit dependency resolve regardless of cwd.
-async function stampExeIdentity(exe, desktopRoot = resolve(import.meta.dirname, '..')) {
+async function stampExeIdentity(exe, options) {
+  const {
+    desktopRoot = resolve(import.meta.dirname, '..'),
+    env = process.env,
+    harnessResource,
+    rcedit: editExecutable = rcedit
+  } = stampOptions(options)
+
   if (!exe || !existsSync(exe)) {
     throw new Error(`target exe not found: ${exe}`)
   }
 
-  // Icon lives at apps/desktop/assets/icon.ico
-  const icon = join(desktopRoot, 'assets', 'icon.ico')
-  if (!existsSync(icon)) {
-    throw new Error(`icon not found: ${icon}`)
+  const identity = resolveExeIdentity({ desktopRoot, env, harnessResource })
+  if (!existsSync(identity.icon)) {
+    throw new Error(`icon not found: ${identity.icon}`)
   }
 
   console.log(`[set-exe-identity] stamping ${exe}`)
-  console.log(`[set-exe-identity] icon: ${icon}`)
+  console.log(`[set-exe-identity] icon: ${identity.icon}`)
 
-  await rcedit(exe, {
-    icon,
+  await editExecutable(exe, {
+    icon: identity.icon,
     'version-string': {
-      ProductName: 'Hermes',
-      FileDescription: 'Hermes',
-      CompanyName: 'Nous Research',
-      LegalCopyright: 'Copyright (c) 2026 Nous Research'
+      ProductName: identity.productName,
+      FileDescription: identity.fileDescription,
+      CompanyName: identity.companyName,
+      LegalCopyright: identity.legalCopyright
     }
   })
 
-  console.log('[set-exe-identity] done — Hermes icon + identity stamped')
+  console.log(`[set-exe-identity] done - ${identity.productName} icon + identity stamped`)
 }
 
 export { stampExeIdentity }

@@ -20,6 +20,7 @@ import { ErrorState } from '@/components/ui/error-state'
 import { TitleMenuTrigger } from '@/components/ui/title-menu-trigger'
 import { type HermesGateway } from '@/hermes'
 import { useI18n } from '@/i18n'
+import { appBrand } from '@/lib/app-brand'
 import type { ChatMessage } from '@/lib/chat-messages'
 import { NEW_SESSION_TITLE, quickModelOptions, sessionTitle } from '@/lib/chat-runtime'
 import { useIncrementalExternalStoreRuntime } from '@/lib/incremental-external-store-runtime'
@@ -556,6 +557,7 @@ const ChatViewContent = memo(function ChatViewContent({
   // to send to until a retry rebinds one. Watch windows are pure spectators of a
   // subagent run driven elsewhere — no composer, transcript is read-only.
   const showChatBar = !loadingSession && !resumeExhausted && !isWatchWindow()
+  const internalHome = showIntro && appBrand().mode === 'internal-harness'
   const threadKey = selectedSessionId || activeSessionId || (isRoutedSessionView ? location.pathname : 'new')
 
   const modelOptionsQuery = useQuery<ModelOptionsResponse>({
@@ -648,6 +650,7 @@ const ChatViewContent = memo(function ChatViewContent({
         'relative isolate flex h-full min-w-0 flex-col overflow-hidden bg-(--ui-chat-surface-background)',
         className
       )}
+      data-chat-empty-home={internalHome ? '' : undefined}
       data-chat-surface=""
       data-chat-unfocused={surfaceFocused ? undefined : ''}
       data-composer-surface-id={composerSurfaceId}
@@ -689,7 +692,17 @@ const ChatViewContent = memo(function ChatViewContent({
             clampToComposer={showChatBar}
             cwd={currentCwd}
             gateway={gateway}
-            intro={showIntro ? { personality: introPersonality, seed: introSeed } : undefined}
+            intro={
+              showIntro
+                ? {
+                    composerDisabled: !showChatBar || !gatewayOpen,
+                    composerTarget: composerScope.target,
+                    homeLayout: internalHome,
+                    personality: introPersonality,
+                    seed: introSeed
+                  }
+                : undefined
+            }
             loading={threadLoading}
             onBranchInNewChat={onBranchInNewChat}
             onCancel={haltRun}
@@ -750,6 +763,7 @@ const ChatViewContent = memo(function ChatViewContent({
               disabled={!gatewayOpen}
               focusKey={activeSessionId}
               gateway={gateway}
+              homeLayout={internalHome}
               maxRecordingSeconds={maxVoiceRecordingSeconds}
               onAddContextRef={onAddContextRef}
               onAddUrl={onAddUrl}

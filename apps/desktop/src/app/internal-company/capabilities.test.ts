@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   filterInternalCompanyRoutes,
+  harnessEnvFromBuildConstants,
   harnessProvisioningFromRuntimeReadiness,
   harnessUiFlagsFromEnv,
   initialInternalCompanyCapabilities,
@@ -46,6 +47,7 @@ describe('internal company static harness capabilities', () => {
       VITE_HERMES_HARNESS_SHOW_TERMINAL: '0',
       VITE_HERMES_HARNESS_SHOW_WEBHOOKS: 'yes'
     })
+
     const state = initialInternalCompanyCapabilities(true, ui)
 
     expect(state.terminalAllowed).toBe(false)
@@ -105,5 +107,25 @@ describe('internal company static harness capabilities', () => {
     expect(internalCompanyExpectedFromEnv({ VITE_HERMES_DESKTOP_HARNESS: '1' })).toBe(false)
     expect(internalCompanyExpectedFromEnv({ VITE_HERMES_INTERNAL_COMPANY_EXPECTED: '1' })).toBe(false)
     expect(internalCompanyExpectedFromEnv({ VITE_HERMES_DESKTOP_HARNESS: 'upstream' })).toBe(false)
+  })
+
+  it('maps configured Vite build constants into the same env contract used by runtime helpers', () => {
+    const env = harnessEnvFromBuildConstants({
+      harness: 'internal',
+      showAgents: 'true',
+      showCron: 'false',
+      showMessaging: 'true',
+      showTerminal: 'false',
+      showWebhooks: 'true'
+    })
+
+    expect(internalCompanyExpectedFromEnv(env)).toBe(true)
+    expect(harnessUiFlagsFromEnv(env)).toEqual({
+      agents: true,
+      cron: false,
+      messaging: true,
+      terminal: false,
+      webhooks: true
+    })
   })
 })

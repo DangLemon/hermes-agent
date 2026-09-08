@@ -72,6 +72,7 @@ import type { SetStatusbarItemGroup } from '../shell/statusbar-controls'
 
 import { EmbeddedHubPicker } from './embedded-hub-picker'
 import { McpTab } from './mcp-tab'
+import { parseSkillPresentation, type SkillPresentation } from './skill-presentation'
 import { $skillsSortDesc, $toolsetsSortDesc } from './store'
 
 // 'hub' is gone as a top-level tab — the Skills Hub browser lives inside the
@@ -121,6 +122,8 @@ async function loadToolCalls(
 const usageOf = (skill: SkillInfo): number => (typeof skill.usage === 'number' ? skill.usage : 0)
 
 const categoryFor = (skill: SkillInfo): string => asText(skill.category) || 'general'
+
+const skillDisplayName = (name: string): string => prettyName(name.replace(/-/g, ' '))
 
 // Row subtitle: category, with non-default origins badged.
 function skillSubtitle(skill: SkillInfo): React.ReactNode {
@@ -706,6 +709,7 @@ export function SkillsView({
   const [createSkillContent, setCreateSkillContent] = useState(() => skillTemplate())
   const [createSkillError, setCreateSkillError] = useState<null | string>(null)
   const [createSkillSaving, setCreateSkillSaving] = useState(false)
+  const [restoreCreateFocus, setRestoreCreateFocus] = useState(false)
   const createSkillErrorId = 'skill-create-error'
   const newSkillButtonRef = useRef<HTMLButtonElement | null>(null)
   const createGeneration = useRef(0)
@@ -726,11 +730,15 @@ export function SkillsView({
     createGeneration.current += 1
     setCreateEditorOpen(false)
     setCreateSkillError(null)
-
-    if (restoreFocus) {
-      newSkillButtonRef.current?.focus()
-    }
+    setRestoreCreateFocus(restoreFocus)
   }, [])
+
+  useEffect(() => {
+    if (!createEditorOpen && restoreCreateFocus) {
+      newSkillButtonRef.current?.focus()
+      setRestoreCreateFocus(false)
+    }
+  }, [createEditorOpen, restoreCreateFocus])
 
   // A profile switch swaps the backend under the open editor/archive dialog —
   // their targets belong to profile A, so a save/archive would hit B. Drop them
@@ -835,7 +843,11 @@ export function SkillsView({
       const created = await createSkill(name, createSkillContent, category || null, submittedScopeProfile)
       const createdName = created.name || name
 
-      if (skillEditorEpoch.current !== epoch || createGeneration.current !== generation || scopeKey !== submittedScopeKey) {
+      if (
+        skillEditorEpoch.current !== epoch ||
+        createGeneration.current !== generation ||
+        scopeKey !== submittedScopeKey
+      ) {
         return
       }
 
@@ -852,7 +864,11 @@ export function SkillsView({
         refreshedSkills = null
       }
 
-      if (skillEditorEpoch.current !== epoch || createGeneration.current !== generation || scopeKey !== submittedScopeKey) {
+      if (
+        skillEditorEpoch.current !== epoch ||
+        createGeneration.current !== generation ||
+        scopeKey !== submittedScopeKey
+      ) {
         return
       }
 
@@ -878,15 +894,23 @@ export function SkillsView({
       })
 
       if (effectiveMode === 'skills') {
-        newSkillButtonRef.current?.focus()
+        setRestoreCreateFocus(true)
       }
     } catch (err) {
-      if (skillEditorEpoch.current === epoch && createGeneration.current === generation && scopeKey === submittedScopeKey) {
+      if (
+        skillEditorEpoch.current === epoch &&
+        createGeneration.current === generation &&
+        scopeKey === submittedScopeKey
+      ) {
         setCreateSkillError(readableError(err, 'Failed to create skill.').message)
         notifyError(err, name)
       }
     } finally {
-      if (skillEditorEpoch.current === epoch && createGeneration.current === generation && scopeKey === submittedScopeKey) {
+      if (
+        skillEditorEpoch.current === epoch &&
+        createGeneration.current === generation &&
+        scopeKey === submittedScopeKey
+      ) {
         setCreateSkillSaving(false)
       }
     }
@@ -914,18 +938,27 @@ export function SkillsView({
     </DetailPane>
   )
 
-  const createNameInvalid = createSkillError === 'Skill name is required.' || Boolean(createSkillError?.toLowerCase().includes('skill named'))
+  const createNameInvalid =
+    createSkillError === 'Skill name is required.' || Boolean(createSkillError?.toLowerCase().includes('skill named'))
 
   const createContentInvalid =
     createSkillError === 'SKILL.md content is required.' ||
     createSkillError === 'SKILL.md must include YAML frontmatter.' ||
     Boolean(createSkillError && !createNameInvalid)
 
+  const createSkillTriggerLabel = harnessMode ? t.internalWorkspace.skills.createSkill : 'New skill'
+
   const createSkillPane = createEditorOpen && (
     <DetailPane
       actions={
         <>
-          <Button disabled={createSkillSaving} onClick={() => closeCreateEditor({ restoreFocus: true })} size="xs" type="button" variant="text">
+          <Button
+            disabled={createSkillSaving}
+            onClick={() => closeCreateEditor({ restoreFocus: true })}
+            size="xs"
+            type="button"
+            variant="text"
+          >
             {t.common.cancel}
           </Button>
           <Button disabled={createSkillSaving} form="skill-create-form" size="xs" type="submit">
@@ -935,7 +968,11 @@ export function SkillsView({
       }
       id="skill-create-editor"
       onClose={() => closeCreateEditor({ restoreFocus: true })}
-      title={<span className="text-[0.68rem] font-normal text-muted-foreground/60">New skill/SKILL.md</span>}
+      title={
+        <span className="text-[0.68rem] font-normal text-muted-foreground/60">
+          {createSkillTriggerLabel}/SKILL.md
+        </span>
+      }
     >
       <form
         className="flex h-full min-h-0 flex-col gap-2 p-3"
@@ -956,7 +993,9 @@ export function SkillsView({
               onChange={event => {
                 const next = event.target.value
                 setCreateSkillName(next)
-                setCreateSkillContent(current => (createContentGenerated.current ? skillTemplate(next.trim() || 'my-skill') : current))
+                setCreateSkillContent(current =>
+                  createContentGenerated.current ? skillTemplate(next.trim() || 'my-skill') : current
+                )
               }}
               placeholder="my-skill"
               value={createSkillName}
@@ -1108,22 +1147,28 @@ export function SkillsView({
       // MCP manages a handful of entries with the editor right there —
       // searching it is noise.
       searchHidden={effectiveMode === 'mcp'}
-      searchHints={searchHints}
-      searchPlaceholder={effectiveMode === 'skills' ? t.skills.searchSkills : t.skills.searchToolsets}
+      searchHints={harnessMode ? [] : searchHints}
+      searchPlaceholder={effectiveMode === 'skills' ? (harnessMode ? t.internalWorkspace.skills.searchPlaceholder : t.skills.searchSkills) : t.skills.searchToolsets}
       searchTrailingAction={
-        effectiveMode === 'skills' ? (
+        effectiveMode === 'skills' && !createEditorOpen ? (
           <Button onClick={openCreateEditor} ref={newSkillButtonRef} size="xs" variant="text">
-            New skill
+            {createSkillTriggerLabel}
           </Button>
         ) : undefined
       }
       searchValue={query}
       tabs={[
-        { id: 'skills', label: t.skills.tabSkills, meta: skills?.length ?? null },
+        { id: 'skills', label: harnessMode ? t.internalWorkspace.skills.skillsTab : t.skills.tabSkills, meta: skills?.length ?? null },
         ...(harnessMode
           ? []
-          : [{ id: 'toolsets', label: t.skills.tabToolsets, meta: toolsets ? visibleToolsetCount(toolsets) : null }]),
-        { id: 'mcp', label: t.skills.tabMcp }
+          : [
+              {
+                id: 'toolsets',
+                label: t.skills.tabToolsets,
+                meta: toolsets ? visibleToolsetCount(toolsets) : null
+              }
+            ]),
+        { id: 'mcp', label: harnessMode ? t.internalWorkspace.skills.connectionsTab : t.skills.tabMcp }
       ]}
     >
       {/* One shared column: the scope selector sits above whichever tab is
@@ -1132,6 +1177,16 @@ export function SkillsView({
       <div className="flex h-full flex-col">
         {profileScopeSelector}
         <div className="flex min-h-0 flex-1 flex-col">
+          {harnessMode && effectiveMode === 'skills' && (
+            <header className="shrink-0 px-8 pb-4 pt-2 max-sm:px-4">
+              <h2 className="text-[2rem] font-semibold leading-tight tracking-normal text-foreground">
+                {t.internalWorkspace.skills.title}
+              </h2>
+              <p className="mt-1 max-w-2xl text-[0.95rem] leading-6 text-(--ui-text-tertiary)">
+                {t.internalWorkspace.skills.description}
+              </p>
+            </header>
+          )}
           <div className={effectiveMode === 'skills' ? 'min-h-40 flex-1 overflow-hidden' : 'min-h-0 flex-1'}>
             {effectiveMode === 'mcp' ? (
               // The gateway instance backs ONLY the live `reload.mcp` RPC, and
@@ -1202,7 +1257,7 @@ export function SkillsView({
                         }}
                         onToggle={enabled => void handleToggleSkill(skill, enabled)}
                         subtitle={skillSubtitle(skill)}
-                        title={skill.name}
+                        title={harnessMode ? skillDisplayName(skill.name) : skill.name}
                         toggleLabel={skill.name}
                       />
                     ))}
@@ -1236,7 +1291,7 @@ export function SkillsView({
                           key={skill.identifier}
                           onSelect={() => setSelectedOfficial(skill.identifier)}
                           subtitle={prettyName(skill.category)}
-                          title={skill.name}
+                          title={harnessMode ? skillDisplayName(skill.name) : skill.name}
                         />
                       )
                     })}
@@ -1245,6 +1300,7 @@ export function SkillsView({
                     {activeOfficial ? (
                       <OfficialSkillDetail
                         installing={runningInstalls.has(activeOfficial.identifier)}
+                        internal={harnessMode}
                         onInstall={() => handleInstallOfficial(activeOfficial)}
                         profile={scopeProfile}
                         skill={activeOfficial}
@@ -1252,6 +1308,7 @@ export function SkillsView({
                     ) : (
                       activeSkill && (
                         <SkillDetail
+                          internal={harnessMode}
                           onArchive={() => setArchiveTarget(activeSkill.name)}
                           onEdit={() => void openSkillEditor(activeSkill.name)}
                           profile={scopeProfile}
@@ -1322,7 +1379,11 @@ export function SkillsView({
               `profile` prop into each install call, and remounting on scope
               change would reload the whole site for no data benefit. */}
           {!harnessMode && hubMounted && (
-            <EmbeddedHubPicker hidden={effectiveMode !== 'skills'} installedNames={installedSkillNames} profile={scopeProfile} />
+            <EmbeddedHubPicker
+              hidden={effectiveMode !== 'skills'}
+              installedNames={installedSkillNames}
+              profile={scopeProfile}
+            />
           )}
         </div>
         {createSkillPane}
@@ -1386,52 +1447,14 @@ function DetailHeader({
   )
 }
 
-// Frontmatter parse for display: the YAML block between the leading `---`
-// fences, flattened to top-level `key: value` rows (nested blocks render as
-// their raw indented text). Display-only — never fed back to the backend.
-function parseFrontmatter(content: string): { body: string; meta: [string, string][] } {
-  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(content)
-
-  if (!match) {
-    return { body: content, meta: [] }
-  }
-
-  const meta: [string, string][] = []
-  let currentKey: null | string = null
-  let block: string[] = []
-
-  const flush = () => {
-    if (currentKey !== null) {
-      meta.push([currentKey, block.join('\n').trim()])
-    }
-
-    currentKey = null
-    block = []
-  }
-
-  for (const line of match[1].split(/\r?\n/)) {
-    const kv = /^(\w[\w-]*):\s?(.*)$/.exec(line)
-
-    if (kv) {
-      flush()
-      currentKey = kv[1]
-      block = kv[2] ? [kv[2]] : []
-    } else if (currentKey !== null) {
-      block.push(line.replace(/^ {2}/, ''))
-    }
-  }
-
-  flush()
-
-  return { body: content.slice(match[0].length), meta }
-}
-
 function SkillDetail({
+  internal,
   onArchive,
   onEdit,
   profile,
   skill
 }: {
+  internal: boolean
   onArchive: () => void
   onEdit: () => void
   profile?: ProfileScope
@@ -1442,19 +1465,20 @@ function SkillDetail({
   // and hub skills are managed by their sources.
   const editable = skill.provenance === 'agent'
 
-  // The FULL skill — frontmatter metadata + complete SKILL.md body — for any
-  // provenance, scoped to the Capabilities profile selector. The row list only
-  // carries name/description; the pane shows the whole thing.
+  // Raw SKILL.md is fetched for the closed technical disclosure. Edit/save
+  // still uses getLearningNode so the original source round-trips unchanged.
   const contentQuery = useQuery({
     queryKey: ['skill-content', skill.name, profileScopeKey(profile)],
     queryFn: () => getSkillContent(skill.name, profile),
     staleTime: 60_000
   })
 
-  const parsed = useMemo(
-    () => (contentQuery.data ? parseFrontmatter(contentQuery.data.content) : null),
+  const presentation = useMemo(
+    () => (contentQuery.data ? parseSkillPresentation(contentQuery.data.content) : null),
     [contentQuery.data]
   )
+
+  const title = internal ? skillDisplayName(skill.name) : skill.name
 
   return (
     <>
@@ -1470,9 +1494,32 @@ function SkillDetail({
             )}
           </>
         }
-        title={skill.name}
+        title={title}
       />
-      {editable && (
+      {internal ? (
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <span className="font-medium text-foreground">{t.internalWorkspace.skills.enabledLabel}</span>
+          <span
+            className={
+              skill.enabled
+                ? 'rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300'
+                : 'rounded-full bg-(--ui-bg-quinary) px-2 py-1 text-xs font-medium text-(--ui-text-tertiary)'
+            }
+          >
+            {skill.enabled ? t.common.on : t.common.off}
+          </span>
+          {editable && (
+            <>
+              <Button onClick={onEdit} size="xs" variant="textStrong">
+                {t.skills.edit}
+              </Button>
+              <Button className="text-destructive hover:text-destructive" onClick={onArchive} size="xs" variant="text">
+                {t.skills.archive}
+              </Button>
+            </>
+          )}
+        </div>
+      ) : editable ? (
         <div className="flex items-center gap-2">
           <Button onClick={onEdit} size="xs" variant="text">
             {t.skills.edit}
@@ -1481,26 +1528,18 @@ function SkillDetail({
             {t.skills.archive}
           </Button>
         </div>
-      )}
-      {parsed && parsed.meta.length > 0 && (
-        <div className="grid gap-1 rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-quinary) p-3">
-          {parsed.meta.map(([key, value]) => (
-            <div className="flex gap-2 text-[0.68rem] leading-4" key={key}>
-              <span className="w-24 shrink-0 font-medium text-(--ui-text-tertiary)">{key}</span>
-              <span className="min-w-0 whitespace-pre-wrap break-words text-(--ui-text-secondary)">{value}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      ) : null}
       {contentQuery.isLoading ? (
         <CountSkeleton />
-      ) : parsed ? (
-        <pre
-          className="overflow-auto whitespace-pre-wrap wrap-break-word rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-quinary) p-3 font-mono text-[0.68rem] leading-relaxed"
-          data-selectable-text="true"
-        >
-          {parsed.body.trim() || t.skills.noDescription}
-        </pre>
+      ) : presentation ? (
+        internal ? (
+          <SkillTechnicalDisclosure label={t.internalWorkspace.skills.technicalDetails} presentation={presentation} />
+        ) : (
+          <>
+            <SkillMetadataPanel presentation={presentation} />
+            <SkillBodyPre>{presentation.body.trim() || t.skills.noDescription}</SkillBodyPre>
+          </>
+        )
       ) : null}
     </>
   )
@@ -1510,11 +1549,13 @@ function SkillDetail({
 // via the hub preview endpoint (same resolver an install uses), plus the same
 // install button as the row.
 function OfficialSkillDetail({
+  internal,
   installing,
   onInstall,
   profile,
   skill
 }: {
+  internal: boolean
   installing: boolean
   onInstall: () => void
   profile?: ProfileScope
@@ -1529,10 +1570,12 @@ function OfficialSkillDetail({
     retry: false
   })
 
-  const parsed = useMemo(
-    () => (previewQuery.data?.skill_md ? parseFrontmatter(previewQuery.data.skill_md) : null),
+  const presentation = useMemo(
+    () => (previewQuery.data?.skill_md ? parseSkillPresentation(previewQuery.data.skill_md) : null),
     [previewQuery.data]
   )
+
+  const title = internal ? skillDisplayName(skill.name) : skill.name
 
   return (
     <>
@@ -1544,17 +1587,71 @@ function OfficialSkillDetail({
             <PanelPill tone="muted">{t.skills.officialPill}</PanelPill>
           </>
         }
-        title={skill.name}
+        title={title}
       />
-      <div className="flex items-center gap-2">
+      <div
+        className={
+          internal
+            ? 'flex items-center gap-2'
+            : 'rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-secondary) p-4'
+        }
+      >
         <Button disabled={installing} onClick={onInstall} size="xs" variant="textStrong">
           {installing && <Loader2 className="size-3 animate-spin" />}
           {installing ? t.skills.hub.installing : t.skills.hub.install}
         </Button>
       </div>
-      {parsed && parsed.meta.length > 0 && (
-        <div className="grid gap-1 rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-quinary) p-3">
-          {parsed.meta.map(([key, value]) => (
+      {previewQuery.isLoading ? (
+        <CountSkeleton />
+      ) : presentation ? (
+        internal ? (
+          <SkillTechnicalDisclosure label={t.internalWorkspace.skills.technicalDetails} presentation={presentation} />
+        ) : (
+          <>
+            <SkillMetadataPanel presentation={presentation} />
+            <SkillBodyPre>{presentation.body.trim() || t.skills.noDescription}</SkillBodyPre>
+          </>
+        )
+      ) : null}
+    </>
+  )
+}
+
+function SkillMetadataPanel({ presentation }: { presentation: SkillPresentation }) {
+  if (presentation.meta.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="grid gap-1 rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-quinary) p-3">
+      {presentation.meta.map(([key, value]) => (
+        <div className="flex gap-2 text-[0.68rem] leading-4" key={key}>
+          <span className="w-24 shrink-0 font-medium text-(--ui-text-tertiary)">{key}</span>
+          <span className="min-w-0 whitespace-pre-wrap break-words text-(--ui-text-secondary)">{value}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function SkillBodyPre({ children }: { children: React.ReactNode }) {
+  return (
+    <pre
+      className="overflow-auto whitespace-pre-wrap wrap-break-word rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-quinary) p-3 font-mono text-[0.68rem] leading-relaxed"
+      data-selectable-text="true"
+    >
+      {children}
+    </pre>
+  )
+}
+
+function SkillTechnicalDisclosure({ label, presentation }: { label: string; presentation: SkillPresentation }) {
+  return (
+    <details className="rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-quinary) p-3">
+      <summary className="cursor-pointer select-none text-sm font-medium text-(--ui-text-secondary)">{label}</summary>
+      {presentation.meta.length > 0 && (
+        <div className="mt-3 grid gap-1 border-b border-(--ui-stroke-tertiary) pb-3">
+          {presentation.meta.map(([key, value]) => (
             <div className="flex gap-2 text-[0.68rem] leading-4" key={key}>
               <span className="w-24 shrink-0 font-medium text-(--ui-text-tertiary)">{key}</span>
               <span className="min-w-0 whitespace-pre-wrap break-words text-(--ui-text-secondary)">{value}</span>
@@ -1562,17 +1659,13 @@ function OfficialSkillDetail({
           ))}
         </div>
       )}
-      {previewQuery.isLoading ? (
-        <CountSkeleton />
-      ) : parsed ? (
-        <pre
-          className="overflow-auto whitespace-pre-wrap wrap-break-word rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-quinary) p-3 font-mono text-[0.68rem] leading-relaxed"
-          data-selectable-text="true"
-        >
-          {parsed.body.trim() || t.skills.noDescription}
-        </pre>
-      ) : null}
-    </>
+      <pre
+        className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap wrap-break-word rounded-md bg-(--ui-bg-secondary) p-3 font-mono text-[0.68rem] leading-relaxed"
+        data-selectable-text="true"
+      >
+        {presentation.raw}
+      </pre>
+    </details>
   )
 }
 
