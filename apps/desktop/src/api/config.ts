@@ -6,6 +6,7 @@ import type {
   EnvVarInfo,
   HermesConfig,
   HermesConfigRecord,
+  HermesRawConfigResponse,
   LogsResponse,
   OAuthPollResponse,
   OAuthProvidersResponse,
@@ -72,6 +73,13 @@ export function getHermesConfigRecord(profile?: ProfileScope): Promise<HermesCon
   return window.hermesDesktop.api<HermesConfigRecord>({
     ...capabilityScoped(profile),
     path: '/api/config'
+  })
+}
+
+export function getHermesRawConfig(profile?: ProfileScope): Promise<HermesRawConfigResponse> {
+  return window.hermesDesktop.api<HermesRawConfigResponse>({
+    ...capabilityScoped(profile),
+    path: '/api/config/raw'
   })
 }
 

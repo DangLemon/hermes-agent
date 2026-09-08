@@ -22,6 +22,8 @@ import { ACTIVE_ICON_BTN, GHOST_ICON_BTN } from './control-classes'
 import type { ChatBarState, VoiceStatus } from './types'
 
 export interface VoiceMenuProps {
+  label?: string
+  showLabel?: boolean
   autoSpeak: boolean
   disabled: boolean
   state: ChatBarState
@@ -49,6 +51,8 @@ export interface VoiceMenuProps {
 export function VoiceMenu({
   autoSpeak,
   disabled,
+  label,
+  showLabel = false,
   state,
   voiceStatus,
   onDictate,
@@ -74,7 +78,8 @@ export function VoiceMenu({
         : c.voiceDictation
 
   const wakeLabel = wakeListening ? c.wakeWordListening(phrase) : c.wakeWordOff(phrase)
-  const triggerLabel = dictating ? dictationLabel : wakeListening ? wakeLabel : c.voiceControls
+  const menuLabel = label ?? c.voiceControls
+  const triggerLabel = dictating ? dictationLabel : wakeListening ? wakeLabel : menuLabel
 
   return (
     <DropdownMenu>
@@ -82,9 +87,14 @@ export function VoiceMenu({
         <DropdownMenuTrigger asChild>
           <Button
             aria-label={triggerLabel}
-            className={cn(GHOST_ICON_BTN, 'p-0', active && ACTIVE_ICON_BTN)}
+            className={cn(
+              showLabel
+                ? 'h-(--composer-control-size) shrink-0 gap-1.5 rounded-md px-2.5 text-xs font-medium text-(--ui-text-secondary) hover:bg-(--chrome-action-hover) hover:text-foreground'
+                : cn(GHOST_ICON_BTN, 'p-0'),
+              active && ACTIVE_ICON_BTN
+            )}
             disabled={disabled}
-            size="icon"
+            size={showLabel ? undefined : 'icon'}
             type="button"
             variant="ghost"
           >
@@ -97,6 +107,7 @@ export function VoiceMenu({
             ) : (
               <Codicon name="mic" size="0.875rem" />
             )}
+            {showLabel ? <span>{menuLabel}</span> : null}
           </Button>
         </DropdownMenuTrigger>
       </Tip>

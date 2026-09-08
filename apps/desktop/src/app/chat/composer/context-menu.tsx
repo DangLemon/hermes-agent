@@ -26,6 +26,7 @@ const SNIPPET_KEYS = ['codeReview', 'implementationPlan', 'explainThis']
 
 export function ContextMenu({
   state,
+  label,
   onInsertText,
   onOpenUrlDialog,
   onPasteClipboardImage,
@@ -43,24 +44,28 @@ export function ContextMenu({
   // `composer.attachments` contributions — plugin/core-registered rows that
   // extend this menu through the same registry as every other surface.
   const attachmentProviders = useComposerAttachmentProviders()
+  const triggerLabel = label ?? state.tools.label
 
   return (
     <>
       <DropdownMenu>
-        <Tip label={state.tools.label} side="top">
+        <Tip label={triggerLabel} side="top">
           <DropdownMenuTrigger asChild>
             <Button
-              aria-label={state.tools.label}
+              aria-label={triggerLabel}
               className={cn(
-                GHOST_ICON_BTN,
+                label
+                  ? 'h-(--composer-control-size) shrink-0 gap-1.5 rounded-md px-2.5 text-xs font-medium text-(--ui-text-secondary) hover:bg-(--chrome-action-hover) hover:text-foreground'
+                  : GHOST_ICON_BTN,
                 'data-[state=open]:bg-(--chrome-action-hover) data-[state=open]:text-foreground'
               )}
               disabled={!state.tools.enabled}
-              size="icon"
+              size={label ? undefined : 'icon'}
               type="button"
               variant="ghost"
             >
               <Codicon name="add" size="0.875rem" />
+              {label ? <span>{label}</span> : null}
             </Button>
           </DropdownMenuTrigger>
         </Tip>
@@ -185,6 +190,7 @@ interface ContextMenuItemProps {
 }
 
 interface ContextMenuProps {
+  label?: string
   onInsertText: (text: string) => void
   onOpenUrlDialog: () => void
   onPasteClipboardImage?: (opts?: { silent?: boolean }) => Promise<boolean> | void

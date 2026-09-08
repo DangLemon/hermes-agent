@@ -370,6 +370,12 @@ export interface HermesConfig {
 
 export type HermesConfigRecord = Record<string, unknown>
 
+export interface HermesRawConfigResponse {
+  explicit_display_language?: boolean
+  path: string
+  yaml: string
+}
+
 export interface ModelInfoResponse {
   auto_context_length?: number
   capabilities?: Record<string, unknown>

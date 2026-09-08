@@ -11,10 +11,10 @@ import {
 
 import { TitlebarControls, type TitlebarTool } from './titlebar-controls'
 
-function renderControls(tools: TitlebarTool[]) {
+function renderControls(tools: TitlebarTool[], leftTools: TitlebarTool[] = []) {
   return render(
     <MemoryRouter>
-      <TitlebarControls onOpenSettings={vi.fn()} tools={tools} />
+      <TitlebarControls leftTools={leftTools} onOpenSettings={vi.fn()} tools={tools} />
     </MemoryRouter>
   )
 }
@@ -33,5 +33,23 @@ describe('TitlebarControls internal harness policy', () => {
 
     expect(screen.queryByRole('button', { name: 'Profiles' })).toBeNull()
     expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it('keeps only sidebar and settings controls in the internal harness titlebar', () => {
+    setInternalCompanyCapabilitiesForTest(initialInternalCompanyCapabilities(true))
+
+    renderControls(
+      [{ icon: <span />, id: 'pane-devtools', label: 'Devtools' }],
+      [{ icon: <span />, id: 'workspace-tool', label: 'Workspace tool' }]
+    )
+
+    expect(screen.getByRole('button', { name: 'Hide sidebar' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Open settings' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Swap sidebar sides' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'HUD mode' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Mute haptics' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Show right sidebar' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Workspace tool' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Devtools' })).toBeNull()
   })
 })

@@ -1,26 +1,50 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 
-import { getHermesConfigRecord, type HermesConfigRecord, saveHermesConfig } from '@/hermes'
+import {
+  captureCapabilityScope,
+  getHermesConfigRecord,
+  getHermesRawConfig,
+  type HermesConfigRecord,
+  type ProfileScope,
+  saveHermesConfig
+} from '@/hermes'
+import { appBrandForEnv } from '@/lib/app-brand'
+import type { HermesRawConfigResponse } from '@/types/hermes'
 
 import { TRANSLATIONS } from './catalog'
-import { DEFAULT_LOCALE, localeConfigValue, normalizeLocale } from './languages'
+import {
+  DEFAULT_LOCALE,
+  INTERNAL_WORKSPACE_DEFAULT_LOCALE,
+  isSupportedLocaleValue,
+  localeConfigValue,
+  normalizeLocale,
+  normalizeLocaleWithDefault
+} from './languages'
 import { setRuntimeI18nLocale } from './runtime'
 import type { Locale, Translations } from './types'
 
 export { LOCALE_META } from './languages'
 
 export interface I18nConfigClient {
-  getConfig: () => Promise<HermesConfigRecord>
+  getConfig: (scope?: ProfileScope) => Promise<HermesConfigRecord>
+  getRawConfig?: (scope?: ProfileScope) => Promise<HermesRawConfigResponse>
   saveConfig: (config: HermesConfigRecord) => Promise<{ ok: boolean }>
 }
 
 const defaultConfigClient: I18nConfigClient = {
-  getConfig: () => {
+  getConfig: scope => {
     if (typeof window === 'undefined' || !window.hermesDesktop?.api) {
       return Promise.resolve({})
     }
 
-    return getHermesConfigRecord()
+    return getHermesConfigRecord(scope)
+  },
+  getRawConfig: scope => {
+    if (typeof window === 'undefined' || !window.hermesDesktop?.api) {
+      return Promise.resolve({ explicit_display_language: false, path: '', yaml: '' })
+    }
+
+    return getHermesRawConfig(scope)
   },
   saveConfig: config => {
     if (typeof window === 'undefined' || !window.hermesDesktop?.api) {
@@ -66,6 +90,32 @@ function applyDocumentLocale(locale: Locale) {
   document.documentElement.dir = RTL_LOCALES.has(locale) ? 'rtl' : 'ltr'
 }
 
+function defaultLocaleForWorkspace(): Locale {
+  return appBrandForEnv().mode === 'internal-harness' ? INTERNAL_WORKSPACE_DEFAULT_LOCALE : DEFAULT_LOCALE
+}
+
+function isInternalWorkspace(): boolean {
+  return appBrandForEnv().mode === 'internal-harness'
+}
+
+function resolveConfiguredLocale(value: unknown): Locale {
+  if (isSupportedLocaleValue(value)) {
+    return normalizeLocale(value)
+  }
+
+  return defaultLocaleForWorkspace()
+}
+
+function resolveLoadedLocale(config: HermesConfigRecord, rawConfig?: HermesRawConfigResponse): Locale {
+  const configuredLanguage = getConfigDisplayLanguage(config)
+
+  if (isInternalWorkspace() && rawConfig?.explicit_display_language === false) {
+    return INTERNAL_WORKSPACE_DEFAULT_LOCALE
+  }
+
+  return resolveConfiguredLocale(configuredLanguage)
+}
+
 export interface I18nContextValue {
   configLoadError: Error | null
   isLoadingConfig: boolean
@@ -93,7 +143,10 @@ export interface I18nProviderProps {
 }
 
 export function I18nProvider({ children, configClient = defaultConfigClient, initialLocale }: I18nProviderProps) {
-  const [locale, setLocaleState] = useState<Locale>(() => normalizeLocale(initialLocale))
+  const [locale, setLocaleState] = useState<Locale>(() =>
+    normalizeLocaleWithDefault(initialLocale, defaultLocaleForWorkspace())
+  )
+
   const [isLoadingConfig, setIsLoadingConfig] = useState(false)
   const [isSavingLocale, setIsSavingLocale] = useState(false)
   const [configLoadError, setConfigLoadError] = useState<Error | null>(null)
@@ -117,17 +170,28 @@ export function I18nProvider({ children, configClient = defaultConfigClient, ini
     setIsLoadingConfig(true)
     setConfigLoadError(null)
 
+    const configScope = captureCapabilityScope()
+
     configClient
-      .getConfig()
-      .then(config => {
-        if (!cancelled) {
-          setLocaleState(normalizeLocale(getConfigDisplayLanguage(config)))
+      .getConfig(configScope)
+      .then(async config => {
+        try {
+          const rawConfig = await configClient.getRawConfig?.(configScope)
+
+          if (!cancelled) {
+            setLocaleState(resolveLoadedLocale(config, rawConfig))
+          }
+        } catch (error) {
+          if (!cancelled) {
+            setConfigLoadError(toError(error))
+            setLocaleState(resolveConfiguredLocale(getConfigDisplayLanguage(config)))
+          }
         }
       })
       .catch(error => {
         if (!cancelled) {
           setConfigLoadError(toError(error))
-          setLocaleState(DEFAULT_LOCALE)
+          setLocaleState(defaultLocaleForWorkspace())
         }
       })
       .finally(() => {

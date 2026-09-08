@@ -6,7 +6,10 @@ import type * as ReactRouterDom from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { initialInternalCompanyCapabilities } from '@/app/internal-company/capabilities'
-import { resetInternalCompanyCapabilitiesForTest, setInternalCompanyCapabilitiesForTest } from '@/app/internal-company/store'
+import {
+  resetInternalCompanyCapabilitiesForTest,
+  setInternalCompanyCapabilitiesForTest
+} from '@/app/internal-company/store'
 import type * as HermesApi from '@/hermes'
 import { queryClient } from '@/lib/query-client'
 import type * as SlashCompletionCache from '@/lib/slash-completion-cache'
@@ -151,9 +154,27 @@ afterEach(() => {
 describe('SkillsView toolset management', { timeout: 60_000 }, () => {
   it('hides toolset and Hub install surfaces in the internal harness while preserving personal Skills', async () => {
     setInternalCompanyCapabilitiesForTest(initialInternalCompanyCapabilities(true))
-    getSkills.mockResolvedValue([{ name: 'daily-review', description: 'Daily review', category: 'general', enabled: true, usage: 0, provenance: 'agent' }])
+    getSkills.mockResolvedValue([
+      {
+        name: 'daily-review',
+        description: 'Daily review',
+        category: 'general',
+        enabled: true,
+        usage: 0,
+        provenance: 'agent'
+      }
+    ])
     getOfficialSkills.mockResolvedValue({
-      skills: [{ category: 'general', description: 'Official', identifier: 'official/general/web', installed: false, name: 'web', tags: [] }]
+      skills: [
+        {
+          category: 'general',
+          description: 'Official',
+          identifier: 'official/general/web',
+          installed: false,
+          name: 'web',
+          tags: []
+        }
+      ]
     })
 
     const { SkillsView } = await import('./index')
@@ -167,7 +188,8 @@ describe('SkillsView toolset management', { timeout: 60_000 }, () => {
       )
     })
 
-    await screen.findByRole('button', { name: 'New skill' })
+    await screen.findByRole('button', { name: 'Create skill' })
+    expect(screen.queryByRole('button', { name: 'New skill' })).toBeNull()
 
     expect(screen.queryByRole('button', { name: /Tools/ })).toBeNull()
     expect(screen.queryByText('Official')).toBeNull()
@@ -304,7 +326,7 @@ describe('SkillsView toolset management', { timeout: 60_000 }, () => {
     await waitFor(() => expect(setSkillEnabled).toHaveBeenCalledWith('web-research', false, 'researcher'))
   })
 
-  it('shows the FULL skill in the detail pane — frontmatter metadata + body', async () => {
+  it('keeps ordinary Hermes Skills presentation technical and ungated by Lemon copy', async () => {
     getSkills.mockResolvedValue([
       {
         name: 'web-research',
@@ -327,13 +349,54 @@ describe('SkillsView toolset management', { timeout: 60_000 }, () => {
       )
     })
 
-    // Frontmatter renders as metadata rows, the body as full text — not just
-    // the one-line description.
     await waitFor(() => expect(getSkillContent).toHaveBeenCalled())
     expect(getSkillContent.mock.calls[0][0]).toBe('web-research')
+    expect(screen.getByLabelText('Search skills...')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Tools/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'New skill' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Create skill' })).toBeNull()
+    expect(screen.getByRole('button', { name: /web-research/ })).toBeTruthy()
+    expect(screen.queryByText('Technical details')).toBeNull()
     expect(await screen.findByText('version')).toBeTruthy()
     expect(await screen.findByText('1.2.0')).toBeTruthy()
     expect(await screen.findByText(/Deep research steps/)).toBeTruthy()
+  })
+
+  it('keeps the internal Skills detail flat and leaves the search placeholder fixed', async () => {
+    setInternalCompanyCapabilitiesForTest(initialInternalCompanyCapabilities(true))
+    getSkills.mockResolvedValue([
+      {
+        name: 'web-research',
+        description: 'Research the web',
+        category: 'research',
+        enabled: true,
+        usage: 3,
+        provenance: 'agent'
+      }
+    ])
+
+    const { SkillsView } = await import('./index')
+    await act(async () => {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={['/skills?tab=skills']}>
+            <SkillsView />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    })
+
+    const search = await screen.findByLabelText('Search skills…')
+    expect(search.getAttribute('placeholder')).toBe('Search skills…')
+    await waitFor(() => expect(screen.getAllByText('Research the web')).toHaveLength(1))
+    expect(screen.getByText('Enabled')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Create skill' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'New skill' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeTruthy()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create skill' }))
+    })
+    expect(screen.getByText('Create skill/SKILL.md')).toBeTruthy()
   })
 
   it('hub picker refuses to reinstall an already-installed skill', async () => {
@@ -629,6 +692,7 @@ describe('SkillsView toolset management', { timeout: 60_000 }, () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'New skill' }))
     })
+    expect(screen.getByText('New skill/SKILL.md')).toBeTruthy()
     await act(async () => {
       fireEvent.change(screen.getByLabelText('Skill name'), { target: { value: 'daily-review' } })
       fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'planning' } })
@@ -649,7 +713,7 @@ describe('SkillsView toolset management', { timeout: 60_000 }, () => {
       'planning',
       'researcher'
     )
-    await waitFor(() => expect(screen.getAllByText('daily-review').length).toBeGreaterThanOrEqual(2))
+    await waitFor(() => expect(screen.getAllByText('daily-review').length).toBeGreaterThanOrEqual(1))
     expect(screen.queryByLabelText('SKILL.md')).toBeNull()
     expect(slashMocks.invalidateSlashCompletions).toHaveBeenCalled()
     expect(notificationMocks.notify).toHaveBeenCalledWith(
@@ -818,7 +882,9 @@ describe('SkillsView toolset management', { timeout: 60_000 }, () => {
     let created = false
     getSkills.mockImplementation(() =>
       Promise.resolve(
-        created ? [{ name: 'daily-review', description: 'Summarize the day', enabled: true, usage: 0, provenance: 'agent' }] : []
+        created
+          ? [{ name: 'daily-review', description: 'Summarize the day', enabled: true, usage: 0, provenance: 'agent' }]
+          : []
       )
     )
 
@@ -1059,7 +1125,6 @@ describe('SkillsView toolset management', { timeout: 60_000 }, () => {
     )
   })
 
-
   it('announces create validation and API errors with a stable alert and field associations', async () => {
     createSkill.mockRejectedValueOnce(new Error('400: {"detail":"A skill named daily-review already exists."}'))
     getSkills.mockResolvedValue([])
@@ -1148,11 +1213,13 @@ describe('SkillsView toolset management', { timeout: 60_000 }, () => {
     await waitFor(() => expect(createSkill).toHaveBeenCalled())
   })
 
-  it('restores focus to New skill after user close, cancel, and confirmed create on the active Skills tab', async () => {
+  it('restores focus to Create skill after user close, cancel, and confirmed create on the active Skills tab', async () => {
     let created = false
     getSkills.mockImplementation(() =>
       Promise.resolve(
-        created ? [{ name: 'daily-review', description: 'Summarize the day', enabled: true, usage: 0, provenance: 'agent' }] : []
+        created
+          ? [{ name: 'daily-review', description: 'Summarize the day', enabled: true, usage: 0, provenance: 'agent' }]
+          : []
       )
     )
     createSkill.mockImplementation(async () => {
@@ -1180,19 +1247,21 @@ describe('SkillsView toolset management', { timeout: 60_000 }, () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     })
-    expect(trigger.ownerDocument.activeElement).toBe(trigger)
+    expect(trigger.ownerDocument.activeElement).toBe(await screen.findByRole('button', { name: 'New skill' }))
 
+    const cancelTrigger = await screen.findByRole('button', { name: 'New skill' })
     await act(async () => {
-      fireEvent.click(trigger)
+      fireEvent.click(cancelTrigger)
     })
     await screen.findByLabelText('Skill name')
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     })
-    expect(trigger.ownerDocument.activeElement).toBe(trigger)
+    expect(cancelTrigger.ownerDocument.activeElement).toBe(await screen.findByRole('button', { name: 'New skill' }))
 
+    const createTrigger = await screen.findByRole('button', { name: 'New skill' })
     await act(async () => {
-      fireEvent.click(trigger)
+      fireEvent.click(createTrigger)
     })
     await screen.findByLabelText('Skill name')
     await act(async () => {
@@ -1204,7 +1273,6 @@ describe('SkillsView toolset management', { timeout: 60_000 }, () => {
     })
 
     await waitFor(() => expect(notificationMocks.notify).toHaveBeenCalled())
-    expect(trigger.ownerDocument.activeElement).toBe(trigger)
+    expect(createTrigger.ownerDocument.activeElement).toBe(await screen.findByRole('button', { name: 'New skill' }))
   })
-
 })

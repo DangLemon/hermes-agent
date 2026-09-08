@@ -2,6 +2,11 @@ import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { initialInternalCompanyCapabilities } from '@/app/internal-company/capabilities'
+import {
+  resetInternalCompanyCapabilitiesForTest,
+  setInternalCompanyCapabilitiesForTest
+} from '@/app/internal-company/store'
 import { registry } from '@/contrib/registry'
 
 import type { GroupNode } from '../model'
@@ -53,6 +58,7 @@ afterEach(() => {
   root = null
   container = null
   disposePane = null
+  resetInternalCompanyCapabilitiesForTest()
   vi.unstubAllGlobals()
 })
 
@@ -75,6 +81,28 @@ describe('TreeGroup', () => {
     render(<TreeGroup node={terminalGroup(true)} parentAxis="column" />)
 
     expect(toggle('Restore').querySelector('i')!.className).toContain('codicon-chevron-up')
+  })
+
+  it('hides a forced singleton sessions strip in the internal harness', () => {
+    disposePane = registry.register({
+      area: 'panes',
+      data: { hideOnly: true, placement: 'left' },
+      id: 'sessions',
+      render: () => <div>Sessions pane</div>,
+      title: 'sessions'
+    })
+    setInternalCompanyCapabilitiesForTest(initialInternalCompanyCapabilities(true))
+    vi.stubGlobal('CSS', { escape: (value: string) => value })
+
+    render(
+      <TreeGroup
+        node={{ active: 'sessions', id: 'sessions-zone', panes: ['sessions'], tabStrip: 'always', type: 'group' }}
+        parentAxis="row"
+      />
+    )
+
+    expect(globalThis.document.querySelector('[data-zone-tabstrip="sessions-zone"]')).toBeNull()
+    expect(globalThis.document.body.textContent).toContain('Sessions pane')
   })
 
   // The invariant behind the shared eligibility predicate

@@ -104,6 +104,29 @@ describe('statusbar item visibility', () => {
     expect(onSelect).not.toHaveBeenCalled()
   })
 
+  it('keeps gateway recovery visible while hiding internal harness statusbar clutter', async () => {
+    setInternalCompanyCapabilitiesForTest(initialInternalCompanyCapabilities(true))
+
+    const statusbar = bar([
+      item('command-center', 'Command Center', { lockedVisible: true }),
+      item('version-client', 'Version', { lockedVisible: true }),
+      item('context-usage', 'Context meter', { variant: 'menu' }),
+      item('gateway-health', 'Gateway')
+    ])
+
+    expect(within(statusbar).getByText('Gateway')).toBeTruthy()
+    expect(within(statusbar).queryByText('Command Center')).toBeNull()
+    expect(within(statusbar).queryByText('Version')).toBeNull()
+    expect(within(statusbar).queryByText('Context meter')).toBeNull()
+
+    openContextMenu(statusbar)
+
+    expect(await screen.findByRole('menuitemcheckbox', { name: 'Gateway' })).toBeTruthy()
+    expect(screen.queryByRole('menuitemcheckbox', { name: 'Command Center' })).toBeNull()
+    expect(screen.queryByRole('menuitemcheckbox', { name: 'Version' })).toBeNull()
+    expect(screen.queryByRole('menuitemcheckbox', { name: 'Context meter' })).toBeNull()
+  })
+
   it('leaves items that never opted into the menu alone', () => {
     $statusbarHiddenIds.set(['plugin-thing'])
     bar([{ id: 'plugin-thing', label: 'Plugin thing', variant: 'action' }])

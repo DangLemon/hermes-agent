@@ -88,6 +88,8 @@ export interface StatusbarSelectModifiers {
 export type StatusbarItemSide = 'left' | 'right'
 export type SetStatusbarItemGroup = (id: string, items: readonly StatusbarItem[], side?: StatusbarItemSide) => void
 
+const INTERNAL_STATUSBAR_ALLOWED_IDS = new Set(['gateway-health'])
+
 interface StatusbarControlsProps extends ComponentProps<'footer'> {
   leftItems?: readonly StatusbarItem[]
   items?: readonly StatusbarItem[]
@@ -100,6 +102,7 @@ export function StatusbarControls({ className, leftItems = [], items = [], ...pr
 
   const visible = (item: StatusbarItem) =>
     !item.hidden &&
+    (internalCompany.mode !== 'harness' || INTERNAL_STATUSBAR_ALLOWED_IDS.has(item.id)) &&
     (!item.to || internalCompanyRouteAllowed(item.to, internalCompany)) &&
     (item.lockedVisible || !item.toggleLabel || !hiddenIds.includes(item.id))
 
@@ -140,7 +143,12 @@ export function StatusbarControls({ className, leftItems = [], items = [], ...pr
           </div>
         </footer>
       </ContextMenuTrigger>
-      <StatusbarVisibilityMenu hiddenIds={hiddenIds} items={items} leftItems={leftItems} />
+      <StatusbarVisibilityMenu
+        hiddenIds={hiddenIds}
+        internalCompany={internalCompany}
+        items={items}
+        leftItems={leftItems}
+      />
     </ContextMenu>
   )
 }
@@ -151,10 +159,12 @@ export function StatusbarControls({ className, leftItems = [], items = [], ...pr
  *  bottom — VS Code puts it on the same context menu. */
 function StatusbarVisibilityMenu({
   hiddenIds,
+  internalCompany,
   items,
   leftItems
 }: {
   hiddenIds: readonly string[]
+  internalCompany: InternalCompanyRouteState
   items: readonly StatusbarItem[]
   leftItems: readonly StatusbarItem[]
 }) {
@@ -172,11 +182,15 @@ function StatusbarVisibilityMenu({
         return false
       }
 
+      if (internalCompany.mode === 'harness' && !INTERNAL_STATUSBAR_ALLOWED_IDS.has(item.id)) {
+        return false
+      }
+
       seen.add(item.id)
 
       return true
     })
-  }, [items, leftItems])
+  }, [internalCompany.mode, items, leftItems])
 
   return (
     <ContextMenuContent className="w-52">

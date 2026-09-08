@@ -8,7 +8,7 @@ import { applyWakeStartResult, applyWakeStatus, resetWakeWordState } from '@/sto
 
 import { ComposerControls } from './controls'
 
-vi.mock('./model-pill', () => ({ ModelPill: () => null }))
+vi.mock('./model-pill', () => ({ ModelPill: () => <span data-testid="model-pill">Mock Model · Med</span> }))
 
 const state: ChatBarState = {
   model: { canSwitch: false, model: '', provider: '' },
@@ -17,8 +17,10 @@ const state: ChatBarState = {
 }
 
 function renderControls(overrides: Partial<React.ComponentProps<typeof ComposerControls>> = {}) {
+  const locale = overrides.internalWorkspace ? 'vi' : 'en'
+
   return render(
-    <I18nProvider configClient={null} initialLocale="en">
+    <I18nProvider configClient={null} initialLocale={locale}>
       <ComposerControls
         autoSpeak={false}
         busy={false}
@@ -128,6 +130,41 @@ describe('narrow tiles', () => {
     renderControls({ busy: true, busyAction: 'stop', foldVoice: true, hasComposerPayload: false, minimal: true })
 
     expect(screen.getByLabelText('Stop')).toBeTruthy()
+  })
+})
+
+describe('internal workspace controls', () => {
+  it('keeps an empty composer on a disabled Gửi button instead of promoting voice', () => {
+    const onStart = vi.fn()
+
+    renderControls({
+      canSubmit: false,
+      conversation: {
+        active: false,
+        level: 0,
+        muted: false,
+        onEnd: vi.fn(),
+        onStart,
+        onStopTurn: vi.fn(),
+        onToggleMute: vi.fn(),
+        status: 'idle'
+      },
+      hasComposerPayload: false,
+      internalWorkspace: true
+    })
+
+    expect((screen.getByRole('button', { name: 'Gửi' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByRole('button', { name: 'Giọng nói' })).toBeTruthy()
+    expect(screen.queryByLabelText('Start voice conversation')).toBeNull()
+    expect(screen.queryByTestId('model-pill')).toBeNull()
+    expect(onStart).not.toHaveBeenCalled()
+  })
+
+  it('enables the visible Gửi action when the composer has content', () => {
+    renderControls({ internalWorkspace: true })
+
+    expect((screen.getByRole('button', { name: 'Gửi' }) as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.queryByTestId('model-pill')).toBeNull()
   })
 })
 

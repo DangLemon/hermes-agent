@@ -272,6 +272,18 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
 
   const visibleSystemTools = systemTools.filter(toolVisible)
   const visiblePaneTools = tools.filter(toolVisible)
+  const visibleLeftTools = leftToolbarTools.filter(tool => !tool.hidden)
+  const internalHarnessChrome = internalCompany.mode === 'harness'
+
+  const harnessLeftTools = internalHarnessChrome
+    ? visibleLeftTools.filter(tool => tool.id === 'sidebar')
+    : visibleLeftTools
+
+  const harnessSystemTools = internalHarnessChrome
+    ? visibleSystemTools.filter(tool => tool.id === 'settings')
+    : visibleSystemTools
+
+  const harnessPaneTools = internalHarnessChrome ? [] : visiblePaneTools
 
   return (
     <>
@@ -282,11 +294,9 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
           'left-(--titlebar-controls-left) top-(--titlebar-controls-top) translate-y-(--titlebar-controls-y-nudge)'
         )}
       >
-        {leftToolbarTools
-          .filter(tool => !tool.hidden)
-          .map(tool => (
-            <TitlebarToolButton internalCompany={internalCompany} key={tool.id} navigate={navigate} tool={tool} />
-          ))}
+        {harnessLeftTools.map(tool => (
+          <TitlebarToolButton internalCompany={internalCompany} key={tool.id} navigate={navigate} tool={tool} />
+        ))}
       </div>
 
       {/*
@@ -297,7 +307,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
         (file-browser open → cluster sits flush against the file-browser pane,
         i.e. at the preview pane's right edge). No margin hacks needed.
       */}
-      {visiblePaneTools.length > 0 && (
+      {harnessPaneTools.length > 0 && (
         <div
           aria-label={t.shell.paneControls}
           className={cn(
@@ -305,7 +315,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
             'top-[calc(var(--titlebar-controls-top)+var(--right-rail-top-inset,0px))] right-[calc(var(--titlebar-tools-right)+var(--shell-preview-toolbar-gap,0))]'
           )}
         >
-          {visiblePaneTools.map(tool => (
+          {harnessPaneTools.map(tool => (
             <TitlebarToolButton internalCompany={internalCompany} key={tool.id} navigate={navigate} tool={tool} />
           ))}
         </div>
@@ -315,10 +325,12 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
         aria-label={t.shell.appControls}
         className={cn(titlebarToolClusterClass, 'right-(--titlebar-tools-right) top-(--titlebar-controls-top)')}
       >
-        {visibleSystemTools.map(tool => (
+        {harnessSystemTools.map(tool => (
           <TitlebarToolButton internalCompany={internalCompany} key={tool.id} navigate={navigate} tool={tool} />
         ))}
-        <TitlebarToolButton internalCompany={internalCompany} navigate={navigate} tool={rightSidebarTool} />
+        {!internalHarnessChrome && (
+          <TitlebarToolButton internalCompany={internalCompany} navigate={navigate} tool={rightSidebarTool} />
+        )}
       </div>
     </>
   )

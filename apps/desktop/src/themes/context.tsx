@@ -14,6 +14,7 @@ import { createContext, type ReactNode, useCallback, useContext, useEffect, useM
 
 import { $registryVersion } from '@/contrib/registry'
 import { matchesQuery, useMediaQuery } from '@/hooks/use-media-query'
+import { applyAppBrandRoot } from '@/lib/app-brand'
 import { persistString, persistStringRecord, storedString, storedStringRecord } from '@/lib/storage'
 import { $activeGatewayProfile, normalizeProfileKey } from '@/store/profile'
 import { setAppearance } from '@/store/translucency'
@@ -282,6 +283,8 @@ function applyTheme(theme: DesktopTheme, mode: 'light' | 'dark') {
   for (const [k, v] of Object.entries({ ...seeds, ...mixesFor(isDark), ...palette })) {
     root.style.setProperty(k, v)
   }
+
+  applyAppBrandRoot(root, undefined, mode)
 
   const chromeBg = chromeBackground(c.background, isDark)
 

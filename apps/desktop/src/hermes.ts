@@ -5,6 +5,7 @@
 // capabilityScoped are shared across api/ but must not reach call sites, or
 // request scoping stops having a single owner.
 export {
+  captureCapabilityScope,
   getApiRequestConnection,
   getApiRequestProfile,
   hermesApi,
@@ -67,6 +68,7 @@ export type {
   GatewayReadyPayload,
   HermesConfig,
   HermesConfigRecord,
+  HermesRawConfigResponse,
   LogsResponse,
   McpCatalogEntry,
   McpCatalogResponse,

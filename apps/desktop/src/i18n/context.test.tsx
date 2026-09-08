@@ -7,7 +7,7 @@ import { type I18nConfigClient, I18nProvider, useI18n } from './context'
 import type { Locale } from './types'
 
 function LanguageProbe({ target = 'zh' }: { target?: Locale }) {
-  const { isLoadingConfig, isSavingLocale, locale, saveError, setLocale, t } = useI18n()
+  const { configLoadError, isLoadingConfig, isSavingLocale, locale, saveError, setLocale, t } = useI18n()
 
   return (
     <div>
@@ -16,6 +16,7 @@ function LanguageProbe({ target = 'zh' }: { target?: Locale }) {
       <p data-testid="save">{t.common.save}</p>
       <p data-testid="loading">{String(isLoadingConfig)}</p>
       <p data-testid="saving">{String(isSavingLocale)}</p>
+      <p data-testid="load-error">{configLoadError?.message ?? ''}</p>
       <p data-testid="save-error">{saveError?.message ?? ''}</p>
       <button onClick={() => void setLocale(target).catch(() => undefined)} type="button">
         switch
@@ -28,6 +29,8 @@ describe('I18nProvider', () => {
   afterEach(() => {
     cleanup()
     vi.restoreAllMocks()
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
   })
 
   it('defaults to English without a config client', () => {
@@ -130,6 +133,158 @@ describe('I18nProvider', () => {
 
     expect(screen.getByTestId('locale').textContent).toBe('ja')
     expect(screen.getByTestId('save').textContent).toBe('保存')
+    expect(configClient.saveConfig).not.toHaveBeenCalled()
+  })
+
+  it('defaults the internal workspace to Vietnamese when no language is configured', async () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+
+    const configClient: I18nConfigClient = {
+      getConfig: vi.fn().mockResolvedValue({}),
+      saveConfig: vi.fn()
+    }
+
+    render(
+      <I18nProvider configClient={configClient}>
+        <LanguageProbe />
+      </I18nProvider>
+    )
+
+    await waitFor(() => expect(screen.getByTestId('loading').textContent).toBe('false'))
+
+    expect(screen.getByTestId('locale').textContent).toBe('vi')
+    expect(screen.getByTestId('save').textContent).toBe('Lưu')
+    expect(configClient.saveConfig).not.toHaveBeenCalled()
+  })
+
+  it('defaults the internal workspace to Vietnamese when only the backend default supplies English', async () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+
+    const configClient: I18nConfigClient = {
+      getConfig: vi.fn().mockResolvedValue({ display: { language: 'en' } }),
+      getRawConfig: vi.fn().mockResolvedValue({ explicit_display_language: false, path: '/tmp/config.yaml', yaml: '' }),
+      saveConfig: vi.fn()
+    }
+
+    render(
+      <I18nProvider configClient={configClient}>
+        <LanguageProbe />
+      </I18nProvider>
+    )
+
+    await waitFor(() => expect(screen.getByTestId('loading').textContent).toBe('false'))
+
+    expect(screen.getByTestId('locale').textContent).toBe('vi')
+    expect(screen.getByTestId('save').textContent).toBe('Lưu')
+    expect(configClient.saveConfig).not.toHaveBeenCalled()
+  })
+
+  it('keeps explicit English in the internal workspace', async () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+
+    const configClient: I18nConfigClient = {
+      getConfig: vi.fn().mockResolvedValue({ display: { language: 'en' } }),
+      getRawConfig: vi.fn().mockResolvedValue({ explicit_display_language: true, path: '/tmp/config.yaml', yaml: '' }),
+      saveConfig: vi.fn()
+    }
+
+    render(
+      <I18nProvider configClient={configClient}>
+        <LanguageProbe />
+      </I18nProvider>
+    )
+
+    await waitFor(() => expect(screen.getByTestId('loading').textContent).toBe('false'))
+
+    expect(screen.getByTestId('locale').textContent).toBe('en')
+    expect(screen.getByTestId('save').textContent).toBe('Save')
+    expect(configClient.saveConfig).not.toHaveBeenCalled()
+  })
+
+  it('keeps an explicit supported language in the internal workspace', async () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+
+    const configClient: I18nConfigClient = {
+      getConfig: vi.fn().mockResolvedValue({ display: { language: 'ja-JP' } }),
+      getRawConfig: vi.fn().mockResolvedValue({ explicit_display_language: true, path: '/tmp/config.yaml', yaml: '' }),
+      saveConfig: vi.fn()
+    }
+
+    render(
+      <I18nProvider configClient={configClient}>
+        <LanguageProbe />
+      </I18nProvider>
+    )
+
+    await waitFor(() => expect(screen.getByTestId('loading').textContent).toBe('false'))
+
+    expect(screen.getByTestId('locale').textContent).toBe('ja')
+    expect(screen.getByTestId('save').textContent).toBe('保存')
+    expect(configClient.saveConfig).not.toHaveBeenCalled()
+  })
+
+  it('keeps explicit Vietnamese in the internal workspace', async () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+
+    const configClient: I18nConfigClient = {
+      getConfig: vi.fn().mockResolvedValue({ display: { language: 'vi-VN' } }),
+      getRawConfig: vi.fn().mockResolvedValue({ explicit_display_language: true, path: '/tmp/config.yaml', yaml: '' }),
+      saveConfig: vi.fn()
+    }
+
+    render(
+      <I18nProvider configClient={configClient}>
+        <LanguageProbe />
+      </I18nProvider>
+    )
+
+    await waitFor(() => expect(screen.getByTestId('loading').textContent).toBe('false'))
+
+    expect(screen.getByTestId('locale').textContent).toBe('vi')
+    expect(screen.getByTestId('save').textContent).toBe('Lưu')
+    expect(configClient.saveConfig).not.toHaveBeenCalled()
+  })
+
+  it('keeps ordinary backend defaults in English when raw language is absent', async () => {
+    const configClient: I18nConfigClient = {
+      getConfig: vi.fn().mockResolvedValue({ display: { language: 'en' } }),
+      getRawConfig: vi.fn().mockResolvedValue({ explicit_display_language: false, path: '/tmp/config.yaml', yaml: '' }),
+      saveConfig: vi.fn()
+    }
+
+    render(
+      <I18nProvider configClient={configClient}>
+        <LanguageProbe />
+      </I18nProvider>
+    )
+
+    await waitFor(() => expect(screen.getByTestId('loading').textContent).toBe('false'))
+
+    expect(screen.getByTestId('locale').textContent).toBe('en')
+    expect(screen.getByTestId('save').textContent).toBe('Save')
+    expect(configClient.saveConfig).not.toHaveBeenCalled()
+  })
+
+  it('keeps supported effective config when raw config metadata cannot be read', async () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+
+    const configClient: I18nConfigClient = {
+      getConfig: vi.fn().mockResolvedValue({ display: { language: 'en' } }),
+      getRawConfig: vi.fn().mockRejectedValue(new Error('raw config unavailable')),
+      saveConfig: vi.fn()
+    }
+
+    render(
+      <I18nProvider configClient={configClient}>
+        <LanguageProbe />
+      </I18nProvider>
+    )
+
+    await waitFor(() => expect(screen.getByTestId('loading').textContent).toBe('false'))
+
+    expect(screen.getByTestId('locale').textContent).toBe('en')
+    expect(screen.getByTestId('save').textContent).toBe('Save')
+    expect(screen.getByTestId('load-error').textContent).toBe('raw config unavailable')
     expect(configClient.saveConfig).not.toHaveBeenCalled()
   })
 

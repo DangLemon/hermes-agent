@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { TRANSLATIONS } from './catalog'
 import { DEFAULT_LOCALE, isLocale, isSupportedLocaleValue, localeConfigValue, normalizeLocale } from './languages'
 
 describe('desktop i18n languages', () => {
@@ -22,6 +23,10 @@ describe('desktop i18n languages', () => {
     expect(normalizeLocale('RU-RU')).toBe('ru')
     expect(normalizeLocale(' ru_ru ')).toBe('ru')
     expect(normalizeLocale('Русский')).toBe('ru')
+    expect(normalizeLocale('vi')).toBe('vi')
+    expect(normalizeLocale('vi-VN')).toBe('vi')
+    expect(normalizeLocale('Vietnamese')).toBe('vi')
+    expect(normalizeLocale('Tiếng Việt')).toBe('vi')
   })
 
   it('falls back to English for empty or unsupported values', () => {
@@ -35,6 +40,7 @@ describe('desktop i18n languages', () => {
     expect(isSupportedLocaleValue('zh-TW')).toBe(true)
     expect(isSupportedLocaleValue('ja-JP')).toBe(true)
     expect(isSupportedLocaleValue('ru-RU')).toBe(true)
+    expect(isSupportedLocaleValue('vi-VN')).toBe(true)
     expect(isSupportedLocaleValue('de')).toBe(false)
     expect(isLocale('zh-CN')).toBe(false)
     expect(isLocale('zh')).toBe(true)
@@ -42,6 +48,7 @@ describe('desktop i18n languages', () => {
     expect(isLocale('ja')).toBe(true)
     expect(isLocale('ar')).toBe(true)
     expect(isLocale('ru')).toBe(true)
+    expect(isLocale('vi')).toBe(true)
   })
 
   it('returns the persisted config value for supported locales', () => {
@@ -51,5 +58,22 @@ describe('desktop i18n languages', () => {
     expect(localeConfigValue('ja')).toBe('ja')
     expect(localeConfigValue('ar')).toBe('ar')
     expect(localeConfigValue('ru')).toBe('ru')
+    expect(localeConfigValue('vi')).toBe('vi')
+  })
+
+  it('provides internal Lemon workspace copy without inherited English chrome labels', () => {
+    const t = TRANSLATIONS.vi
+
+    expect(t.internalWorkspace.actions.newConversation).toBe('Cuộc trò chuyện mới')
+    expect(t.shell.gatewayMenu.connected).toBe('Đã kết nối')
+    expect(t.shell.gatewayMenu.inferenceReady).toBe('Đã kết nối')
+    expect(t.shell.statusbar.gatewayReady).toBe('Đã kết nối')
+    expect(t.shell.statusbar.gatewayConnecting).toBe('Đang kết nối')
+    expect(t.composer.voiceControls).toBe('Giọng nói')
+    expect(t.skills.sortMostUsed).toBe('Dùng nhiều')
+  })
+
+  it('keeps the English internal new conversation label icon-free', () => {
+    expect(TRANSLATIONS.en.internalWorkspace.actions.newConversation).toBe('New conversation')
   })
 })

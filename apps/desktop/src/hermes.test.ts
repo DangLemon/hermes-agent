@@ -15,6 +15,7 @@ import {
   getGlobalModelOptions,
   getHermesConfig,
   getHermesConfigDefaults,
+  getHermesRawConfig,
   getLatestSessionMessages,
   getOlderSessionMessages,
   getProfiles,
@@ -466,6 +467,26 @@ describe('Hermes REST helpers', () => {
       await call()
       expect(api).toHaveBeenCalledWith(expect.objectContaining({ path, timeoutMs: 60_000 }))
     }
+  })
+
+  it('reads raw config metadata through the capability-scoped route', async () => {
+    api.mockResolvedValueOnce({ explicit_display_language: false, path: '/tmp/config.yaml', yaml: '' })
+    setApiRequestConnection('office')
+    setApiRequestProfile('default')
+
+    await expect(getHermesRawConfig()).resolves.toEqual({
+      explicit_display_language: false,
+      path: '/tmp/config.yaml',
+      yaml: ''
+    })
+
+    expect(api).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionId: 'office',
+        path: '/api/config/raw',
+        profile: 'default'
+      })
+    )
   })
 
   it('waits for synchronous cron triggers as a long-running operation', async () => {
