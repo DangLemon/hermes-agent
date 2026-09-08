@@ -4,11 +4,14 @@
 
 import path from "node:path"
 import { pathToFileURL } from "node:url"
+import fs from "node:fs"
 import { spawnSync } from "node:child_process"
 import { createRequire } from "node:module"
 import { generateInternalDesktopHarnessResource } from "./internal-desktop-harness.mjs"
+import { createDesktopPackageConfig } from "./desktop-build-identity.mjs"
 
 const require = createRequire(import.meta.url)
+const DEFAULT_CONFIG_PATH = path.resolve(import.meta.dirname, "..", "build", "electron-builder.generated.json")
 
 function electronBuilderCli() {
   const pkgJson = require.resolve("electron-builder/package.json")
@@ -17,7 +20,22 @@ function electronBuilderCli() {
   return path.join(path.dirname(pkgJson), rel)
 }
 
-export function buildElectronBuilderArgs({ argv = process.argv.slice(2) } = {}) {
+export function createElectronBuilderConfig(baseBuild, { env = process.env, harnessResource } = {}) {
+  return createDesktopPackageConfig(baseBuild, { env, harnessResource })
+}
+
+export function writeElectronBuilderConfig(baseBuild, {
+  env = process.env,
+  harnessResource,
+  configPath = DEFAULT_CONFIG_PATH
+} = {}) {
+  const config = createElectronBuilderConfig(baseBuild, { env, harnessResource })
+  fs.mkdirSync(path.dirname(configPath), { recursive: true })
+  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8")
+  return configPath
+}
+
+export function buildElectronBuilderArgs({ argv = process.argv.slice(2), configPath = DEFAULT_CONFIG_PATH } = {}) {
   // Local `hermes desktop` builds only ever package (--dir or dist), never
   // publish a GitHub release — no CI workflow drives this script. But the npm
   // lifecycle env sets CI=1 (so esbuild's postinstall doesn't try interactive
@@ -27,14 +45,16 @@ export function buildElectronBuilderArgs({ argv = process.argv.slice(2) } = {}) 
   // (only the repo root does) and no "repository" field in its package.json —
   // so it fails with "Cannot detect repository by .git/config". Pin publish to
   // "never" so electron-builder skips that lookup entirely.
-  const args = ["--publish", "never"]
+  const args = ["--publish", "never", "--config", configPath]
   args.push(...argv)
   return args
 }
 
 function main() {
-  generateInternalDesktopHarnessResource()
-  const args = buildElectronBuilderArgs()
+  const harness = generateInternalDesktopHarnessResource()
+  const pkg = require("../package.json")
+  const configPath = writeElectronBuilderConfig(pkg.build, { harnessResource: harness.resource })
+  const args = buildElectronBuilderArgs({ configPath })
 
   const result = spawnSync(process.execPath, [electronBuilderCli(), ...args], {
     stdio: "inherit",

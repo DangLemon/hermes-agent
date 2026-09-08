@@ -69,17 +69,27 @@ export function resolveAppIcon(
  * `app.asar.unpacked` for builds that leave assets outside the archive.
  */
 export function appIconCandidates(opts: {
+  internalHarness?: boolean
   isWindows: boolean
   appRoot: string
   resourcesPath?: string
   unpackedPathFor: (p: string) => string
 }): string[] {
-  const { isWindows, appRoot, resourcesPath, unpackedPathFor } = opts
+  const { internalHarness = false, isWindows, appRoot, resourcesPath, unpackedPathFor } = opts
+  const appleTouchIcon = internalHarness ? 'lemon-apple-touch-icon.png' : 'apple-touch-icon.png'
+  const assetIcon = internalHarness ? 'lemon-icon.ico' : 'icon.ico'
 
   return [
-    ...(isWindows ? [path.join(resourcesPath ?? '', 'icon.ico'), path.join(appRoot, 'assets', 'icon.ico')] : []),
-    path.join(appRoot, 'public', 'apple-touch-icon.png'),
-    path.join(appRoot, 'dist', 'apple-touch-icon.png'),
-    path.join(unpackedPathFor(appRoot), 'dist', 'apple-touch-icon.png')
+    ...(isWindows ? [path.join(resourcesPath ?? '', 'icon.ico'), path.join(appRoot, 'assets', assetIcon)] : []),
+    path.join(appRoot, 'public', appleTouchIcon),
+    path.join(appRoot, 'dist', appleTouchIcon),
+    path.join(unpackedPathFor(appRoot), 'dist', appleTouchIcon),
+    ...(internalHarness
+      ? [
+          path.join(appRoot, 'public', 'apple-touch-icon.png'),
+          path.join(appRoot, 'dist', 'apple-touch-icon.png'),
+          path.join(unpackedPathFor(appRoot), 'dist', 'apple-touch-icon.png')
+        ]
+      : [])
   ]
 }
