@@ -50,13 +50,15 @@ def _git(cwd: Path, *args: str) -> str:
 def _extract_pin_block() -> str:
     """Pull the commit-pin block out of install.sh's update_repo()."""
     text = INSTALL_SH.read_text()
+    start_at = text.index('    cd "$INSTALL_DIR"')
     match = re.search(
-        r'if \[ -n "\$INSTALL_COMMIT" \]; then.*?\n    fi\n',
-        text,
+        r'(?P<block>    if \[ -n "\$INSTALL_COMMIT" \]; then.*?\n    fi)'
+        r'\n\n    log_success "Repository ready"',
+        text[start_at:],
         re.DOTALL,
     )
     assert match is not None, "commit-pin block not found in install.sh"
-    return match.group(0)
+    return match["block"]
 
 
 @pytest.fixture
@@ -76,17 +78,15 @@ def repo(tmp_path):
 
 def _run_pin_block(repo_dir: Path, commit: str, *, force: bool = False) -> str:
     """Execute install.sh's pin block standalone against ``repo_dir``."""
-    script = "\n".join(
-        [
-            "set -e",
-            "log_info() { echo \"INFO $*\"; }",
-            "log_warn() { echo \"WARN $*\"; }",
-            f'INSTALL_COMMIT="{commit}"',
-            f'FORCE_COMMIT={"true" if force else "false"}',
-            f'cd "{repo_dir}"',
-            _extract_pin_block(),
-        ]
-    )
+    script = "\n".join([
+        "set -e",
+        'log_info() { echo "INFO $*"; }',
+        'log_warn() { echo "WARN $*"; }',
+        f'INSTALL_COMMIT="{commit}"',
+        f"FORCE_COMMIT={'true' if force else 'false'}",
+        f'cd "{repo_dir}"',
+        _extract_pin_block(),
+    ])
     return subprocess.run(
         ["bash", "-c", script],
         capture_output=True,

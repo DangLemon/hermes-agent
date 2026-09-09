@@ -1,0 +1,362 @@
+name: Lemon Desktop Installers
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/lemon-desktop-installers.yml'
+      - '.github/actions/retry/**'
+      - 'apps/desktop/**'
+      - 'apps/shared/**'
+      - 'package.json'
+      - 'package-lock.json'
+  push:
+    branches:
+      - main
+    tags:
+      - 'lemon-v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lemon-desktop-installers-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) }}
+
+env:
+  HERMES_DESKTOP_HARNESS_CONFIG: ${{ github.workspace }}/apps/desktop/internal-desktop-harness.config.json
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+  WIN_CSC_LINK: ''
+  WIN_CSC_KEY_PASSWORD: ''
+
+jobs:
+  build-mac-arm64:
+    name: Build macOS arm64 DMG
+    runs-on: macos-15
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    env:
+      HERMES_BUILD_COMMIT: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      HERMES_BUILD_REF: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+    steps:
+      - name: Checkout exact source commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Validate native macOS arm64 runner
+        run: |
+          set -euo pipefail
+          if [ "$(uname -s)" != "Darwin" ]; then
+            echo "Expected macOS runner, got $(uname -s)" >&2
+            exit 1
+          fi
+          if [ "$(uname -m)" != "arm64" ]; then
+            echo "Expected arm64 runner, got $(uname -m)" >&2
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26
+          cache: npm
+
+      - name: Install npm 12
+        run: |
+          set -euo pipefail
+          npm --version | grep -q '^12\.' || npm i -g npm@12
+          if [ "$(node -p 'process.arch')" != "arm64" ]; then
+            echo "Expected arm64 Node.js, got $(node -p 'process.arch')" >&2
+            exit 1
+          fi
+
+      - name: Install workspace dependencies
+        uses: ./.github/actions/retry
+        with:
+          command: npm ci
+
+      - name: Run installer script tests
+        working-directory: apps/desktop
+        run: npx vitest run --project electron scripts/verify-internal-installer.test.mjs scripts/prepare-internal-release.test.mjs
+
+      - name: Build Lemon AI DMG
+        working-directory: apps/desktop
+        run: |
+          set -euo pipefail
+          rm -rf release
+          node -e "const cp=require('node:child_process'); const env={...process.env,GITHUB_SHA:process.env.HERMES_BUILD_COMMIT,GITHUB_REF_NAME:process.env.HERMES_BUILD_REF}; const r=cp.spawnSync('npm',['run','dist:mac:dmg','--','--arm64'],{stdio:'inherit',env}); process.exit(r.status ?? 1)"
+
+      - name: Verify and stage macOS installer artifact
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./apps/desktop/package.json').version")"
+          target="mac-arm64"
+          installer="apps/desktop/release/Lemon-AI-${version}-${target}.dmg"
+          app="apps/desktop/release/mac-arm64/Hermes.app"
+          output_dir="${RUNNER_TEMP}/lemon-installer-ci/${target}"
+
+          test -f "$installer"
+          test -d "$app"
+          node apps/desktop/scripts/verify-internal-installer.mjs \
+            --platform darwin \
+            --arch arm64 \
+            --sha "$HERMES_BUILD_COMMIT" \
+            --ref "$HERMES_BUILD_REF" \
+            --canonical apps/desktop/internal-desktop-harness.config.json \
+            --builder-config apps/desktop/build/electron-builder.generated.json \
+            --installer "$installer" \
+            --app "$app" \
+            --out "$output_dir"
+
+          receipt="${output_dir}/Lemon-AI-${version}-${target}.dmg.receipt.json"
+          mv "${output_dir}/installer-receipt.json" "$receipt"
+          test -f "${output_dir}/Lemon-AI-${version}-${target}.dmg"
+          test -f "${output_dir}/Lemon-AI-${version}-${target}.dmg.sha256"
+          test -f "$receipt"
+          test ! -e "${output_dir}/installer-receipt.json"
+          {
+            echo "### Lemon AI macOS arm64 installer"
+            echo ""
+            echo "- Artifact: Lemon-AI-${version}-${target}.dmg"
+            echo "- Source commit: ${HERMES_BUILD_COMMIT}"
+            echo "- Signing: unsigned"
+            echo "- Notarization: skipped"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload macOS installer artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: lemon-desktop-installer-mac-arm64
+          path: ${{ runner.temp }}/lemon-installer-ci/mac-arm64
+          retention-days: 30
+          overwrite: true
+          if-no-files-found: error
+
+  build-win-x64:
+    name: Build Windows x64 NSIS
+    runs-on: windows-2022
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    env:
+      HERMES_BUILD_COMMIT: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      HERMES_BUILD_REF: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+    steps:
+      - name: Checkout exact source commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Validate native Windows x64 runner
+        shell: pwsh
+        run: |
+          if (-not [Environment]::Is64BitOperatingSystem) {
+            throw 'Expected a 64-bit Windows runner.'
+          }
+          if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64' -and $env:PROCESSOR_ARCHITEW6432 -ne 'AMD64') {
+            throw "Expected AMD64 runner, got PROCESSOR_ARCHITECTURE=$env:PROCESSOR_ARCHITECTURE PROCESSOR_ARCHITEW6432=$env:PROCESSOR_ARCHITEW6432"
+          }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26
+          cache: npm
+
+      - name: Install npm 12
+        shell: pwsh
+        run: |
+          $npmVersion = npm --version
+          if (-not $npmVersion.StartsWith('12.')) {
+            npm i -g npm@12
+          }
+          $nodeArch = node -p 'process.arch'
+          if ($nodeArch -ne 'x64') {
+            throw "Expected x64 Node.js, got $nodeArch"
+          }
+
+      - name: Install workspace dependencies
+        uses: ./.github/actions/retry
+        with:
+          command: npm ci
+
+      - name: Run installer script tests
+        shell: pwsh
+        working-directory: apps/desktop
+        run: npx vitest run --project electron scripts/verify-internal-installer.test.mjs scripts/prepare-internal-release.test.mjs
+
+      - name: Build Lemon AI NSIS installer
+        shell: pwsh
+        working-directory: apps/desktop
+        run: |
+          Remove-Item -Recurse -Force release -ErrorAction SilentlyContinue
+          node -e "const cp=require('node:child_process'); const env={...process.env,GITHUB_SHA:process.env.HERMES_BUILD_COMMIT,GITHUB_REF_NAME:process.env.HERMES_BUILD_REF}; const r=cp.spawnSync('npm',['run','dist:win:nsis','--','--x64'],{stdio:'inherit',env,shell:true}); process.exit(r.status ?? 1)"
+
+      - name: Verify and stage Windows installer artifact
+        shell: pwsh
+        run: |
+          $version = node -p "require('./apps/desktop/package.json').version"
+          $target = 'win-x64'
+          $installer = "apps/desktop/release/Lemon-AI-$version-$target.exe"
+          $app = 'apps/desktop/release/win-unpacked'
+          $outputDir = Join-Path $env:RUNNER_TEMP "lemon-installer-ci\$target"
+
+          if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
+            throw "Missing expected installer: $installer"
+          }
+          if (-not (Test-Path -LiteralPath $app -PathType Container)) {
+            throw "Missing expected unpacked app directory: $app"
+          }
+          node apps/desktop/scripts/verify-internal-installer.mjs `
+            --platform win32 `
+            --arch x64 `
+            --sha $env:HERMES_BUILD_COMMIT `
+            --ref $env:HERMES_BUILD_REF `
+            --canonical apps/desktop/internal-desktop-harness.config.json `
+            --builder-config apps/desktop/build/electron-builder.generated.json `
+            --installer $installer `
+            --app $app `
+            --out $outputDir
+
+          $receipt = "$outputDir\Lemon-AI-$version-$target.exe.receipt.json"
+          Move-Item -LiteralPath "$outputDir\installer-receipt.json" -Destination $receipt
+          foreach ($path in @(
+            "$outputDir\Lemon-AI-$version-$target.exe",
+            "$outputDir\Lemon-AI-$version-$target.exe.sha256",
+            $receipt
+          )) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Missing verifier output: $path"
+            }
+          }
+          if (Test-Path -LiteralPath "$outputDir\installer-receipt.json") {
+            throw 'Verifier receipt was not renamed to a unique release basename.'
+          }
+          @"
+          ### Lemon AI Windows x64 installer
+
+          - Artifact: Lemon-AI-$version-$target.exe
+          - Source commit: $env:HERMES_BUILD_COMMIT
+          - Signing: unsigned
+          "@ >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: lemon-desktop-installer-win-x64
+          path: ${{ runner.temp }}\lemon-installer-ci\win-x64
+          retention-days: 30
+          overwrite: true
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish Lemon AI release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/lemon-v')
+    needs:
+      - build-mac-arm64
+      - build-win-x64
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26
+
+      - name: Download macOS installer artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: lemon-desktop-installer-mac-arm64
+          path: release-assets/mac-arm64
+
+      - name: Download Windows installer artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: lemon-desktop-installer-win-x64
+          path: release-assets/win-x64
+
+      - name: Validate release inputs
+        env:
+          RELEASE_TAG_NAME: ${{ github.ref_name }}
+          RELEASE_BUILD_REF: ${{ github.ref_name }}
+          RELEASE_BUILD_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./apps/desktop/package.json').version")"
+          expected_tag="lemon-v${version}"
+          if [ "$RELEASE_TAG_NAME" != "$expected_tag" ]; then
+            echo "Release tag must be ${expected_tag}; got ${RELEASE_TAG_NAME}" >&2
+            exit 1
+          fi
+
+          git fetch origin main --prune
+          tag_commit="$(git rev-list -n 1 "${RELEASE_TAG_NAME}^{commit}")"
+          if ! git merge-base --is-ancestor "$tag_commit" origin/main; then
+            echo "Tag commit ${tag_commit} is not an ancestor of origin/main." >&2
+            exit 1
+          fi
+
+          node apps/desktop/scripts/prepare-internal-release.mjs \
+            --assets-root release-assets \
+            --out release-assets/staged \
+            --version "$version" \
+            --sha "$GITHUB_SHA" \
+            --ref "$GITHUB_REF_NAME" \
+            --repository DangLemon/hermes-agent
+
+      - name: Publish draft release
+        env:
+          RELEASE_TAG_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./apps/desktop/package.json').version")"
+          notes_file="${RUNNER_TEMP}/lemon-ai-release-notes.md"
+          state_file="${RUNNER_TEMP}/release-state.json"
+          mapfile -t release_files < <(find release-assets/staged -maxdepth 1 -type f | sort)
+          if [ "${#release_files[@]}" -ne 7 ]; then
+            echo "Expected 7 staged release files; got ${#release_files[@]}." >&2
+            exit 1
+          fi
+
+          {
+            echo "Lemon AI ${version}"
+            echo ""
+            echo "Verified installer targets:"
+            echo "- mac-arm64 DMG"
+            echo "- win-x64 NSIS"
+            echo ""
+            echo "These CI artifacts are unsigned and not notarized. This release is marked prerelease until macOS notarization and Windows code signing are configured."
+            echo ""
+            echo "Build commit: ${GITHUB_SHA}"
+          } > "$notes_file"
+
+          if gh release view "$RELEASE_TAG_NAME" --json isDraft,url > "$state_file" 2>/dev/null; then
+            is_draft="$(node -e "const fs=require('node:fs'); console.log(JSON.parse(fs.readFileSync(process.argv[1], 'utf8')).isDraft ? 'true' : 'false')" "$state_file")"
+            if [ "$is_draft" != "true" ]; then
+              echo "Release ${RELEASE_TAG_NAME} already exists and is published; refusing to overwrite it." >&2
+              exit 1
+            fi
+          else
+            gh release create "$RELEASE_TAG_NAME" \
+              --verify-tag \
+              --draft \
+              --prerelease \
+              --title "Lemon AI ${version}" \
+              --notes-file "$notes_file"
+          fi
+          gh release upload "$RELEASE_TAG_NAME" "${release_files[@]}" --clobber
+          gh release edit "$RELEASE_TAG_NAME" --title "Lemon AI ${version}" --notes-file "$notes_file" --prerelease --draft=false

@@ -12,6 +12,21 @@ import { LocalModelsSettings } from './local-models-settings'
 // payloads, not transport.
 vi.mock('@/hermes', () => ({
   activateLocalModel: vi.fn(),
+  captureCapabilityScope: vi.fn((scope?: null | string | { connectionId?: null | string; profile?: null | string }) => {
+    if (scope && typeof scope === 'object') {
+      const profile = (scope.profile ?? '').trim()
+      const connectionId = (scope.connectionId ?? '').trim()
+
+      return {
+        ...(profile ? { profile } : {}),
+        ...(connectionId ? { connectionId } : {})
+      }
+    }
+
+    const profile = (scope ?? '').trim()
+
+    return profile ? { profile } : {}
+  }),
   deleteLocalModel: vi.fn(),
   downloadBrowsedModel: vi.fn(),
   downloadLocalModel: vi.fn(),
