@@ -18,6 +18,24 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
+def quickstart_fit(monkeypatch):
+    from hermes_cli.local_runtime.catalog import VariantChoice
+
+    monkeypatch.setattr(
+        "hermes_cli.local_runtime.catalog.select_variant",
+        lambda entry, budget: VariantChoice(
+            variant=entry.variants[0],
+            zero_spill=True,
+            reason_key="best-fits",
+        ),
+    )
+    monkeypatch.setattr(
+        "hermes_cli.web_routers.local_models._engine_too_old",
+        lambda min_engine: False,
+    )
+
+
+@pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
     from hermes_cli import web_server
@@ -46,23 +64,29 @@ def test_quickstart_refuses_when_nothing_fits(client, monkeypatch):
     """Preflight is synchronous: a machine no catalog entry fits gets a 409
     with guidance, not a doomed background job."""
     monkeypatch.setattr(
-        "hermes_cli.local_runtime.catalog.select_variant", lambda *a, **k: None)
+        "hermes_cli.local_runtime.catalog.select_variant", lambda *a, **k: None
+    )
     r = client.post("/api/local-models/quickstart", json={})
     assert r.status_code == 409
     assert "Local Models" in r.json()["detail"]
 
 
-def test_quickstart_runs_all_three_legs(client, monkeypatch, tmp_path):
+def test_quickstart_runs_all_three_legs(
+    client,
+    quickstart_fit,
+    monkeypatch,
+    tmp_path,
+):
     """Fresh machine: install runtime -> download recommended -> activate.
     Each leg is asserted by its observable call, in order."""
     calls: list[str] = []
 
     # Leg 1: no runtime installed yet; install is the stubbed binaries call.
-    monkeypatch.setattr(
-        "hermes_cli.local_runtime.binaries.installed_tags", lambda: [])
+    monkeypatch.setattr("hermes_cli.local_runtime.binaries.installed_tags", lambda: [])
     monkeypatch.setattr(
         "hermes_cli.local_runtime.binaries.ensure_runtime_installed",
-        lambda tag, backend, progress=None: calls.append("install"))
+        lambda tag, backend, progress=None: calls.append("install"),
+    )
 
     # Leg 2: nothing staged; the download writes the files the plan names.
     def _fake_download(url, dest, job, *, base_done=0, keep_totals=False):
@@ -71,18 +95,22 @@ def test_quickstart_runs_all_three_legs(client, monkeypatch, tmp_path):
         calls.append("download")
 
     monkeypatch.setattr(
-        "hermes_cli.web_routers.local_models.download_file", _fake_download)
+        "hermes_cli.web_routers.local_models.download_file", _fake_download
+    )
 
     # Leg 3: activation — stub the server start and the model assignment.
     monkeypatch.setattr(
         "hermes_cli.local_runtime.bootstrap.ensure_local_runtime",
-        lambda config, force=False: calls.append("server") or None)
+        lambda config, force=False: calls.append("server") or None,
+    )
     monkeypatch.setattr(
         "hermes_cli.web_routers.local_models._state_endpoint",
-        lambda: {"base_url": "http://127.0.0.1:1/v1", "api_key": "k"})
+        lambda: {"base_url": "http://127.0.0.1:1/v1", "api_key": "k"},
+    )
     monkeypatch.setattr(
         "hermes_cli.web_server_config._apply_model_assignment_sync",
-        lambda *a, **k: calls.append("assign"))
+        lambda *a, **k: calls.append("assign"),
+    )
 
     r = client.post("/api/local-models/quickstart", json={})
     assert r.status_code == 200
@@ -105,35 +133,42 @@ def test_quickstart_runs_all_three_legs(client, monkeypatch, tmp_path):
     assert load_config()["local_runtime"]["enabled"] is True
 
 
-def test_quickstart_skips_satisfied_legs(client, monkeypatch):
+def test_quickstart_skips_satisfied_legs(client, quickstart_fit, monkeypatch):
     """Runtime present and model already staged: the response says so and
     the job goes straight to activation."""
     calls: list[str] = []
 
     monkeypatch.setattr(
-        "hermes_cli.local_runtime.binaries.installed_tags", lambda: ["b10362"])
+        "hermes_cli.local_runtime.binaries.installed_tags", lambda: ["b10362"]
+    )
     monkeypatch.setattr(
         "hermes_cli.local_runtime.binaries.ensure_runtime_installed",
-        lambda tag, backend, progress=None: calls.append("install"))
+        lambda tag, backend, progress=None: calls.append("install"),
+    )
 
     # Every catalog variant reads as staged.
     from hermes_cli.local_runtime.catalog import CATALOG
 
     all_ids = {v.model_id for e in CATALOG for v in e.variants}
     monkeypatch.setattr(
-        "hermes_cli.local_runtime.bootstrap.staged_model_ids", lambda: all_ids)
+        "hermes_cli.local_runtime.bootstrap.staged_model_ids", lambda: all_ids
+    )
     monkeypatch.setattr(
         "hermes_cli.web_routers.local_models.download_file",
-        lambda *a, **k: calls.append("download"))
+        lambda *a, **k: calls.append("download"),
+    )
     monkeypatch.setattr(
         "hermes_cli.local_runtime.bootstrap.ensure_local_runtime",
-        lambda config, force=False: None)
+        lambda config, force=False: None,
+    )
     monkeypatch.setattr(
         "hermes_cli.web_routers.local_models._state_endpoint",
-        lambda: {"base_url": "http://127.0.0.1:1/v1", "api_key": "k"})
+        lambda: {"base_url": "http://127.0.0.1:1/v1", "api_key": "k"},
+    )
     monkeypatch.setattr(
         "hermes_cli.web_server_config._apply_model_assignment_sync",
-        lambda *a, **k: calls.append("assign"))
+        lambda *a, **k: calls.append("assign"),
+    )
 
     r = client.post("/api/local-models/quickstart", json={})
     assert r.status_code == 200
@@ -149,23 +184,14 @@ def test_quickstart_skips_satisfied_legs(client, monkeypatch):
 
 
 @pytest.fixture
-def quickstart_ready(monkeypatch):
+def quickstart_ready(quickstart_fit, monkeypatch):
     """Preflight passes without hardware or network: the runtime reads as
     installed and every entry's first variant is servable, so the POST
     reaches the single-flight lock instead of 409ing at fit/engine
     preflight on machines where nothing fits."""
-    from hermes_cli.local_runtime.catalog import VariantChoice
-
     monkeypatch.setattr(
-        "hermes_cli.local_runtime.binaries.installed_tags", lambda: ["b10362"])
-    monkeypatch.setattr(
-        "hermes_cli.local_runtime.catalog.select_variant",
-        lambda entry, budget: VariantChoice(variant=entry.variants[0],
-                                            zero_spill=True,
-                                            reason_key="best-fits"))
-    monkeypatch.setattr(
-        "hermes_cli.web_routers.local_models._engine_too_old",
-        lambda min_engine: False)
+        "hermes_cli.local_runtime.binaries.installed_tags", lambda: ["b10362"]
+    )
 
 
 def test_quickstart_is_single_flight(client, quickstart_ready, monkeypatch):
@@ -192,6 +218,7 @@ def test_assign_default_reaches_model_assignment(monkeypatch):
     seen: list[tuple] = []
     monkeypatch.setattr(
         "hermes_cli.web_server_config._apply_model_assignment_sync",
-        lambda *a, **k: seen.append(a))
+        lambda *a, **k: seen.append(a),
+    )
     lm._assign_default({}, "some-model")
     assert seen == [("main", "llamacpp", "some-model", "", "", "")]

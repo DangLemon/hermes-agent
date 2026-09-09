@@ -113,16 +113,17 @@ def test_materialization_fails_closed():
     )
 
 
-def test_partial_clone_failure_still_cleans_up_and_exits():
+def test_partial_clone_failure_still_tries_archive_then_exits():
     branch = _https_branch()
     m = re.search(
         r'if \[ "\$clone_ok" = true \]; then\n\s*log_success "Cloned via HTTPS"'
+        r"\n\s*elif download_archive_checkout; then\n\s*clone_ok=true"
         r"\n\s*else\n\s*log_error \"Failed to clone repository\"\n\s*exit 1",
         branch,
     )
     assert m is not None, (
-        "when the fallback also fails the installer must still report the "
-        "failure and exit 1"
+        "when both git fallbacks and the archive fallback fail, the installer "
+        "must still report the failure and exit 1"
     )
 
 

@@ -18,6 +18,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 INSTALL_SH = REPO_ROOT / "scripts" / "install.sh"
 INSTALL_PS1 = REPO_ROOT / "scripts" / "install.ps1"
+MANAGED_ORIGIN = "https://github.com/NousResearch/hermes-agent.git"
 POWERSHELL = next(
     (candidate for candidate in ("pwsh", "powershell") if shutil.which(candidate)),
     None,
@@ -34,8 +35,17 @@ def _git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProce
     )
 
 
-def _make_conflicted_managed_checkout(tmp_path: Path) -> Path:
-    """Create a managed checkout whose autostash conflicts with its origin."""
+def _installer_env(tmp_path: Path, managed: Path, remote: Path) -> dict[str, str]:
+    return os.environ | {
+        "HERMES_HOME": str(tmp_path / "hermes-home"),
+        "HERMES_INSTALL_DIR": str(managed),
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": f"url.{remote.as_uri()}.insteadOf",
+        "GIT_CONFIG_VALUE_0": MANAGED_ORIGIN,
+    }
+
+
+def _make_managed_checkout(tmp_path: Path) -> tuple[Path, Path]:
     seed = tmp_path / "seed"
     seed.mkdir()
     _git(seed, "init")
@@ -51,6 +61,14 @@ def _make_conflicted_managed_checkout(tmp_path: Path) -> Path:
 
     managed = tmp_path / "hermes-agent"
     _git(tmp_path, "clone", "--branch", "main", str(remote), str(managed))
+    _git(managed, "remote", "set-url", "origin", MANAGED_ORIGIN)
+
+    return managed, remote
+
+
+def _make_conflicted_managed_checkout(tmp_path: Path) -> tuple[Path, Path]:
+    """Create a managed checkout whose autostash conflicts with its origin."""
+    managed, remote = _make_managed_checkout(tmp_path)
 
     (managed / "tracked.txt").write_text("local edit\n", encoding="utf-8")
 
@@ -60,7 +78,7 @@ def _make_conflicted_managed_checkout(tmp_path: Path) -> Path:
     _git(upstream, "commit", "-am", "upstream")
     _git(upstream, "push", "origin", "main")
 
-    return managed
+    return managed, remote
 
 
 def _assert_conflict_was_recovered(repo: Path, output: str) -> None:
@@ -86,11 +104,8 @@ def _assert_conflict_was_recovered(repo: Path, output: str) -> None:
 def test_install_sh_repository_stage_recovers_from_autostash_conflict(
     tmp_path: Path,
 ) -> None:
-    managed = _make_conflicted_managed_checkout(tmp_path)
-    env = os.environ | {
-        "HERMES_HOME": str(tmp_path / "hermes-home"),
-        "HERMES_INSTALL_DIR": str(managed),
-    }
+    managed, remote = _make_conflicted_managed_checkout(tmp_path)
+    env = _installer_env(tmp_path, managed, remote)
 
     result = subprocess.run(
         ["bash", str(INSTALL_SH), "--stage", "repository", "--non-interactive"],
@@ -112,7 +127,8 @@ def test_install_sh_repository_stage_recovers_from_autostash_conflict(
 def test_install_ps1_repository_stage_recovers_from_autostash_conflict(
     tmp_path: Path,
 ) -> None:
-    managed = _make_conflicted_managed_checkout(tmp_path)
+    assert POWERSHELL is not None
+    managed, remote = _make_conflicted_managed_checkout(tmp_path)
     result = subprocess.run(
         [
             POWERSHELL,
@@ -128,6 +144,7 @@ def test_install_ps1_repository_stage_recovers_from_autostash_conflict(
             str(tmp_path / "hermes-home"),
         ],
         cwd=tmp_path,
+        env=_installer_env(tmp_path, managed, remote),
         capture_output=True,
         text=True,
     )
@@ -149,21 +166,7 @@ def test_install_sh_repository_stage_clean_apply_drops_stash(
     The conflict-recovery fix must not regress the normal path — when stash apply
     succeeds cleanly, the stash should be dropped and local changes restored.
     """
-    seed = tmp_path / "seed"
-    seed.mkdir()
-    _git(seed, "init")
-    (seed / "tracked.txt").write_text("base\n", encoding="utf-8")
-    _git(seed, "add", "tracked.txt")
-    _git(seed, "commit", "-m", "base")
-    _git(seed, "branch", "-M", "main")
-
-    remote = tmp_path / "origin.git"
-    _git(tmp_path, "init", "--bare", str(remote))
-    _git(seed, "remote", "add", "origin", str(remote))
-    _git(seed, "push", "-u", "origin", "main")
-
-    managed = tmp_path / "hermes-agent"
-    _git(tmp_path, "clone", "--branch", "main", str(remote), str(managed))
+    managed, remote = _make_managed_checkout(tmp_path)
 
     # Local edit on a file upstream will NOT touch — no conflict on apply.
     (managed / "local-only.txt").write_text("local edit\n", encoding="utf-8")
@@ -174,10 +177,7 @@ def test_install_sh_repository_stage_clean_apply_drops_stash(
     _git(upstream, "commit", "-am", "upstream")
     _git(upstream, "push", "origin", "main")
 
-    env = os.environ | {
-        "HERMES_HOME": str(tmp_path / "hermes-home"),
-        "HERMES_INSTALL_DIR": str(managed),
-    }
+    env = _installer_env(tmp_path, managed, remote)
     result = subprocess.run(
         ["bash", str(INSTALL_SH), "--stage", "repository", "--non-interactive"],
         cwd=tmp_path,
@@ -187,9 +187,13 @@ def test_install_sh_repository_stage_clean_apply_drops_stash(
     )
 
     assert result.returncode == 0, result.stderr
-    assert "Local changes were restored on top of the updated codebase." in result.stdout
+    assert (
+        "Local changes were restored on top of the updated codebase." in result.stdout
+    )
     # Stash must be dropped on a clean apply — not preserved.
-    assert _git(managed, "stash", "list").stdout.strip() == "", "stash must be dropped on clean apply"
+    assert _git(managed, "stash", "list").stdout.strip() == "", (
+        "stash must be dropped on clean apply"
+    )
     # Local changes must be present in the working tree.
     assert (managed / "local-only.txt").read_text(encoding="utf-8") == "local edit\n"
     assert (managed / "tracked.txt").read_text(encoding="utf-8") == "upstream edit\n"
