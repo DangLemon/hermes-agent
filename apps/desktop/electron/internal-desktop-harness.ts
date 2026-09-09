@@ -5,9 +5,12 @@ import path from 'node:path'
 export const HARNESS_RESOURCE_FILENAME = 'internal-desktop-harness.json'
 const HARNESS_SCHEMA_VERSION = 1
 const UI_KEYS = ['agents', 'cron', 'messaging', 'terminal', 'webhooks'] as const
-const SOURCE_REPOSITORY_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/
-const SECRET_KEY_RE = /(^|[_-])(api[_-]?key|authorization|bearer|client[_-]?secret|password|secret|token)([_-]|$)|^(api[_-]?key|authorization|bearer|client[_-]?secret|password|secret|token)$/i
-const SECRET_VALUE_RE = /\b(?:bearer\s+(?!\$\{)[a-z0-9._~+/=-]{12,}|sk-[a-z0-9_-]{12,}|[a-z0-9_]*token[a-z0-9_]*\s*[:=]\s*[a-z0-9._~+/=-]{12,})\b/i
+const SOURCE_REPOSITORY_RE =
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/
+const SECRET_KEY_RE =
+  /(^|[_-])(api[_-]?key|authorization|bearer|client[_-]?secret|password|secret|token)([_-]|$)|^(api[_-]?key|authorization|bearer|client[_-]?secret|password|secret|token)$/i
+const SECRET_VALUE_RE =
+  /\b(?:bearer\s+(?!\$\{)[a-z0-9._~+/=-]{12,}|sk-[a-z0-9_-]{12,}|[a-z0-9_]*token[a-z0-9_]*\s*[:=]\s*[a-z0-9._~+/=-]{12,})\b/i
 const OPAQUE_SECRET_VALUE_RE = /^[A-Za-z0-9._~+/=-]{16,}$/
 const AUTH_LIKE_KEY_RE = /(auth|authorization|token|secret|password|credential|api[-_]?key)/i
 
@@ -67,7 +70,6 @@ function validateSourceRepository(value: unknown): void {
   }
 }
 
-
 function validateCredentialRequirements(value: unknown, trail: string[] = ['credentialRequirements']): void {
   if (!isPlainObject(value)) {
     fail(`${trail.join('.')} must be an object`)
@@ -108,7 +110,11 @@ function validateCredentialRequirementNode(value: unknown, trail: string[]): voi
     const parentKey = trail[trail.length - 1]
     const metadataMap = ['mcpServers', 'mcp_servers', 'labels'].includes(parentKey)
 
-    if (!metadataMap && !['requiredEnv', 'required_env', 'label', 'labels', 'name', 'names', 'login'].includes(key) && !/^<[^>]+>$/.test(key)) {
+    if (
+      !metadataMap &&
+      !['requiredEnv', 'required_env', 'label', 'labels', 'name', 'names', 'login'].includes(key) &&
+      !/^<[^>]+>$/.test(key)
+    ) {
       fail(`credentialRequirements contains unsupported key ${[...trail, key].join('.')}`)
     }
 
@@ -129,10 +135,15 @@ function scanNonSecret(value: unknown, trail: string[] = []): void {
         fail(`secret-shaped field at ${[...trail, key].join('.')}`)
       }
 
-      if (trail[0] !== 'credentialRequirements' && AUTH_LIKE_KEY_RE.test(key) && typeof child === 'string' && !isEnvironmentReference(child) && OPAQUE_SECRET_VALUE_RE.test(child)) {
+      if (
+        trail[0] !== 'credentialRequirements' &&
+        AUTH_LIKE_KEY_RE.test(key) &&
+        typeof child === 'string' &&
+        !isEnvironmentReference(child) &&
+        OPAQUE_SECRET_VALUE_RE.test(child)
+      ) {
         fail(`secret-shaped value at ${[...trail, key].join('.')}`)
       }
-
 
       scanNonSecret(child, [...trail, key])
     }
@@ -148,25 +159,41 @@ function scanNonSecret(value: unknown, trail: string[] = []): void {
 }
 
 export function validateInternalDesktopHarnessResource(input: unknown): InternalDesktopHarnessResource {
-  if (!isPlainObject(input)) {fail('resource must be a JSON object')}
+  if (!isPlainObject(input)) {
+    fail('resource must be a JSON object')
+  }
 
-  if (input.schemaVersion !== HARNESS_SCHEMA_VERSION) {fail(`schemaVersion must be ${HARNESS_SCHEMA_VERSION}`)}
+  if (input.schemaVersion !== HARNESS_SCHEMA_VERSION) {
+    fail(`schemaVersion must be ${HARNESS_SCHEMA_VERSION}`)
+  }
 
-  if (input.profile !== 'internal') {fail('profile must be "internal"')}
+  if (input.profile !== 'internal') {
+    fail('profile must be "internal"')
+  }
 
-  if ('sourceRepository' in input) {validateSourceRepository(input.sourceRepository)}
+  if ('sourceRepository' in input) {
+    validateSourceRepository(input.sourceRepository)
+  }
 
-  if (!isPlainObject(input.ui)) {fail('ui must be an object')}
+  if (!isPlainObject(input.ui)) {
+    fail('ui must be an object')
+  }
 
   for (const key of UI_KEYS) {
-    if (typeof input.ui[key] !== 'boolean') {fail(`ui.${key} must be boolean`)}
+    if (typeof input.ui[key] !== 'boolean') {
+      fail(`ui.${key} must be boolean`)
+    }
   }
 
   for (const key of Object.keys(input.ui)) {
-    if (!(UI_KEYS as readonly string[]).includes(key)) {fail(`ui.${key} is not part of the frozen schema`)}
+    if (!(UI_KEYS as readonly string[]).includes(key)) {
+      fail(`ui.${key} is not part of the frozen schema`)
+    }
   }
 
-  if ('managedConfig' in input && !isPlainObject(input.managedConfig)) {fail('managedConfig must be an object when present')}
+  if ('managedConfig' in input && !isPlainObject(input.managedConfig)) {
+    fail('managedConfig must be an object when present')
+  }
 
   if ('credentialRequirements' in input) {
     validateCredentialRequirements(input.credentialRequirements)
@@ -176,17 +203,23 @@ export function validateInternalDesktopHarnessResource(input: unknown): Internal
 
   if (isPlainObject(input.managedConfig)) {
     for (const key of Object.keys(input.managedConfig)) {
-      if (!['model', 'mcp_servers'].includes(key)) {fail(`managedConfig.${key} is not allowed`)}
+      if (!['model', 'mcp_servers'].includes(key)) {
+        fail(`managedConfig.${key} is not allowed`)
+      }
     }
 
     if ('model' in input.managedConfig) {
       const model = input.managedConfig.model
 
-      if (!isPlainObject(model)) {fail('managedConfig.model must be an object')}
+      if (!isPlainObject(model)) {
+        fail('managedConfig.model must be an object')
+      }
       const modelKeys = Object.keys(model)
 
       for (const key of modelKeys) {
-        if (!['provider', 'default', 'base_url', 'api_key'].includes(key)) {fail(`managedConfig.model.${key} is not allowed`)}
+        if (!['provider', 'default', 'base_url', 'api_key'].includes(key)) {
+          fail(`managedConfig.model.${key} is not allowed`)
+        }
       }
 
       if (!modelKeys.includes('provider') || !modelKeys.includes('default')) {
@@ -196,7 +229,9 @@ export function validateInternalDesktopHarnessResource(input: unknown): Internal
       requireNonEmptyString(model.provider, 'managedConfig.model.provider')
       requireNonEmptyString(model.default, 'managedConfig.model.default')
 
-      if ('base_url' in model) {requireNonEmptyString(model.base_url, 'managedConfig.model.base_url')}
+      if ('base_url' in model) {
+        requireNonEmptyString(model.base_url, 'managedConfig.model.base_url')
+      }
 
       if ('api_key' in model && !isEnvironmentReference(model.api_key)) {
         fail('managedConfig.model.api_key must be an environment reference')
@@ -222,7 +257,9 @@ export function loadInternalDesktopHarnessResource({
   ].filter(Boolean) as string[]
 
   for (const candidate of candidates) {
-    if (!fs.existsSync(candidate)) {continue}
+    if (!fs.existsSync(candidate)) {
+      continue
+    }
 
     try {
       const parsed = JSON.parse(fs.readFileSync(candidate, 'utf8'))
@@ -252,7 +289,11 @@ export function materializeInternalDesktopManagedConfig(
 ): string {
   const managedDir = path.join(userDataPath, 'internal-desktop-harness', `${pid}-${nonce()}`)
   fs.mkdirSync(managedDir, { recursive: true })
-  fs.writeFileSync(path.join(managedDir, 'config.yaml'), `${JSON.stringify(resource.managedConfig || {}, null, 2)}\n`, 'utf8')
+  fs.writeFileSync(
+    path.join(managedDir, 'config.yaml'),
+    `${JSON.stringify(resource.managedConfig || {}, null, 2)}\n`,
+    'utf8'
+  )
 
   return managedDir
 }

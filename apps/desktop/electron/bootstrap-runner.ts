@@ -44,7 +44,8 @@ const IS_WINDOWS = process.platform === 'win32'
 
 const HARNESS_RESOURCE_FILENAME = 'internal-desktop-harness.json'
 const DEFAULT_SOURCE_REPOSITORY = 'NousResearch/hermes-agent'
-const SOURCE_REPOSITORY_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/
+const SOURCE_REPOSITORY_RE =
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/
 const STAMP_COMMIT_RE = /^[0-9a-f]{7,40}$/i
 const FALLBACK_COMMIT_RE = /^0{7,40}$/
 const FALLBACK_BRANCH = 'main'
@@ -102,7 +103,9 @@ function readHarnessSourceRepository(candidate) {
       return validateSourceRepository(parsed.sourceRepository)
     }
   } catch (error) {
-    throw new Error(`invalid ${HARNESS_RESOURCE_FILENAME} sourceRepository at ${candidate}: ${(error as Error).message}`)
+    throw new Error(
+      `invalid ${HARNESS_RESOURCE_FILENAME} sourceRepository at ${candidate}: ${(error as Error).message}`
+    )
   }
 
   return null
@@ -112,14 +115,21 @@ function resolveBootstrapSourceRepository({
   resourcesPath = (process as any).resourcesPath,
   env,
   environ = env || process['env']
-}: { resourcesPath?: string | null; env?: Record<string, string | undefined>; environ?: Record<string, string | undefined> } = {}) {
-  const packaged = readHarnessSourceRepository(resourcesPath ? path.join(resourcesPath, HARNESS_RESOURCE_FILENAME) : null)
+}: {
+  resourcesPath?: string | null
+  env?: Record<string, string | undefined>
+  environ?: Record<string, string | undefined>
+} = {}) {
+  const packaged = readHarnessSourceRepository(
+    resourcesPath ? path.join(resourcesPath, HARNESS_RESOURCE_FILENAME) : null
+  )
 
   if (packaged) {
     return packaged
   }
 
-  const selected = typeof environ.HERMES_DESKTOP_HARNESS_CONFIG === 'string' ? environ.HERMES_DESKTOP_HARNESS_CONFIG.trim() : ''
+  const selected =
+    typeof environ.HERMES_DESKTOP_HARNESS_CONFIG === 'string' ? environ.HERMES_DESKTOP_HARNESS_CONFIG.trim() : ''
 
   return (selected ? readHarnessSourceRepository(path.resolve(selected)) : null) || DEFAULT_SOURCE_REPOSITORY
 }

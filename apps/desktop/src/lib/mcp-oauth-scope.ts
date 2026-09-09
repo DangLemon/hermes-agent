@@ -35,7 +35,6 @@ export function useMcpOAuthScopeGuard(scope?: ProfileScope): () => () => boolean
   const epoch = useRef(0)
   const scopeKey = profileScopeKey(scope)
 
-
   useEffect(
     () => () => {
       epoch.current += 1

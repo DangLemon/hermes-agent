@@ -226,13 +226,7 @@ describe('ChatBar internal floating composer', () => {
 
     render(
       <I18nProvider configClient={null} initialLocale="vi">
-        <ChatBar
-          busy={false}
-          disabled={false}
-          onCancel={vi.fn()}
-          onSubmit={vi.fn()}
-          state={state}
-        />
+        <ChatBar busy={false} disabled={false} onCancel={vi.fn()} onSubmit={vi.fn()} state={state} />
       </I18nProvider>
     )
 

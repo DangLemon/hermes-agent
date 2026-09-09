@@ -1,9 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import {
-  resetInternalCompanyCapabilities,
-  updateInternalCompanyRuntimeReadiness
-} from '@/app/internal-company/store'
+import { resetInternalCompanyCapabilities, updateInternalCompanyRuntimeReadiness } from '@/app/internal-company/store'
 import { getStatus } from '@/hermes'
 import { evaluateRuntimeReadiness, type RuntimeReadinessResult } from '@/lib/runtime-readiness'
 import type { StatusResponse } from '@/types/hermes'

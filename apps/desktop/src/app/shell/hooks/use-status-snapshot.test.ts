@@ -11,7 +11,6 @@ vi.mock('@/hermes', () => ({
   getStatus: vi.fn()
 }))
 
-
 type GatewayRequester = <T = unknown>(method: string, params?: Record<string, unknown>) => Promise<T>
 
 async function flushAsync() {
@@ -188,7 +187,8 @@ describe('useStatusSnapshot', () => {
   })
 
   it('updates internal-company harness provisioning from scoped runtime readiness without a status endpoint', async () => {
-    const { $internalCompanyCapabilities, setInternalCompanyCapabilitiesForTest } = await import('@/app/internal-company/store')
+    const { $internalCompanyCapabilities, setInternalCompanyCapabilitiesForTest } =
+      await import('@/app/internal-company/store')
     const { initialInternalCompanyCapabilities } = await import('@/app/internal-company/capabilities')
 
     setInternalCompanyCapabilitiesForTest(initialInternalCompanyCapabilities(true))

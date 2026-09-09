@@ -1,10 +1,4 @@
-import {
-  addMcpServer,
-  createMcpOAuthClient,
-  getMcpCatalog,
-  listMcpServers,
-  removeMcpServer
-} from '@/hermes'
+import { addMcpServer, createMcpOAuthClient, getMcpCatalog, listMcpServers, removeMcpServer } from '@/hermes'
 import { translateNow } from '@/i18n'
 import { completeMcpDesktopOAuth, McpOAuthCancelled } from '@/lib/mcp-dashboard-oauth'
 import { MCP_DIRECTORY } from '@/lib/mcp-directory'

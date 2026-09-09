@@ -72,7 +72,15 @@ const SETTINGS_VIEWS: readonly SettingsViewId[] = [
   'about'
 ]
 
-const HARNESS_ALLOWED_CONFIG_SECTIONS = new Set(['appearance', 'browser', 'chat', 'memory', 'safety', 'voice', 'workspace'])
+const HARNESS_ALLOWED_CONFIG_SECTIONS = new Set([
+  'appearance',
+  'browser',
+  'chat',
+  'memory',
+  'safety',
+  'voice',
+  'workspace'
+])
 
 const HARNESS_ALLOWED_SETTINGS_VIEWS: readonly SettingsViewId[] = [
   'config:appearance',

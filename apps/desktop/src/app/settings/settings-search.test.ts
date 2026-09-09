@@ -97,8 +97,6 @@ describe('settings search index', () => {
     expect(credentialSettingsView(envVar('provider'))).toBeNull()
   })
 
-
-
   it('filters company-managed blocked settings entries while preserving normal search entries', () => {
     const schema: Record<string, ConfigFieldSchema> = {
       'display.personality': { type: 'select' },

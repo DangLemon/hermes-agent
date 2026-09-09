@@ -149,7 +149,6 @@ export function buildCredentialSearchEntries(
     })
 }
 
-
 function companyManagedAllowsSettingsSearchEntry(entry: SettingsSearchEntry): boolean {
   const view = entry.target.view
 

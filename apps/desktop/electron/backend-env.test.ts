@@ -147,7 +147,6 @@ test('buildDesktopBackendEnv forces PYTHONUTF8 unless the user set it explicitly
   assert.equal(optedOut.PYTHONUTF8, '0')
 })
 
-
 test('buildDesktopBackendEnv propagates HERMES_MANAGED_DIR only when supplied', () => {
   const mac = buildDesktopBackendEnv({
     hermesHome: '/Users/test/.hermes',

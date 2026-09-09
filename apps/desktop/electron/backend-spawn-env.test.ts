@@ -25,7 +25,6 @@ for (const label of ['primary', 'pooled'] as const) {
   })
 }
 
-
 test('resolver-provided PATH hermes CLI backend env reaches spawn env before config load', () => {
   const resolverOutput = { env: { HERMES_MANAGED_DIR: '/tmp/path-cli-managed', PYTHONUTF8: '1' } }
 

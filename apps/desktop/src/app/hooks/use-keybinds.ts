@@ -187,7 +187,8 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
   }
 
   handlersRef.current = {
-    'keybinds.openPanel': () => routeAllowed(`${SETTINGS_ROUTE}?tab=keybinds`) && navigate(`${SETTINGS_ROUTE}?tab=keybinds`),
+    'keybinds.openPanel': () =>
+      routeAllowed(`${SETTINGS_ROUTE}?tab=keybinds`) && navigate(`${SETTINGS_ROUTE}?tab=keybinds`),
 
     'composer.focus': () => requestComposerFocus('active'),
     // Toggle the composer pill's live model dropdown (pane under the pointer,

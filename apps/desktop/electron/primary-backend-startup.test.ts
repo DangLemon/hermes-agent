@@ -175,7 +175,6 @@ test('reset rejects with a typed error and never enters either backend', async (
   assert.equal(options.ensureLocalRuntime.mock.calls.length, 0)
 })
 
-
 test('internal harness force-local mode ignores saved and applied remote backends', async () => {
   const options = startupOptions({
     forceLocalBackend: true,
@@ -191,21 +190,19 @@ test('internal harness force-local mode ignores saved and applied remote backend
   assert.equal(options.resolveRemote.mock.calls.length, 0)
 })
 
-
 test('internal harness force-local mode skips first-run decision wait', async () => {
   const options = startupOptions({ forceLocalBackend: true })
   await runPrimaryBackendStartup(options)
   assert.equal(options.waitForDecision.mock.calls.length, 0)
 })
 
-
 test('internal harness launch scope uses default profile and omits persisted profile arg', () => {
-  assert.deepEqual(
-    resolvePrimaryHarnessLaunchScope({ harnessRequested: true, persistedProfile: 'remote-worker' }),
-    { primaryProfile: 'default', backendArgs: ['serve', '--host', '127.0.0.1', '--port', '0'] }
-  )
-  assert.deepEqual(
-    resolvePrimaryHarnessLaunchScope({ harnessRequested: false, persistedProfile: 'remote-worker' }),
-    { primaryProfile: 'remote-worker', backendArgs: ['--profile', 'remote-worker', 'serve', '--host', '127.0.0.1', '--port', '0'] }
-  )
+  assert.deepEqual(resolvePrimaryHarnessLaunchScope({ harnessRequested: true, persistedProfile: 'remote-worker' }), {
+    primaryProfile: 'default',
+    backendArgs: ['serve', '--host', '127.0.0.1', '--port', '0']
+  })
+  assert.deepEqual(resolvePrimaryHarnessLaunchScope({ harnessRequested: false, persistedProfile: 'remote-worker' }), {
+    primaryProfile: 'remote-worker',
+    backendArgs: ['--profile', 'remote-worker', 'serve', '--host', '127.0.0.1', '--port', '0']
+  })
 })

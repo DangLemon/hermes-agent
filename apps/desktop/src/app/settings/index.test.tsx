@@ -4,12 +4,17 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { initialInternalCompanyCapabilities } from '@/app/internal-company/capabilities'
-import { resetInternalCompanyCapabilitiesForTest, setInternalCompanyCapabilitiesForTest } from '@/app/internal-company/store'
+import {
+  resetInternalCompanyCapabilitiesForTest,
+  setInternalCompanyCapabilitiesForTest
+} from '@/app/internal-company/store'
 
 vi.mock('./about-settings', () => ({ AboutSettings: () => <div>About panel</div> }))
 vi.mock('./appearance-settings', () => ({ AppearanceSettings: () => <div>Appearance panel</div> }))
 vi.mock('./billing', () => ({ BillingSettings: () => <div>Billing panel</div> }))
-vi.mock('./config-settings', () => ({ ConfigSettings: ({ activeSectionId }: { activeSectionId: string }) => <div>Config {activeSectionId}</div> }))
+vi.mock('./config-settings', () => ({
+  ConfigSettings: ({ activeSectionId }: { activeSectionId: string }) => <div>Config {activeSectionId}</div>
+}))
 vi.mock('./gateway-settings', () => ({ GatewaySettings: () => <div>Gateway panel</div> }))
 vi.mock('./keybind-settings', () => ({ KeybindSettings: () => <div>Keybinds panel</div> }))
 vi.mock('./keys-settings', () => ({

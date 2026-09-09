@@ -244,9 +244,10 @@ test('resolveInstallScript downloads internal scripts from the harness repositor
       }
     })
 
-    assert.deepEqual(calls.map(call => ({ ref: call.ref, sourceRepository: call.sourceRepository })), [
-      { ref: commit, sourceRepository: 'DangLemon/hermes-agent' }
-    ])
+    assert.deepEqual(
+      calls.map(call => ({ ref: call.ref, sourceRepository: call.sourceRepository })),
+      [{ ref: commit, sourceRepository: 'DangLemon/hermes-agent' }]
+    )
     assert.equal(result.source, 'download')
     assert.equal(result.path, cachedScriptPath(home, commit, 'DangLemon/hermes-agent'))
     assert.ok(result.path.includes('DangLemon__hermes-agent'))
@@ -263,7 +264,12 @@ test('resolveBootstrapSourceRepository reads packaged harness sourceRepository a
     fs.mkdirSync(resourcesPath, { recursive: true })
     fs.writeFileSync(
       path.join(resourcesPath, 'internal-desktop-harness.json'),
-      JSON.stringify({ schemaVersion: 1, profile: 'internal', sourceRepository: 'DangLemon/hermes-agent', ui: { agents: false, cron: true, messaging: false, terminal: true, webhooks: false } }),
+      JSON.stringify({
+        schemaVersion: 1,
+        profile: 'internal',
+        sourceRepository: 'DangLemon/hermes-agent',
+        ui: { agents: false, cron: true, messaging: false, terminal: true, webhooks: false }
+      }),
       'utf8'
     )
 
@@ -271,7 +277,12 @@ test('resolveBootstrapSourceRepository reads packaged harness sourceRepository a
 
     fs.writeFileSync(
       path.join(resourcesPath, 'internal-desktop-harness.json'),
-      JSON.stringify({ schemaVersion: 1, profile: 'internal', sourceRepository: 'https://github.com/DangLemon/hermes-agent', ui: { agents: false, cron: true, messaging: false, terminal: true, webhooks: false } }),
+      JSON.stringify({
+        schemaVersion: 1,
+        profile: 'internal',
+        sourceRepository: 'https://github.com/DangLemon/hermes-agent',
+        ui: { agents: false, cron: true, messaging: false, terminal: true, webhooks: false }
+      }),
       'utf8'
     )
     assert.throws(() => resolveBootstrapSourceRepository({ resourcesPath, env: {} }), /sourceRepository/)

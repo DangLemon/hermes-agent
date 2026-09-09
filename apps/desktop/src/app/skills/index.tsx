@@ -969,9 +969,7 @@ export function SkillsView({
       id="skill-create-editor"
       onClose={() => closeCreateEditor({ restoreFocus: true })}
       title={
-        <span className="text-[0.68rem] font-normal text-muted-foreground/60">
-          {createSkillTriggerLabel}/SKILL.md
-        </span>
+        <span className="text-[0.68rem] font-normal text-muted-foreground/60">{createSkillTriggerLabel}/SKILL.md</span>
       }
     >
       <form
@@ -1148,7 +1146,13 @@ export function SkillsView({
       // searching it is noise.
       searchHidden={effectiveMode === 'mcp'}
       searchHints={harnessMode ? [] : searchHints}
-      searchPlaceholder={effectiveMode === 'skills' ? (harnessMode ? t.internalWorkspace.skills.searchPlaceholder : t.skills.searchSkills) : t.skills.searchToolsets}
+      searchPlaceholder={
+        effectiveMode === 'skills'
+          ? harnessMode
+            ? t.internalWorkspace.skills.searchPlaceholder
+            : t.skills.searchSkills
+          : t.skills.searchToolsets
+      }
       searchTrailingAction={
         effectiveMode === 'skills' && !createEditorOpen ? (
           <Button onClick={openCreateEditor} ref={newSkillButtonRef} size="xs" variant="text">
@@ -1158,7 +1162,11 @@ export function SkillsView({
       }
       searchValue={query}
       tabs={[
-        { id: 'skills', label: harnessMode ? t.internalWorkspace.skills.skillsTab : t.skills.tabSkills, meta: skills?.length ?? null },
+        {
+          id: 'skills',
+          label: harnessMode ? t.internalWorkspace.skills.skillsTab : t.skills.tabSkills,
+          meta: skills?.length ?? null
+        },
         ...(harnessMode
           ? []
           : [

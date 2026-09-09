@@ -34,7 +34,6 @@ interface ResolvedPrimaryRemote {
   wsUrl: string
 }
 
-
 export function resolvePrimaryHarnessLaunchScope({
   harnessRequested,
   persistedProfile
