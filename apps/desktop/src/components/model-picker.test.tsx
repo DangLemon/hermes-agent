@@ -12,6 +12,21 @@ import type { LocalRuntimeJob, ModelOptionsResponse } from '@/types/hermes'
 import { ModelPickerDialog } from './model-picker'
 
 vi.mock('@/hermes', () => ({
+  captureCapabilityScope: vi.fn((scope?: null | string | { connectionId?: null | string; profile?: null | string }) => {
+    if (scope && typeof scope === 'object') {
+      const profile = (scope.profile ?? '').trim()
+      const connectionId = (scope.connectionId ?? '').trim()
+
+      return {
+        ...(profile ? { profile } : {}),
+        ...(connectionId ? { connectionId } : {})
+      }
+    }
+
+    const profile = (scope ?? '').trim()
+
+    return profile ? { profile } : {}
+  }),
   getLocalModelsStatus: vi.fn().mockResolvedValue({ loading: {} })
 }))
 vi.mock('@/lib/model-options', async importOriginal => ({

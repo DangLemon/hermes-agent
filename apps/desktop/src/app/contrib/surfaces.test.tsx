@@ -30,6 +30,17 @@ vi.mock('../shell/hooks/use-statusbar-items', () => ({
 vi.mock('../shell/statusbar-controls', () => ({ StatusbarControls: () => null }))
 vi.mock('../routes', () => ({
   contributedRoutes: () => [],
+  internalCompanyRouteAllowed: vi.fn(
+    (to: string, state: { allowedRoutes?: Set<string>; mode?: 'harness' | 'upstream' } = { mode: 'upstream' }) => {
+      if (state.mode === 'upstream') {
+        return true
+      }
+
+      const path = to.split(/[?#]/, 1)[0] || '/'
+
+      return state.allowedRoutes?.has(path) ?? true
+    }
+  ),
   NEW_CHAT_ROUTE: '/new',
   ROUTES_AREA: 'routes',
   sessionRoute: (id: string) => `/${id}`
