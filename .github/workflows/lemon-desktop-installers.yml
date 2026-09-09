@@ -95,7 +95,7 @@ jobs:
           version="$(node -p "require('./apps/desktop/package.json').version")"
           target="mac-arm64"
           installer="apps/desktop/release/Lemon-AI-${version}-${target}.dmg"
-          app="apps/desktop/release/mac-arm64/Hermes.app"
+          app="apps/desktop/release/mac-arm64/Lemon AI.app"
           output_dir="${RUNNER_TEMP}/lemon-installer-ci/${target}"
 
           test -f "$installer"

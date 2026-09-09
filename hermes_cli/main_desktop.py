@@ -55,7 +55,7 @@ def _renderer_bundle_dir(desktop_dir: Path, *, source_mode: bool) -> Optional[Pa
     if executable is None:
         return None
 
-    # macOS: …/Hermes.app/Contents/MacOS/Hermes → …/Contents/Resources
+    # macOS: …/Lemon AI.app/Contents/MacOS/Hermes → …/Contents/Resources
     resources = (
         executable.parent.parent / "Resources" if sys.platform == "darwin" else executable.parent / "resources"
     )
@@ -133,7 +133,20 @@ def _desktop_packaged_executable_in(release_dir: Path) -> Optional[Path]:
     stage-and-swap staging dir (#86443).
     """
     if sys.platform == "darwin":
-        candidates = list(release_dir.glob("mac*/Hermes.app/Contents/MacOS/Hermes"))
+        mac_candidates = [
+            (p, brand_priority)
+            for brand_priority, pattern in enumerate(
+                (
+                    "mac*/Hermes.app/Contents/MacOS/Hermes",
+                    "mac*/Lemon AI.app/Contents/MacOS/Hermes",
+                )
+            )
+            for p in release_dir.glob(pattern)
+            if p.is_file() and os.access(p, os.X_OK)
+        ]
+        if not mac_candidates:
+            return None
+        return max(mac_candidates, key=lambda item: (item[0].parents[2].stat().st_mtime, item[1]))[0]
     elif sys.platform == "win32":
         candidates = [
             release_dir / d / "Hermes.exe" for d in ("win-unpacked", "win-ia32-unpacked", "win-arm64-unpacked")
@@ -162,7 +175,7 @@ def _desktop_packaged_executable_in(release_dir: Path) -> Optional[Path]:
 
 
 # ─── Desktop stage-and-swap pack (#86443) ─────────────────────────────────── electron-builder packs IN
-# PLACE: before-pack.mjs wipes ``release/<platform>- unpacked`` (or the mac ``Hermes.app``) and the Electron
+# PLACE: before-pack.mjs wipes ``release/<platform>- unpacked`` (or the mac ``Lemon AI.app``/``Hermes.app``) and the Electron
 # unpack + asar + rename then rebuild it. Any failure after that wipe — corrupt cached zip, blocked
 # download, missing dep, disk full — leaves the user with NO app, and ``hermes update`` used to report
 # "partially complete" over an empty release/. Fix the class, not the predicate: build into a STAGING output
@@ -774,7 +787,7 @@ def _desktop_macos_local_codesign(app: Path, *, desktop_dir: Path, identity: str
 
     # 1) Standalone Mach-O files (native modules, dylibs, crashpad handler),
     #    compared relative to the app root — the absolute path always contains
-    #    the outer Hermes.app component.
+    #    the outer Lemon AI.app/Hermes.app component.
     contents = app / "Contents"
     standalone: list[Path] = []
     for root, _dirs, files in os.walk(contents):
@@ -858,7 +871,7 @@ def _desktop_macos_relaunchable_fixup(
     exe = _desktop_packaged_executable_in(release_dir or (desktop_dir / "release"))
     if exe is None:
         return True
-    # exe = .../Hermes.app/Contents/MacOS/Hermes  ->  app bundle = .../Hermes.app
+    # exe = .../Lemon AI.app/Contents/MacOS/Hermes  ->  app bundle = .../Lemon AI.app
     app = exe.parents[2]
     if not str(app).endswith(".app") or not app.is_dir():
         return True

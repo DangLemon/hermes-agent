@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
+import { AppInfo } from 'app-builder-lib/out/appInfo.js'
 import { validateConfiguration } from 'app-builder-lib/out/util/config/config.js'
 
 import {
@@ -36,9 +37,9 @@ function withTempHarness(resource, fn) {
   }
 }
 
-function assertPhysicalIdentity(config) {
+function assertPhysicalIdentity(config, expectedProductName = 'Hermes') {
   assert.equal(config.appId, 'com.nousresearch.hermes')
-  assert.equal(config.productName, 'Hermes')
+  assert.equal(config.productName, expectedProductName)
   assert.equal(config.executableName, 'Hermes')
   assert.deepEqual(config.protocols, [
     {
@@ -46,6 +47,22 @@ function assertPhysicalIdentity(config) {
       schemes: ['hermes']
     }
   ])
+}
+
+function productFilenameFor(config, platformSpecificOptions = null) {
+  return new AppInfo(
+    {
+      metadata: {
+        name: 'hermes',
+        productName: 'Hermes',
+        version: '0.17.0',
+        description: ''
+      },
+      config
+    },
+    null,
+    platformSpecificOptions
+  ).productFilename
 }
 
 test('electron-builder uses a schema-valid static harness resource without indexed CLI overrides', async () => {
@@ -97,14 +114,16 @@ test('ordinary package config keeps Hermes installer metadata and assets without
   await validateConfiguration(structuredClone(config))
 })
 
-test('validated internal package config applies Lemon installer metadata while preserving physical identity', async () => {
+test('validated internal package config applies Lemon visible identity while preserving runtime identity', async () => {
   await withTempHarness(validHarnessResource, async configPath => {
     const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
     const config = createElectronBuilderConfig(pkg.build, {
       env: { HERMES_DESKTOP_HARNESS_CONFIG: configPath }
     })
 
-    assertPhysicalIdentity(config)
+    assertPhysicalIdentity(config, 'Lemon AI')
+    assert.equal(productFilenameFor(config, config.mac), 'Lemon AI')
+    assert.equal(productFilenameFor(config, config.win), 'Hermes')
     assert.equal(config.artifactName, 'Lemon-AI-${version}-${os}-${arch}.${ext}')
     assert.equal(config.icon, 'assets/lemon-icon')
     assert.equal(config.mac.extendInfo.CFBundleDisplayName, 'Lemon AI')

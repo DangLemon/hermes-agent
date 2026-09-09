@@ -79,6 +79,34 @@ def test_linux_discovery_includes_launcher_entry(tmp_path, monkeypatch):
     assert lde.desktop_entry_path() in gu.packaged_gui_app_paths()
 
 
+@pytest.mark.macos_only
+def test_macos_packaged_gui_paths_prefer_lemon_ai_before_legacy():
+    paths = gu.packaged_gui_app_paths()
+
+    assert paths[:4] == [
+        Path("/Applications/Lemon AI.app"),
+        Path.home() / "Applications" / "Lemon AI.app",
+        Path("/Applications/Hermes.app"),
+        Path.home() / "Applications" / "Hermes.app",
+    ]
+
+
+@pytest.mark.windows_only
+def test_windows_packaged_gui_paths_prefer_lemon_ai_before_legacy(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "program-files"))
+
+    paths = gu.packaged_gui_app_paths()
+
+    assert paths == [
+        tmp_path / "local" / "Programs" / "Lemon AI",
+        tmp_path / "local" / "Programs" / "Hermes",
+        tmp_path / "local" / "hermes-desktop",
+        tmp_path / "program-files" / "Lemon AI",
+        tmp_path / "program-files" / "Hermes",
+    ]
+
+
 def test_uninstall_removes_launcher_entry_and_refreshes_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(gu.sys, "platform", "linux")
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
@@ -166,4 +194,3 @@ def test_uninstall_args_namespace_mode_mapping():
 
     full = uninstall._UninstallArgs(mode="full")
     assert full.gui is False and full.full is True and full.yes is True
-

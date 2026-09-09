@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +16,13 @@ from hermes_cli import main as cli_main
 from hermes_cli import main_desktop
 from hermes_cli import main_install_repair
 from hermes_cli import main_web_build
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+MAC_BUNDLE_SHELL_SCRIPTS = (
+    REPO_ROOT / "scripts" / "install.sh",
+    REPO_ROOT / "scripts" / "desktop-update" / "posix.sh",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -75,6 +84,12 @@ def _make_desktop_tree(tmp_path: Path) -> Path:
     return root
 
 
+def _write_executable(path: Path, content: str = "") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    path.chmod(0o755)
+
+
 def _make_packaged_executable(root: Path, monkeypatch) -> Path:
     """Create the packaged-app path layout electron-builder emits on THIS host.
 
@@ -95,8 +110,7 @@ def _make_packaged_executable(root: Path, monkeypatch) -> Path:
         exe = desktop_dir / "release" / "win-unpacked" / "Hermes.exe"
     else:
         exe = desktop_dir / "release" / "linux-unpacked" / "hermes"
-    exe.parent.mkdir(parents=True, exist_ok=True)
-    exe.write_text("", encoding="utf-8")
+    _write_executable(exe)
     if sys.platform not in ("darwin", "win32"):
         (exe.parent / "chrome-sandbox").write_text("", encoding="utf-8")
     return exe
@@ -120,6 +134,132 @@ def _packaged_exe_rel() -> Path:
     return Path("linux-unpacked") / "hermes"
 
 
+@pytest.mark.macos_only
+def test_desktop_packaged_executable_prefers_newer_lemon_ai_mac_bundle(tmp_path):
+    release = tmp_path / "release"
+    legacy = release / "mac-arm64" / "Hermes.app" / "Contents" / "MacOS" / "Hermes"
+    branded = release / "mac-arm64" / "Lemon AI.app" / "Contents" / "MacOS" / "Hermes"
+    _write_executable(legacy)
+    _write_executable(branded)
+    os.utime(legacy, (50, 50))
+    os.utime(branded, (50, 50))
+    os.utime(legacy.parents[2], (100, 100))
+    os.utime(branded.parents[2], (200, 200))
+
+    assert main_desktop._desktop_packaged_executable_in(release) == branded
+
+
+@pytest.mark.macos_only
+def test_desktop_packaged_executable_prefers_newer_legacy_mac_bundle(tmp_path):
+    release = tmp_path / "release"
+    legacy = release / "mac-arm64" / "Hermes.app" / "Contents" / "MacOS" / "Hermes"
+    branded = release / "mac-arm64" / "Lemon AI.app" / "Contents" / "MacOS" / "Hermes"
+    _write_executable(legacy)
+    _write_executable(branded)
+    os.utime(legacy, (50, 50))
+    os.utime(branded, (50, 50))
+    os.utime(legacy.parents[2], (200, 200))
+    os.utime(branded.parents[2], (100, 100))
+
+    assert main_desktop._desktop_packaged_executable_in(release) == legacy
+
+
+@pytest.mark.macos_only
+def test_desktop_packaged_executable_falls_back_to_legacy_mac_bundle(tmp_path):
+    release = tmp_path / "release"
+    legacy = release / "mac-arm64" / "Hermes.app" / "Contents" / "MacOS" / "Hermes"
+    _write_executable(legacy)
+
+    assert main_desktop._desktop_packaged_executable_in(release) == legacy
+
+
+@pytest.mark.macos_only
+def test_desktop_packaged_executable_prefers_lemon_ai_when_bundle_mtimes_tie(tmp_path):
+    release = tmp_path / "release"
+    legacy = release / "mac-arm64" / "Hermes.app" / "Contents" / "MacOS" / "Hermes"
+    branded = release / "mac-arm64" / "Lemon AI.app" / "Contents" / "MacOS" / "Hermes"
+    _write_executable(legacy)
+    _write_executable(branded)
+    os.utime(legacy.parents[2], (200, 200))
+    os.utime(branded.parents[2], (200, 200))
+
+    assert main_desktop._desktop_packaged_executable_in(release) == branded
+
+
+@pytest.mark.macos_only
+def test_desktop_packaged_executable_ignores_partial_lemon_ai_mac_bundle(tmp_path):
+    release = tmp_path / "release"
+    partial = release / "mac-arm64" / "Lemon AI.app"
+    legacy = release / "mac-arm64" / "Hermes.app" / "Contents" / "MacOS" / "Hermes"
+    partial.mkdir(parents=True)
+    _write_executable(legacy)
+    os.utime(partial, (300, 300))
+    os.utime(legacy, (200, 200))
+
+    assert main_desktop._desktop_packaged_executable_in(release) == legacy
+
+
+@pytest.mark.macos_only
+def test_desktop_packaged_executable_ignores_nonexecutable_lemon_ai_mac_binary(tmp_path):
+    release = tmp_path / "release"
+    branded = release / "mac-arm64" / "Lemon AI.app" / "Contents" / "MacOS" / "Hermes"
+    legacy = release / "mac-arm64" / "Hermes.app" / "Contents" / "MacOS" / "Hermes"
+    branded.parent.mkdir(parents=True)
+    branded.write_text("", encoding="utf-8")
+    _write_executable(legacy)
+    os.utime(branded, (300, 300))
+    os.utime(legacy, (200, 200))
+
+    assert main_desktop._desktop_packaged_executable_in(release) == legacy
+
+
+def _select_mac_bundle_with_shell_script(script: Path, *candidates: Path) -> Path:
+    source = script.read_text(encoding="utf-8")
+    match = re.search(r"(?ms)^select_newest_macos_app\(\) \{\n.*?^\}", source)
+    assert match is not None, f"select_newest_macos_app() not found in {script}"
+    command = f'{match.group(0)}\nselect_newest_macos_app "$@"'
+    result = subprocess.run(
+        ["bash", "-c", command, "bundle-selection", *(str(path) for path in candidates)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return Path(result.stdout.strip())
+
+
+def _make_shell_mac_bundle(root: Path, name: str, *, app_mtime: int, executable_mtime: int = 50) -> Path:
+    app = root / name
+    executable = app / "Contents" / "MacOS" / "Hermes"
+    _write_executable(executable)
+    os.utime(executable, (executable_mtime, executable_mtime))
+    os.utime(app, (app_mtime, app_mtime))
+    return app
+
+
+@pytest.mark.macos_only
+@pytest.mark.parametrize("script", MAC_BUNDLE_SHELL_SCRIPTS)
+def test_shell_selector_uses_outer_bundle_freshness_when_inner_mtimes_tie(tmp_path, script):
+    lemon = _make_shell_mac_bundle(tmp_path, "Lemon AI.app", app_mtime=100)
+    hermes = _make_shell_mac_bundle(tmp_path, "Hermes.app", app_mtime=200)
+
+    assert _select_mac_bundle_with_shell_script(script, lemon, hermes) == hermes
+
+    os.utime(lemon, (300, 300))
+    assert _select_mac_bundle_with_shell_script(script, lemon, hermes) == lemon
+
+
+@pytest.mark.macos_only
+@pytest.mark.parametrize("script", MAC_BUNDLE_SHELL_SCRIPTS)
+def test_shell_selector_prefers_valid_lemon_bundle_on_mtime_tie(tmp_path, script):
+    lemon = _make_shell_mac_bundle(tmp_path, "Lemon AI.app", app_mtime=200)
+    hermes = _make_shell_mac_bundle(tmp_path, "Hermes.app", app_mtime=200)
+
+    assert _select_mac_bundle_with_shell_script(script, hermes, lemon) == lemon
+
+    (lemon / "Contents" / "MacOS" / "Hermes").chmod(0o644)
+    assert _select_mac_bundle_with_shell_script(script, lemon, hermes) == hermes
+
+
 def _pack_into_staging(root: Path, content: str = "", returncode: int = 0):
     """``subprocess.run`` side effect mimicking a real ``npm run pack``: lays
     the packaged app down inside the STAGING dir named on the command line
@@ -128,8 +268,7 @@ def _pack_into_staging(root: Path, content: str = "", returncode: int = 0):
     def _run(cmd, **kwargs):
         if len(cmd) >= 3 and cmd[1:3] == ["run", "pack"]:
             exe = _staging_dir_from(cmd) / _packaged_exe_rel()
-            exe.parent.mkdir(parents=True, exist_ok=True)
-            exe.write_text(content, encoding="utf-8")
+            _write_executable(exe, content)
             if sys.platform not in ("darwin", "win32"):
                 (exe.parent / "chrome-sandbox").write_text("", encoding="utf-8")
             return subprocess.CompletedProcess(cmd, returncode)
@@ -1352,12 +1491,10 @@ def test_swap_staged_desktop_app_promotes_staged_tree_and_drops_previous(tmp_pat
     root = _make_desktop_tree(tmp_path)
     desktop_dir = root / "apps" / "desktop"
     live_exe = desktop_dir / "release" / _packaged_exe_rel()
-    live_exe.parent.mkdir(parents=True)
-    live_exe.write_text("old", encoding="utf-8")
+    _write_executable(live_exe, "old")
     staging = main_desktop._desktop_staging_dir(desktop_dir)
     staged_exe = staging / _packaged_exe_rel()
-    staged_exe.parent.mkdir(parents=True)
-    staged_exe.write_text("new", encoding="utf-8")
+    _write_executable(staged_exe, "new")
 
     promoted = main_desktop._swap_staged_desktop_app(desktop_dir, staging)
 
@@ -1372,8 +1509,7 @@ def test_swap_staged_desktop_app_without_staged_exe_keeps_live_app(tmp_path):
     root = _make_desktop_tree(tmp_path)
     desktop_dir = root / "apps" / "desktop"
     live_exe = desktop_dir / "release" / _packaged_exe_rel()
-    live_exe.parent.mkdir(parents=True)
-    live_exe.write_text("old", encoding="utf-8")
+    _write_executable(live_exe, "old")
     staging = main_desktop._desktop_staging_dir(desktop_dir)
     (staging / "linux-unpacked" / "resources").mkdir(parents=True)  # partial tree, no exe
 
@@ -1386,12 +1522,10 @@ def test_swap_staged_desktop_app_rolls_back_when_second_rename_fails(tmp_path, m
     root = _make_desktop_tree(tmp_path)
     desktop_dir = root / "apps" / "desktop"
     live_exe = desktop_dir / "release" / _packaged_exe_rel()
-    live_exe.parent.mkdir(parents=True)
-    live_exe.write_text("old", encoding="utf-8")
+    _write_executable(live_exe, "old")
     staging = main_desktop._desktop_staging_dir(desktop_dir)
     staged_exe = staging / _packaged_exe_rel()
-    staged_exe.parent.mkdir(parents=True)
-    staged_exe.write_text("new", encoding="utf-8")
+    _write_executable(staged_exe, "new")
 
     real_rename = cli_main.os.rename
     calls = {"n": 0}

@@ -195,7 +195,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --stage NAME   Run one desktop bootstrap stage"
             echo "  --json         Print a JSON result frame for --stage"
             echo "  --non-interactive  Skip stages that require user input"
-            echo "  --include-desktop  Also build the desktop app (apps/desktop -> Hermes.app)"
+            echo "  --include-desktop  Also build the desktop app (apps/desktop -> Lemon AI.app or Hermes.app)"
             echo "  --dir PATH     Installation directory"
             echo "                   default (non-root):  ~/.hermes/hermes-agent"
             echo "                   default (root, Linux): /usr/local/lib/hermes-agent"
@@ -3669,6 +3669,30 @@ install_desktop_voice_deps() {
     return 0
 }
 
+select_newest_macos_app() {
+    local selected="" selected_mtime=0 selected_priority=-1
+    local candidate candidate_exe candidate_mtime candidate_priority
+
+    for candidate in "$@"; do
+        candidate_exe="$candidate/Contents/MacOS/Hermes"
+        if [ -d "$candidate" ] && [ -x "$candidate_exe" ]; then
+            candidate_mtime="$(stat -f %m "$candidate" 2>/dev/null || stat -c %Y "$candidate" 2>/dev/null || echo 0)"
+            case "$candidate" in
+                *"/Lemon AI.app") candidate_priority=1 ;;
+                *) candidate_priority=0 ;;
+            esac
+            if [ -z "$selected" ] || [ "$candidate_mtime" -gt "$selected_mtime" ] \
+                || { [ "$candidate_mtime" -eq "$selected_mtime" ] && [ "$candidate_priority" -gt "$selected_priority" ]; }; then
+                selected="$candidate"
+                selected_mtime="$candidate_mtime"
+                selected_priority="$candidate_priority"
+            fi
+        fi
+    done
+
+    printf '%s\n' "$selected"
+}
+
 install_desktop() {
     local desktop_dir="$INSTALL_DIR/apps/desktop"
 
@@ -3802,15 +3826,11 @@ install_desktop() {
             app="$desktop_dir/release/linux-unpacked/hermes"
         fi
     else
-        local cand
-        for cand in \
+        app="$(select_newest_macos_app \
+            "$desktop_dir/release/mac-arm64/Lemon AI.app" \
             "$desktop_dir/release/mac-arm64/Hermes.app" \
-            "$desktop_dir/release/mac/Hermes.app"; do
-            if [ -d "$cand" ]; then
-                app="$cand"
-                break
-            fi
-        done
+            "$desktop_dir/release/mac/Lemon AI.app" \
+            "$desktop_dir/release/mac/Hermes.app")"
     fi
     if [ -z "$app" ]; then
         log_error "Desktop build completed but no app was found under $desktop_dir/release/"

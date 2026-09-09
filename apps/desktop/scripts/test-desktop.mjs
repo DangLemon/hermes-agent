@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { listPackage } from '@electron/asar'
 
 import PACKAGE_JSON from '../package.json' with { type: 'json' }
+import { newestValidMacAppPath } from './mac-app-bundle.mjs'
 
 const MODE = process.argv[2] || 'help'
 const ARCH = process.arch === 'arm64' ? 'arm64' : 'x64'
@@ -19,7 +20,17 @@ const PLATFORM = process.platform
 // launch via install.ps1 / install.sh, per the Phase 1 thin-installer flow).
 const APP = (() => {
   if (PLATFORM === 'darwin') {
-    const appPath = path.join(RELEASE_ROOT, `mac-${ARCH}`, 'Hermes.app')
+    const appCandidates = [
+      {
+        appPath: path.join(RELEASE_ROOT, `mac-${ARCH}`, 'Lemon AI.app'),
+        requiredFile: path.join(RELEASE_ROOT, `mac-${ARCH}`, 'Lemon AI.app', 'Contents', 'MacOS', 'Hermes')
+      },
+      {
+        appPath: path.join(RELEASE_ROOT, `mac-${ARCH}`, 'Hermes.app'),
+        requiredFile: path.join(RELEASE_ROOT, `mac-${ARCH}`, 'Hermes.app', 'Contents', 'MacOS', 'Hermes')
+      }
+    ]
+    const appPath = newestValidMacAppPath(appCandidates, appCandidates[0].appPath)
     return {
       appPath,
       binary: path.join(appPath, 'Contents', 'MacOS', 'Hermes'),
