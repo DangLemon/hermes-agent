@@ -8,7 +8,15 @@ import PACKAGE_JSON from '../package.json' with { type: 'json' }
 
 const EXPECTED_REPOSITORY = 'DangLemon/hermes-agent'
 const RECEIPT_SCHEMA_VERSION = 1
-const CHECK_KEYS = ['gitHead', 'manifestByteIdentical', 'stamp', 'generatedConfig', 'platformIdentity', 'nativePayload']
+const CHECK_KEYS = [
+  'gitHead',
+  'manifestByteIdentical',
+  'stamp',
+  'generatedConfig',
+  'platformIdentity',
+  'codeSignature',
+  'nativePayload'
+]
 
 export const RELEASE_TARGETS = [
   {
@@ -17,6 +25,7 @@ export const RELEASE_TARGETS = [
     notarization: 'unnotarized',
     os: 'mac',
     platform: 'darwin',
+    signature: 'adhoc',
     target: 'mac-arm64'
   },
   {
@@ -25,6 +34,7 @@ export const RELEASE_TARGETS = [
     notarization: 'not-applicable',
     os: 'win',
     platform: 'win32',
+    signature: 'unsigned',
     target: 'win-x64'
   }
 ]
@@ -127,7 +137,7 @@ function validateReceipt({
   assertEqual(receipt.installer, installerName, `${receiptPath} receipt installer`)
   assertEqual(receipt.checksumFile, checksumFile, `${receiptPath} checksumFile`)
   assertEqual(receipt.checksumFormat, 'sha256sum', `${receiptPath} checksumFormat`)
-  assertEqual(receipt.signature, 'unsigned', `${receiptPath} signature`)
+  assertEqual(receipt.signature, target.signature, `${receiptPath} signature`)
   assertEqual(receipt.notarization, target.notarization, `${receiptPath} notarization`)
   assertBasename(receipt.installer, `${receiptPath} receipt installer`)
   assertBasename(receipt.checksumFile, `${receiptPath} checksumFile`)

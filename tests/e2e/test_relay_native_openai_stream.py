@@ -2,8 +2,8 @@
 
 Relay runs its finalizer as soon as the provider stream ends — concurrently with Hermes'
 consumer thread, which may not have processed the last chunk yet. Each test forces that
-ordering deterministically (finalizer runs BEFORE the consumer sees a chosen chunk) and
-asserts Relay's LLM end event still records the full response.
+ordering deterministically by exhausting Relay before Hermes sees a chosen terminal chunk
+and asserts Relay's LLM end event still records the full response.
 """
 
 from __future__ import annotations
@@ -20,14 +20,14 @@ def _sse(*chunk_bodies: bytes) -> bytes:
 
 
 def _stream_through_relay(tmp_path, monkeypatch, response_body: bytes, *, finalize_before):
-    """Stream ``response_body`` through Relay; Relay's finalizer is forced to complete before
-    the consumer thread processes the first chunk matching ``finalize_before(chunk)``.
-    Returns ``(hermes_result, relay_llm_end_event)``."""
+    """Stream ``response_body`` through Relay; Relay's finalizer is forced to complete
+    before the consumer thread processes the first terminal chunk matching
+    ``finalize_before(chunk)``. Returns ``(hermes_result, relay_llm_end_event)``."""
     httpx = pytest.importorskip("httpx")
     nemo_relay = pytest.importorskip("nemo_relay")
     openai = pytest.importorskip("openai")
 
-    from agent import chat_completion_helpers, relay_llm, relay_runtime
+    from agent import relay_llm, relay_runtime
     from run_agent import AIAgent
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
@@ -54,31 +54,34 @@ def _stream_through_relay(tmp_path, monkeypatch, response_body: bytes, *, finali
     subscriber_name = "test.openai_stream"
     events = []
     relay_finalizer_started = threading.Event()
-    allow_relay_finalizer = threading.Event()
     relay_finalizer_finished = threading.Event()
     run_relay_finalizer = relay_llm.ManagedLlmStream._relay_finalizer
 
-    def run_synchronized_relay_finalizer(managed_stream, attempt):
+    def observe_relay_finalizer(managed_stream, attempt):
         relay_finalizer_started.set()
-        assert allow_relay_finalizer.wait(5), "consumer did not release Relay's finalizer"
         try:
             return run_relay_finalizer(managed_stream, attempt)
         finally:
             relay_finalizer_finished.set()
 
-    monkeypatch.setattr(relay_llm.ManagedLlmStream, "_relay_finalizer", run_synchronized_relay_finalizer)
+    monkeypatch.setattr(relay_llm.ManagedLlmStream, "_relay_finalizer", observe_relay_finalizer)
 
-    count_chunk = chat_completion_helpers._StreamingCall._count_chunk
+    next_managed_stream = relay_llm.ManagedLlmStream.__next__
 
-    def count_chunk_after_relay_finalizes(self, diag, chunk):
-        # ``_count_chunk`` is the first thing the consumer does with every chunk.
-        if finalize_before(chunk):
-            assert relay_finalizer_started.wait(5), "Relay's finalizer did not start"
-            allow_relay_finalizer.set()
-            assert relay_finalizer_finished.wait(5), "Relay's finalizer did not finish"
-        return count_chunk(self, diag, chunk)
+    def next_after_relay_finalizes(managed_stream):
+        chunk = next_managed_stream(managed_stream)
+        if not finalize_before(chunk):
+            return chunk
 
-    monkeypatch.setattr(chat_completion_helpers._StreamingCall, "_count_chunk", count_chunk_after_relay_finalizes)
+        try:
+            next_managed_stream(managed_stream)
+        except StopIteration:
+            assert relay_finalizer_started.is_set(), "Relay's finalizer did not start"
+            assert relay_finalizer_finished.is_set(), "Relay's finalizer did not finish"
+            return chunk
+        pytest.fail("finalize_before matched a non-terminal stream chunk")
+
+    monkeypatch.setattr(relay_llm.ManagedLlmStream, "__next__", next_after_relay_finalizes)
     lease.host.retain_managed_execution(consumer)
     lease.host.relay.subscribers.register(subscriber_name, events.append)
     try:
