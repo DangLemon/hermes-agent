@@ -44,6 +44,7 @@ const PLATFORM_TO_NODE_PTY = {
   darwin: 'darwin',
   win32: 'win32'
 }
+const WINDOWS_VERSION_INFO_TIMEOUT_MS = 30_000
 
 function fail(message) {
   throw new Error(`[verify-internal-installer] ${message}`)
@@ -376,7 +377,8 @@ export function readWindowsVersionInfo(exePath, { spawn = spawnSync } = {}) {
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, exePath],
       {
         encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe']
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: WINDOWS_VERSION_INFO_TIMEOUT_MS
       }
     )
 

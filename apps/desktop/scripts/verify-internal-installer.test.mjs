@@ -28,6 +28,7 @@ const WINDOWS_VERSION_INFO = {
   CompanyName: 'Lemon Digital',
   LegalCopyright: 'Copyright (c) 2026 Lemon Digital'
 }
+const WINDOWS_NATIVE_VERSION_INFO_TIMEOUT_MS = 30_000
 
 function withTempDir(fn) {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-installer-verify-'))
@@ -263,6 +264,22 @@ function makeWindowsFixture(root) {
   }
 }
 
+function makeHostSuccessfulFixture(root) {
+  const options = process.platform === 'win32' ? makeWindowsFixture(root) : makeMacFixture(root)
+  return {
+    ...options,
+    ...(process.platform === 'win32' ? { readWindowsVersionInfo: windowsVersionInfoReader() } : {})
+  }
+}
+
+function fixturePackagedManifestPath(options) {
+  const resourcesPath =
+    options.platform === 'darwin'
+      ? path.join(options.appPath, 'Contents', 'Resources')
+      : path.join(options.appPath, 'resources')
+  return path.join(resourcesPath, 'internal-desktop-harness.json')
+}
+
 function gitSpawn(expectedSha = VALID_SHA) {
   return (command, args) => {
     assert.equal(command, 'git')
@@ -353,9 +370,9 @@ test('validateHarnessManifest requires the approved fork and canonical harness r
 
 test('verification accepts valid canonical model, UI, and MCP changes when packaged bytes match', () => {
   withTempDir(root => {
-    const options = makeMacFixture(root)
+    const options = makeHostSuccessfulFixture(root)
     const manifest = changedCanonicalManifest()
-    writeJson(path.join(options.appPath, 'Contents', 'Resources', 'internal-desktop-harness.json'), manifest)
+    writeJson(fixturePackagedManifestPath(options), manifest)
     writeJson(options.canonicalManifestPath, manifest)
 
     const result = verifyInternalInstaller({
@@ -416,32 +433,40 @@ test('Windows verification catches rcedit failures through executable VersionInf
   })
 })
 
-test('Windows VersionInfo reader does not accept synthetic UTF-16 strings as native resources', () => {
-  withTempDir(root => {
-    const exePath = path.join(root, 'Hermes.exe')
-    makePE(exePath, { versionInfo: true })
-    const expectedError =
-      process.platform === 'win32'
-        ? /PowerShell VersionInfo query failed|VersionInfo ProductName: missing native VersionInfo value/
-        : /Windows VersionInfo requires Windows/
-    assert.throws(() => readWindowsVersionInfo(exePath), expectedError)
-  })
-})
+test(
+  'Windows VersionInfo reader does not accept synthetic UTF-16 strings as native resources',
+  () => {
+    withTempDir(root => {
+      const exePath = path.join(root, 'Hermes.exe')
+      makePE(exePath, { versionInfo: true })
+      const expectedError =
+        process.platform === 'win32'
+          ? /PowerShell VersionInfo query failed|VersionInfo ProductName: missing native VersionInfo value/
+          : /Windows VersionInfo requires Windows/
+      assert.throws(() => readWindowsVersionInfo(exePath), expectedError)
+    })
+  },
+  WINDOWS_NATIVE_VERSION_INFO_TIMEOUT_MS
+)
 
 const windowsOnlyTest = process.platform === 'win32' ? test : test.skip
 
-windowsOnlyTest('Windows VersionInfo reader reads real Electron executable resources', async () => {
-  const { rcedit } = await import('rcedit')
-  await withTempDir(async root => {
-    const exePath = path.join(root, 'Hermes.exe')
-    fs.copyFileSync(electronExePath(), exePath)
-    await rcedit(exePath, {
-      'version-string': WINDOWS_VERSION_INFO
-    })
+windowsOnlyTest(
+  'Windows VersionInfo reader reads real Electron executable resources',
+  async () => {
+    const { rcedit } = await import('rcedit')
+    await withTempDir(async root => {
+      const exePath = path.join(root, 'Hermes.exe')
+      fs.copyFileSync(electronExePath(), exePath)
+      await rcedit(exePath, {
+        'version-string': WINDOWS_VERSION_INFO
+      })
 
-    assert.deepEqual(readWindowsVersionInfo(exePath), WINDOWS_VERSION_INFO)
-  })
-})
+      assert.deepEqual(readWindowsVersionInfo(exePath), WINDOWS_VERSION_INFO)
+    })
+  },
+  WINDOWS_NATIVE_VERSION_INFO_TIMEOUT_MS
+)
 
 test('Windows verification requires PE x64 for exe, node-pty, and get-windows selected payloads', () => {
   withTempDir(root => {
@@ -504,7 +529,7 @@ test('verification ignores unused foreign native prebuilds and writes installer 
 
 test('verification compares packaged manifest to generated canonical bytes, not source formatting', () => {
   withTempDir(root => {
-    const options = makeMacFixture(root)
+    const options = makeHostSuccessfulFixture(root)
     fs.writeFileSync(options.canonicalManifestPath, JSON.stringify(validManifest()), 'utf8')
     const result = verifyInternalInstaller({
       ...options,
