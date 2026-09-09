@@ -61,7 +61,7 @@ jobs:
             runner: macos-latest
             marker: macos_only
           - name: Windows-only tests
-            runner: windows-latest-32-core
+            runner: ${{ github.repository == 'NousResearch/hermes-agent' && 'windows-latest-32-core' || 'windows-latest' }}
             marker: windows_only
     steps:
       - name: Checkout code
@@ -73,7 +73,7 @@ jobs:
           # Pinned for the same reason as the Linux lane: unpinned, setup-uv
           # resolves "latest" by fetching a manifest on every job and a
           # transient fetch failure fails the whole job.
-          version: "0.9.28"
+          version: '0.9.28'
           enable-cache: true
           cache-dependency-glob: |
             pyproject.toml
@@ -176,6 +176,6 @@ jobs:
         env:
           # Belt-and-suspenders with tests/conftest.py's env blanking: no
           # test may reach a real provider API.
-          OPENROUTER_API_KEY: ""
-          OPENAI_API_KEY: ""
-          NOUS_API_KEY: ""
+          OPENROUTER_API_KEY: ''
+          OPENAI_API_KEY: ''
+          NOUS_API_KEY: ''
