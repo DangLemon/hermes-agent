@@ -80,7 +80,7 @@ jobs:
 
       - name: Run installer script tests
         working-directory: apps/desktop
-        run: npx vitest run --project electron scripts/verify-internal-installer.test.mjs scripts/prepare-internal-release.test.mjs
+        run: npx vitest run --project electron scripts/verify-internal-installer.test.mjs scripts/prepare-internal-release.test.mjs scripts/run-electron-builder.test.mjs
 
       - name: Build Lemon AI DMG
         working-directory: apps/desktop
@@ -122,7 +122,7 @@ jobs:
             echo ""
             echo "- Artifact: Lemon-AI-${version}-${target}.dmg"
             echo "- Source commit: ${HERMES_BUILD_COMMIT}"
-            echo "- Signing: unsigned"
+            echo "- Signing: ad-hoc"
             echo "- Notarization: skipped"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -187,7 +187,7 @@ jobs:
       - name: Run installer script tests
         shell: pwsh
         working-directory: apps/desktop
-        run: npx vitest run --project electron scripts/verify-internal-installer.test.mjs scripts/prepare-internal-release.test.mjs
+        run: npx vitest run --project electron scripts/verify-internal-installer.test.mjs scripts/prepare-internal-release.test.mjs scripts/run-electron-builder.test.mjs
 
       - name: Build Lemon AI NSIS installer
         shell: pwsh
@@ -339,7 +339,7 @@ jobs:
             echo "- mac-arm64 DMG"
             echo "- win-x64 NSIS"
             echo ""
-            echo "These CI artifacts are unsigned and not notarized. This release is marked prerelease until macOS notarization and Windows code signing are configured."
+            echo "The macOS CI artifact is ad-hoc signed and not notarized. The Windows CI artifact is unsigned. This release is marked prerelease until macOS notarization and Windows code signing are configured."
             echo ""
             echo "Build commit: ${GITHUB_SHA}"
           } > "$notes_file"

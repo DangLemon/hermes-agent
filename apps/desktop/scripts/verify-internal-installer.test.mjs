@@ -11,6 +11,7 @@ import {
   readWindowsVersionInfo,
   validateGeneratedConfig,
   validateHarnessManifest,
+  validateMacCodeSignature,
   validateWindowsIdentity,
   validateNativePayload,
   validateStamp,
@@ -195,6 +196,11 @@ function makePlist(filePath, values = {}) {
   )
 }
 
+function makeMacCodeSignature(appPath) {
+  fs.mkdirSync(path.join(appPath, 'Contents', '_CodeSignature'), { recursive: true })
+  fs.writeFileSync(path.join(appPath, 'Contents', '_CodeSignature', 'CodeResources'), 'codesign-resources')
+}
+
 function makeMacFixture(root) {
   const appPath = path.join(root, 'release', 'mac-arm64', 'Lemon AI.app')
   const resources = path.join(appPath, 'Contents', 'Resources')
@@ -202,6 +208,7 @@ function makeMacFixture(root) {
   fs.mkdirSync(path.join(appPath, 'Contents', 'MacOS'), { recursive: true })
   makeMachO(path.join(appPath, 'Contents', 'MacOS', 'Hermes'))
   makePlist(path.join(appPath, 'Contents', 'Info.plist'))
+  makeMacCodeSignature(appPath)
   fs.mkdirSync(path.join(resources, 'app.asar.unpacked', 'dist'), { recursive: true })
   fs.writeFileSync(path.join(resources, 'app.asar.unpacked', 'dist', 'index.html'), '<div></div>')
   writeJson(path.join(nodePty, 'package.json'), { name: 'node-pty' })
@@ -289,6 +296,35 @@ function gitSpawn(expectedSha = VALID_SHA) {
     assert.deepEqual(args, ['rev-parse', 'HEAD'])
     return { status: 0, stdout: `${expectedSha}\n`, stderr: '' }
   }
+}
+
+function codeSignSpawn({
+  verifyStatus = 0,
+  detailStatus = 0,
+  policyStatus = 0,
+  policyError,
+  signatureOutput = 'Signature=adhoc\n'
+} = {}) {
+  const calls = []
+  const spawn = (command, args) => {
+    calls.push({ command, args })
+    assert.equal(command, 'codesign')
+    if (args.includes('--test-requirement')) {
+      return {
+        status: policyStatus,
+        stdout: '',
+        stderr: policyStatus === 0 || policyError ? '' : 'code failed to satisfy specified code requirement',
+        error: policyError
+      }
+    }
+    if (args.includes('--verify')) {
+      return { status: verifyStatus, stdout: '', stderr: verifyStatus === 0 ? '' : 'bundle format is ambiguous' }
+    }
+    assert.deepEqual(args.slice(0, 2), ['-dv', '--verbose=4'])
+    return { status: detailStatus, stdout: '', stderr: signatureOutput }
+  }
+  spawn.calls = calls
+  return spawn
 }
 
 function windowsVersionInfoReader(info = WINDOWS_VERSION_INFO) {
@@ -382,7 +418,8 @@ test('verification accepts valid canonical model, UI, and MCP changes when packa
       ...options,
       expectedSha: VALID_SHA,
       expectedRef: VALID_REF,
-      spawn: gitSpawn()
+      spawn: gitSpawn(),
+      codeSignSpawn: codeSignSpawn()
     })
 
     assert.equal(result.manifest.managedConfig.model.default, 'company-approved-gpt-5.6')
@@ -406,7 +443,14 @@ test('macOS verification rejects universal or x64 Mach-O payloads', () => {
     const options = makeMacFixture(root)
     makeFatMachO(path.join(options.appPath, 'Contents', 'MacOS', 'Hermes'))
     assert.throws(
-      () => verifyInternalInstaller({ ...options, expectedSha: VALID_SHA, expectedRef: VALID_REF, spawn: gitSpawn() }),
+      () =>
+        verifyInternalInstaller({
+          ...options,
+          expectedSha: VALID_SHA,
+          expectedRef: VALID_REF,
+          spawn: gitSpawn(),
+          codeSignSpawn: codeSignSpawn()
+        }),
       /must contain only arm64/
     )
   })
@@ -417,8 +461,104 @@ test('macOS verification fails when Lemon plist metadata is missing', () => {
     const options = makeMacFixture(root)
     makePlist(path.join(options.appPath, 'Contents', 'Info.plist'), { CFBundleDisplayName: 'Hermes' })
     assert.throws(
-      () => verifyInternalInstaller({ ...options, expectedSha: VALID_SHA, expectedRef: VALID_REF, spawn: gitSpawn() }),
+      () =>
+        verifyInternalInstaller({
+          ...options,
+          expectedSha: VALID_SHA,
+          expectedRef: VALID_REF,
+          spawn: gitSpawn(),
+          codeSignSpawn: codeSignSpawn()
+        }),
       /CFBundleDisplayName/
+    )
+  })
+})
+
+test('macOS verification requires CodeResources before accepting a signed app bundle', () => {
+  withTempDir(root => {
+    const options = makeMacFixture(root)
+    fs.rmSync(path.join(options.appPath, 'Contents', '_CodeSignature'), { recursive: true, force: true })
+    assert.throws(() => validateMacCodeSignature(options.appPath, { spawn: codeSignSpawn() }), /CodeResources/)
+  })
+})
+
+test('macOS verification rejects apps that fail strict codesign verification', () => {
+  withTempDir(root => {
+    const options = makeMacFixture(root)
+    assert.throws(
+      () => validateMacCodeSignature(options.appPath, { spawn: codeSignSpawn({ verifyStatus: 1 }) }),
+      /codesign verification failed/
+    )
+  })
+})
+
+test('macOS verification writes an ad-hoc signature receipt after strict codesign passes', () => {
+  withTempDir(root => {
+    const options = makeMacFixture(root)
+    const result = verifyInternalInstaller({
+      ...options,
+      expectedSha: VALID_SHA,
+      expectedRef: VALID_REF,
+      spawn: gitSpawn(),
+      codeSignSpawn: codeSignSpawn()
+    })
+
+    assert.equal(result.receipt.signature, 'adhoc')
+    assert.equal(result.receipt.checks.codeSignature, true)
+  })
+})
+
+test('macOS verification requires Apple Developer ID code requirement before developer-id receipt', () => {
+  withTempDir(root => {
+    const options = makeMacFixture(root)
+    const spawn = codeSignSpawn({
+      signatureOutput: 'Authority=Developer ID Application: Lookalike Corp\n'
+    })
+    const result = validateMacCodeSignature(options.appPath, { spawn })
+
+    assert.equal(result.signature, 'developer-id')
+    assert.equal(
+      spawn.calls.some(call => call.args.includes('--test-requirement')),
+      true
+    )
+    assert.equal(
+      spawn.calls
+        .find(call => call.args.includes('--test-requirement'))
+        .args.includes('=anchor apple generic and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'),
+      true
+    )
+  })
+})
+
+test('macOS verification rejects Developer ID lookalike names when Apple code requirement fails', () => {
+  withTempDir(root => {
+    const options = makeMacFixture(root)
+    assert.throws(
+      () =>
+        validateMacCodeSignature(options.appPath, {
+          spawn: codeSignSpawn({
+            policyStatus: 1,
+            signatureOutput: 'Authority=Developer ID Application: Lookalike Corp\n'
+          })
+        }),
+      /Developer ID code requirement failed/
+    )
+  })
+})
+
+test('macOS verification rejects Developer ID policy command timeouts', () => {
+  withTempDir(root => {
+    const options = makeMacFixture(root)
+    assert.throws(
+      () =>
+        validateMacCodeSignature(options.appPath, {
+          spawn: codeSignSpawn({
+            policyStatus: null,
+            policyError: new Error('spawnSync codesign ETIMEDOUT'),
+            signatureOutput: 'Authority=Developer ID Application: Lemon Digital\n'
+          })
+        }),
+      /ETIMEDOUT/
     )
   })
 })
@@ -538,7 +678,8 @@ test('verification compares packaged manifest to generated canonical bytes, not 
       ...options,
       expectedSha: VALID_SHA,
       expectedRef: VALID_REF,
-      spawn: gitSpawn()
+      spawn: gitSpawn(),
+      codeSignSpawn: codeSignSpawn()
     })
     assert.equal(result.manifest.sourceRepository, 'DangLemon/hermes-agent')
   })
@@ -549,7 +690,14 @@ test('verification rejects packaged manifest byte drift from canonical input', (
     const options = makeMacFixture(root)
     fs.appendFileSync(path.join(options.appPath, 'Contents', 'Resources', 'internal-desktop-harness.json'), '\n')
     assert.throws(
-      () => verifyInternalInstaller({ ...options, expectedSha: VALID_SHA, expectedRef: VALID_REF, spawn: gitSpawn() }),
+      () =>
+        verifyInternalInstaller({
+          ...options,
+          expectedSha: VALID_SHA,
+          expectedRef: VALID_REF,
+          spawn: gitSpawn(),
+          codeSignSpawn: codeSignSpawn()
+        }),
       /manifest bytes differ/
     )
   })

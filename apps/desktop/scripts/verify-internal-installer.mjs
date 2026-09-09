@@ -45,6 +45,8 @@ const PLATFORM_TO_NODE_PTY = {
   win32: 'win32'
 }
 const WINDOWS_VERSION_INFO_TIMEOUT_MS = 30_000
+const CODESIGN_TIMEOUT_MS = 30_000
+const DEVELOPER_ID_REQUIREMENT = '=anchor apple generic and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
 
 function fail(message) {
   throw new Error(`[verify-internal-installer] ${message}`)
@@ -348,6 +350,54 @@ export function validateMacIdentity(appPath, options) {
   }
 }
 
+export function validateMacCodeSignature(appPath, { spawn = spawnSync } = {}) {
+  const codeResources = path.join(appPath, 'Contents', '_CodeSignature', 'CodeResources')
+  ensureFile(codeResources, 'macOS code signature resources')
+
+  const verify = spawn('codesign', ['--verify', '--deep', '--strict', appPath], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: CODESIGN_TIMEOUT_MS
+  })
+  if (verify.status !== 0) {
+    const detail =
+      verify.stderr?.trim() || verify.stdout?.trim() || verify.error?.message || `exit status ${verify.status}`
+    fail(`codesign verification failed for ${appPath}: ${detail}`)
+  }
+
+  const display = spawn('codesign', ['-dv', '--verbose=4', appPath], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: CODESIGN_TIMEOUT_MS
+  })
+  if (display.status !== 0) {
+    const detail =
+      display.stderr?.trim() || display.stdout?.trim() || display.error?.message || `exit status ${display.status}`
+    fail(`codesign signature detail failed for ${appPath}: ${detail}`)
+  }
+
+  const output = `${display.stdout ?? ''}\n${display.stderr ?? ''}`
+  if (/Signature=adhoc\b/.test(output)) return { codeResources, signature: 'adhoc' }
+  if (/Authority=Developer ID Application:/i.test(output)) {
+    validateDeveloperIdRequirement(appPath, { spawn })
+    return { codeResources, signature: 'developer-id' }
+  }
+  fail(`codesign signature identity is neither ad-hoc nor Developer ID for ${appPath}`)
+}
+
+export function validateDeveloperIdRequirement(appPath, { spawn = spawnSync } = {}) {
+  const result = spawn('codesign', ['--verify', '--strict', '--test-requirement', DEVELOPER_ID_REQUIREMENT, appPath], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: CODESIGN_TIMEOUT_MS
+  })
+  if (result.status !== 0) {
+    const detail =
+      result.stderr?.trim() || result.stdout?.trim() || result.error?.message || `exit status ${result.status}`
+    fail(`Developer ID code requirement failed for ${appPath}: ${detail}`)
+  }
+}
+
 export function readWindowsVersionInfo(exePath, { spawn = spawnSync } = {}) {
   if (process.platform !== 'win32') {
     fail(`Windows VersionInfo requires Windows: ${exePath}`)
@@ -508,6 +558,8 @@ export function verifyInternalInstaller(options) {
     validatePEArch(layout.binaryPath, config.arch)
   }
 
+  const macSignature =
+    config.platform === 'darwin' ? validateMacCodeSignature(layout.appPath, { spawn: config.codeSignSpawn }) : null
   const nativePayload = validateNativePayload({
     layout,
     platform: config.platform,
@@ -528,7 +580,7 @@ export function verifyInternalInstaller(options) {
     installer: path.basename(layout.installerPath),
     sha256,
     checksumFormat: 'sha256sum',
-    signature: 'unsigned',
+    signature: macSignature?.signature ?? 'unsigned',
     notarization: config.platform === 'darwin' ? 'unnotarized' : 'not-applicable',
     verifiedAt: new Date().toISOString(),
     checks: {
@@ -537,6 +589,7 @@ export function verifyInternalInstaller(options) {
       stamp: true,
       generatedConfig: true,
       platformIdentity: true,
+      codeSignature: true,
       nativePayload: true
     }
   }

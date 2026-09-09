@@ -20,6 +20,7 @@ const TARGETS = [
     notarization: 'unnotarized',
     os: 'mac',
     platform: 'darwin',
+    signature: 'adhoc',
     target: 'mac-arm64'
   },
   {
@@ -29,6 +30,7 @@ const TARGETS = [
     notarization: 'not-applicable',
     os: 'win',
     platform: 'win32',
+    signature: 'unsigned',
     target: 'win-x64'
   }
 ]
@@ -77,7 +79,7 @@ async function createReleaseAssets(root, mutate = () => {}) {
       sha256,
       checksumFile,
       checksumFormat: 'sha256sum',
-      signature: 'unsigned',
+      signature: target.signature,
       notarization: target.notarization,
       verifiedAt: '2026-09-09T04:00:00.000Z',
       checks: {
@@ -86,6 +88,7 @@ async function createReleaseAssets(root, mutate = () => {}) {
         stamp: true,
         generatedConfig: true,
         platformIdentity: true,
+        codeSignature: true,
         nativePayload: true
       }
     }
@@ -182,6 +185,32 @@ test('rejects a receipt from the wrong source repository fork', async () => {
     })
 
     assert.throws(() => runPrepare(root, assetsRoot), /sourceRepository/)
+  })
+})
+
+test('rejects a macOS receipt that was not verified as ad-hoc signed', async () => {
+  await withTempDir(async root => {
+    const assetsRoot = await createReleaseAssets(root, ({ fixtures }) => {
+      const fixture = fixtures.find(item => item.target.platform === 'darwin')
+      const receiptPath = path.join(fixture.dir, receiptNameForInstaller(fixture.installer))
+      writeJson(receiptPath, { ...fixture.receipt, signature: 'unsigned' })
+    })
+
+    assert.throws(() => runPrepare(root, assetsRoot), /signature/)
+  })
+})
+
+test('rejects receipts that predate the code signature verification gate', async () => {
+  await withTempDir(async root => {
+    const assetsRoot = await createReleaseAssets(root, ({ fixtures }) => {
+      const fixture = fixtures[0]
+      const receiptPath = path.join(fixture.dir, receiptNameForInstaller(fixture.installer))
+      const checks = { ...fixture.receipt.checks }
+      delete checks.codeSignature
+      writeJson(receiptPath, { ...fixture.receipt, checks })
+    })
+
+    assert.throws(() => runPrepare(root, assetsRoot), /checks/)
   })
 })
 
