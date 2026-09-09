@@ -332,12 +332,37 @@ linux_gate() {
   GATE=manual GATE_MSG="Update complete, but the rebuilt app can't relaunch itself (its sandbox helper needs root ownership). Reopen Hermes to finish."
 }
 
-mac_swap() {
-  local rebuilt="" c
-  for c in "$INSTALL_ROOT/apps/desktop/release/mac-arm64/Hermes.app" \
-           "$INSTALL_ROOT/apps/desktop/release/mac/Hermes.app"; do
-    [ -d "$c" ] && { rebuilt="$c"; break; }
+select_newest_macos_app() {
+  local selected="" selected_mtime=0 selected_priority=-1
+  local candidate candidate_exe candidate_mtime candidate_priority
+
+  for candidate in "$@"; do
+    candidate_exe="$candidate/Contents/MacOS/Hermes"
+    if [ -d "$candidate" ] && [ -x "$candidate_exe" ]; then
+      candidate_mtime="$(stat -f %m "$candidate" 2>/dev/null || stat -c %Y "$candidate" 2>/dev/null || echo 0)"
+      case "$candidate" in
+        *"/Lemon AI.app") candidate_priority=1 ;;
+        *) candidate_priority=0 ;;
+      esac
+      if [ -z "$selected" ] || [ "$candidate_mtime" -gt "$selected_mtime" ] \
+          || { [ "$candidate_mtime" -eq "$selected_mtime" ] && [ "$candidate_priority" -gt "$selected_priority" ]; }; then
+        selected="$candidate"
+        selected_mtime="$candidate_mtime"
+        selected_priority="$candidate_priority"
+      fi
+    fi
   done
+
+  printf '%s\n' "$selected"
+}
+
+mac_swap() {
+  local rebuilt
+  rebuilt="$(select_newest_macos_app \
+    "$INSTALL_ROOT/apps/desktop/release/mac-arm64/Lemon AI.app" \
+    "$INSTALL_ROOT/apps/desktop/release/mac-arm64/Hermes.app" \
+    "$INSTALL_ROOT/apps/desktop/release/mac/Lemon AI.app" \
+    "$INSTALL_ROOT/apps/desktop/release/mac/Hermes.app")"
 
   # Transactional swap: stage a full copy, move the old bundle aside, move
   # the copy in. Every step checked; a failed final move ROLLS BACK so the

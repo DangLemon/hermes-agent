@@ -47,6 +47,7 @@ export function createDesktopPackageConfig(baseBuild, { env = process.env, harne
     return config
   }
 
+  config.productName = 'Lemon AI'
   config.artifactName = 'Lemon-AI-${version}-${os}-${arch}.${ext}'
   config.icon = 'assets/lemon-icon'
   config.extraResources = config.extraResources.map(entry =>
@@ -56,6 +57,7 @@ export function createDesktopPackageConfig(baseBuild, { env = process.env, harne
   )
   config.mac = {
     ...config.mac,
+    executableName: 'Lemon AI',
     extendInfo: {
       ...config.mac.extendInfo,
       ...LEMON_MAC_COPY

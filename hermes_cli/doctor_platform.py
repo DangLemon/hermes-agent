@@ -278,14 +278,23 @@ def check_macos_tcc_grants() -> None:
 
 
 def _desktop_app_bundle() -> Path | None:
-    """Locate the locally-built desktop bundle (``apps/desktop/release/mac-<arch>/Hermes.app``), newest first.
+    """Locate the newest locally-built desktop bundle, supporting Lemon AI.app and legacy Hermes.app.
 
-    The only layout whose ad-hoc re-signed bundle can invalidate TCC grants. ``/Applications/Hermes.app`` is
-    deliberately not probed: it is the separately-signed, certificate-anchored Hermes-Setup launcher.
+    These local release bundles can use ad-hoc signing that invalidates TCC grants. ``/Applications`` is
+    deliberately not probed because installed apps are separately signed/certificate anchored.
     """
     release_dir = Path(__file__).resolve().parents[1] / "apps" / "desktop" / "release"
-    candidates = [p for p in release_dir.glob("mac*/Hermes.app") if p.is_dir()]
-    return max(candidates, key=lambda p: p.stat().st_mtime) if candidates else None
+    candidates = [
+        (p, executable, brand_priority)
+        for brand_priority, pattern in enumerate(("mac*/Hermes.app", "mac*/Lemon AI.app"))
+        for p in release_dir.glob(pattern)
+        if p.is_dir()
+        for executable in (p / "Contents" / "MacOS" / "Hermes",)
+        if executable.is_file() and os.access(executable, os.X_OK)
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: (item[0].stat().st_mtime, item[2]))[0]
 
 
 def _macos_desktop_dr(app: Path) -> str | None:
@@ -338,7 +347,7 @@ def check_macos_full_disk_access() -> None:
                    "will never trip per-folder dialogs (Desktop/Downloads/Documents/...) again. Open: System Settings → "
                    "Privacy & Security → Full Disk Access — or run:\n"
                    "      open \"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles\"\n"
-                   "    then enable your terminal (and Hermes.app if you use Desktop), and restart them once. "
+                   "    then enable your terminal (and Lemon AI.app/Hermes.app if you use Desktop), and restart them once. "
                    "With Hermes' stable signing identities the grant survives every update.")
     except OSError:
         pass  # missing dir / other error: indeterminate, stay silent

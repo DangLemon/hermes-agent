@@ -34,6 +34,34 @@ const DESKTOP_ROOT = path.resolve(import.meta.dirname, '..')
 const REPO_ROOT = path.resolve(DESKTOP_ROOT, '..', '..')
 const RELEASE_ROOT = path.join(DESKTOP_ROOT, 'release')
 
+function newestValidMacAppPath(
+  candidates: Array<{ appPath: string; requiredFile: string }>,
+  fallback: string
+): string {
+  let selected: string | null = null
+  let selectedMtime = -Infinity
+  let selectedPriority = -1
+
+  for (const candidate of candidates) {
+    try {
+      fs.accessSync(candidate.requiredFile, fs.constants.X_OK)
+    } catch {
+      continue
+    }
+
+    const mtime = fs.statSync(candidate.appPath).mtimeMs
+    const priority = path.basename(candidate.appPath) === 'Lemon AI.app' ? 1 : 0
+
+    if (selected === null || mtime > selectedMtime || (mtime === selectedMtime && priority > selectedPriority)) {
+      selected = candidate.appPath
+      selectedMtime = mtime
+      selectedPriority = priority
+    }
+  }
+
+  return selected ?? fallback
+}
+
 // ─── Credential stripping (matches launch.spec.ts) ──────────────────────
 
 const CREDENTIAL_SUFFIXES: string[] = [
@@ -526,7 +554,20 @@ function resolvePackagedBinaryPath(): string {
   if (process.platform === 'darwin') {
     const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
 
-    return path.join(RELEASE_ROOT, `mac-${arch}`, 'Hermes.app', 'Contents', 'MacOS', 'Hermes')
+    const appCandidates = [
+      {
+        appPath: path.join(RELEASE_ROOT, `mac-${arch}`, 'Lemon AI.app'),
+        requiredFile: path.join(RELEASE_ROOT, `mac-${arch}`, 'Lemon AI.app', 'Contents', 'MacOS', 'Hermes')
+      },
+      {
+        appPath: path.join(RELEASE_ROOT, `mac-${arch}`, 'Hermes.app'),
+        requiredFile: path.join(RELEASE_ROOT, `mac-${arch}`, 'Hermes.app', 'Contents', 'MacOS', 'Hermes')
+      }
+    ]
+
+    const appPath = newestValidMacAppPath(appCandidates, appCandidates[0].appPath)
+
+    return path.join(appPath, 'Contents', 'MacOS', 'Hermes')
   }
 
   return path.join(RELEASE_ROOT, 'linux-unpacked', 'hermes')

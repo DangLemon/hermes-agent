@@ -124,10 +124,13 @@ function validStamp() {
 function validGeneratedConfig() {
   return {
     appId: 'com.nousresearch.hermes',
-    productName: 'Hermes',
+    productName: 'Lemon AI',
     executableName: 'Hermes',
     artifactName: 'Lemon-AI-${version}-${os}-${arch}.${ext}',
     icon: 'assets/lemon-icon',
+    mac: {
+      executableName: 'Lemon AI'
+    },
     dmg: {
       title: 'Install Lemon AI'
     }
@@ -193,7 +196,7 @@ function makePlist(filePath, values = {}) {
 }
 
 function makeMacFixture(root) {
-  const appPath = path.join(root, 'release', 'mac-arm64', 'Hermes.app')
+  const appPath = path.join(root, 'release', 'mac-arm64', 'Lemon AI.app')
   const resources = path.join(appPath, 'Contents', 'Resources')
   const nodePty = path.join(resources, 'app.asar.unpacked', 'dist', 'node_modules', 'node-pty')
   fs.mkdirSync(path.join(appPath, 'Contents', 'MacOS'), { recursive: true })
@@ -601,7 +604,7 @@ test('validateNativePayload rejects missing target node-pty binary', () => {
   })
 })
 
-test('validateGeneratedConfig preserves Lemon metadata while keeping Hermes physical identity', () => {
+test('validateGeneratedConfig requires Lemon visible product identity while keeping executable stable', () => {
   validateGeneratedConfig(validGeneratedConfig())
   assert.throws(
     () => validateGeneratedConfig({ ...validGeneratedConfig(), executableName: 'Lemon AI' }),

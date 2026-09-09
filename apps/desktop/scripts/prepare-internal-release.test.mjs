@@ -72,7 +72,7 @@ async function createReleaseAssets(root, mutate = () => {}) {
       platform: target.platform,
       os: target.os,
       arch: target.arch,
-      appPath: target.platform === 'darwin' ? 'Hermes.app' : 'win-unpacked',
+      appPath: target.platform === 'darwin' ? 'Lemon AI.app' : 'win-unpacked',
       installer,
       sha256,
       checksumFile,

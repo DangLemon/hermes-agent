@@ -118,7 +118,7 @@ export function resolveLayout({
   const resolvedAppPath = appPath
     ? path.resolve(appPath)
     : platform === 'darwin'
-      ? path.join(releaseRoot, 'mac-arm64', 'Hermes.app')
+      ? path.join(releaseRoot, 'mac-arm64', 'Lemon AI.app')
       : path.join(releaseRoot, 'win-unpacked')
   const resolvedInstallerPath = installerPath
     ? path.resolve(installerPath)
@@ -182,8 +182,9 @@ export function validateGeneratedConfig(config) {
   assertEqual(config.artifactName, 'Lemon-AI-${version}-${os}-${arch}.${ext}', 'electron-builder artifactName')
   assertEqual(config.icon, 'assets/lemon-icon', 'electron-builder icon')
   assertEqual(config.dmg?.title, 'Install Lemon AI', 'electron-builder dmg.title')
-  assertEqual(config.productName, 'Hermes', 'electron-builder productName')
+  assertEqual(config.productName, 'Lemon AI', 'electron-builder productName')
   assertEqual(config.executableName, 'Hermes', 'electron-builder executableName')
+  assertEqual(config.mac?.executableName, 'Lemon AI', 'electron-builder mac.executableName')
   assertEqual(config.appId, 'com.nousresearch.hermes', 'electron-builder appId')
 }
 
@@ -566,7 +567,7 @@ function usage() {
     --arch arm64|x64 \\
     --sha <40-char triggering sha> \\
     --ref <branch-or-tag> \\
-    --app <release/mac-arm64/Hermes.app|release/win-unpacked> \\
+    --app <release/mac-arm64/Lemon AI.app|release/win-unpacked> \\
     --installer <Lemon-AI-version-platform-arch.dmg|exe> \\
     --canonical <internal-desktop-harness.config.json> \\
     --builder-config <build/electron-builder.generated.json> \\

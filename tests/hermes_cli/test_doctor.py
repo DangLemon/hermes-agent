@@ -8,6 +8,7 @@ import types
 import io
 import contextlib
 from argparse import Namespace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -27,6 +28,69 @@ from tools import browser_tool_install as bt_install
 
 
 class TestDoctorPlatformHints:
+    def _mac_bundle(self, release_dir, relative, app_mtime, executable_mtime=50):
+        app = release_dir / relative
+        exe = app / "Contents" / "MacOS" / "Hermes"
+        exe.parent.mkdir(parents=True)
+        exe.write_text("", encoding="utf-8")
+        exe.chmod(0o755)
+        os.utime(exe, (executable_mtime, executable_mtime))
+        os.utime(app, (app_mtime, app_mtime))
+        return app
+
+    @pytest.mark.macos_only
+    def test_desktop_app_bundle_prefers_newer_lemon_ai_bundle(self, tmp_path, monkeypatch):
+        fake_module = tmp_path / "hermes_cli" / "doctor_platform.py"
+        fake_module.parent.mkdir()
+        fake_module.write_text("", encoding="utf-8")
+        monkeypatch.setattr(doctor_platform, "__file__", str(fake_module))
+        release_dir = tmp_path / "apps" / "desktop" / "release"
+        self._mac_bundle(release_dir, Path("mac-arm64") / "Hermes.app", 100)
+        lemon = self._mac_bundle(release_dir, Path("mac-arm64") / "Lemon AI.app", 200)
+
+        assert doctor_platform._desktop_app_bundle() == lemon
+
+    @pytest.mark.macos_only
+    def test_desktop_app_bundle_prefers_newer_legacy_bundle(self, tmp_path, monkeypatch):
+        fake_module = tmp_path / "hermes_cli" / "doctor_platform.py"
+        fake_module.parent.mkdir()
+        fake_module.write_text("", encoding="utf-8")
+        monkeypatch.setattr(doctor_platform, "__file__", str(fake_module))
+        release_dir = tmp_path / "apps" / "desktop" / "release"
+        legacy = self._mac_bundle(release_dir, Path("mac-arm64") / "Hermes.app", 200)
+        self._mac_bundle(release_dir, Path("mac-arm64") / "Lemon AI.app", 100)
+
+        assert doctor_platform._desktop_app_bundle() == legacy
+
+    @pytest.mark.macos_only
+    def test_desktop_app_bundle_ignores_partial_bundle_without_hermes_executable(self, tmp_path, monkeypatch):
+        fake_module = tmp_path / "hermes_cli" / "doctor_platform.py"
+        fake_module.parent.mkdir()
+        fake_module.write_text("", encoding="utf-8")
+        monkeypatch.setattr(doctor_platform, "__file__", str(fake_module))
+        release_dir = tmp_path / "apps" / "desktop" / "release"
+        partial = release_dir / "mac-arm64" / "Lemon AI.app"
+        partial.mkdir(parents=True)
+        os.utime(partial, (300, 300))
+        legacy = self._mac_bundle(release_dir, Path("mac-arm64") / "Hermes.app", 200)
+
+        assert doctor_platform._desktop_app_bundle() == legacy
+
+    @pytest.mark.macos_only
+    def test_desktop_app_bundle_ignores_nonexecutable_hermes_binary(self, tmp_path, monkeypatch):
+        fake_module = tmp_path / "hermes_cli" / "doctor_platform.py"
+        fake_module.parent.mkdir()
+        fake_module.write_text("", encoding="utf-8")
+        monkeypatch.setattr(doctor_platform, "__file__", str(fake_module))
+        release_dir = tmp_path / "apps" / "desktop" / "release"
+        branded = release_dir / "mac-arm64" / "Lemon AI.app" / "Contents" / "MacOS" / "Hermes"
+        branded.parent.mkdir(parents=True)
+        branded.write_text("", encoding="utf-8")
+        os.utime(branded, (300, 300))
+        legacy = self._mac_bundle(release_dir, Path("mac-arm64") / "Hermes.app", 200)
+
+        assert doctor_platform._desktop_app_bundle() == legacy
+
     def test_termux_package_hint(self, monkeypatch):
         monkeypatch.setenv("TERMUX_VERSION", "0.118.3")
         monkeypatch.setenv("PREFIX", "/data/data/com.termux/files/usr")
