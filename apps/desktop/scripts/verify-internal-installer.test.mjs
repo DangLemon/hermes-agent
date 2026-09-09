@@ -492,7 +492,18 @@ test('macOS verification rejects apps that fail strict codesign verification', (
   })
 })
 
-test('macOS verification writes an ad-hoc signature receipt after strict codesign passes', () => {
+test('macOS code signature verification reports ad-hoc after strict codesign passes', () => {
+  withTempDir(root => {
+    const options = makeMacFixture(root)
+    const result = validateMacCodeSignature(options.appPath, { spawn: codeSignSpawn() })
+
+    assert.equal(result.signature, 'adhoc')
+  })
+})
+
+const nonWindowsTest = process.platform === 'win32' ? test.skip : test
+
+nonWindowsTest('macOS verification writes an ad-hoc signature receipt after strict codesign passes', () => {
   withTempDir(root => {
     const options = makeMacFixture(root)
     const result = verifyInternalInstaller({

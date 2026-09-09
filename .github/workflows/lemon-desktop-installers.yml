@@ -84,6 +84,8 @@ jobs:
 
       - name: Build Lemon AI DMG
         working-directory: apps/desktop
+        env:
+          CSC_FOR_PULL_REQUEST: 'true'
         run: |
           set -euo pipefail
           rm -rf release
