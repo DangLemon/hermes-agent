@@ -267,9 +267,11 @@ class PluginContext:
         if managed_scope.is_key_managed(dotted_path):
             raise PermissionError(f"Plugin setting {dotted_path!r} is administrator-managed")
         partial = _nested_plugin_mapping(full_path[:4], _nested_plugin_mapping(segments, value))
-        # The lock covers merge-read plus atomic save so sibling plugin writes (threads or
-        # processes) cannot race between the two steps.
-        with _locked_plugin_state(config_mod.get_config_path()), config_mod._CONFIG_LOCK:
+        # The canonical config transaction covers merge-read plus atomic save so sibling plugin
+        # writes (threads or processes) cannot race between the two steps. Do not also take
+        # _locked_plugin_state(config_path): it uses the same .config.yaml.lock file and would
+        # self-deadlock when save_config() re-enters the canonical file lock.
+        with config_mod.config_write_transaction(config_mod.get_config_path()):
             # Fail closed on malformed YAML: save_config degrades parse failures to {} — safe
             # for reads, destructive for read-modify-write.
             config_mod.read_user_config_raw()
