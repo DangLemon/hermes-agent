@@ -43,6 +43,7 @@ import { OverlayView } from '../overlays/overlay-view'
 import { SKILLS_ROUTE } from '../routes'
 
 import { AboutSettings } from './about-settings'
+import { AiConnectionSettings } from './ai-connection-settings'
 import { AppearanceSettings } from './appearance-settings'
 import { BillingSettings } from './billing'
 import { ConfigSettings } from './config-settings'
@@ -82,6 +83,7 @@ const HARNESS_ALLOWED_SETTINGS_VIEWS: readonly SettingsViewId[] = [
   'config:safety',
   'config:voice',
   'config:workspace',
+  'providers',
   'keybinds',
   'notifications',
   'sessions',
@@ -99,7 +101,7 @@ function harnessAllowsSettingsNavGroup(group: OverlayNavGroup): boolean {
     return HARNESS_ALLOWED_CONFIG_SECTIONS.has(group.id.slice('config:'.length))
   }
 
-  return ['about', 'keybinds', 'notifications', 'sessions'].includes(String(group.id))
+  return ['about', 'keybinds', 'notifications', 'providers', 'sessions'].includes(String(group.id))
 }
 
 export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: SettingsPageProps) {
@@ -241,48 +243,50 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
       },
       {
         active: activeView === 'providers',
-        children: [
-          {
-            active: activeView === 'providers' && providerView === 'accounts',
-            icon: codiconIcon('account'),
-            id: 'pview:accounts',
-            label: t.settings.nav.providerAccounts,
-            onSelect: () => openProviderView('accounts')
-          },
-          {
-            active: activeView === 'providers' && providerView === 'keys',
-            icon: KeyRound,
-            id: 'pview:keys',
-            label: t.settings.nav.providerApiKeys,
-            onSelect: () => openProviderView('keys')
-          },
-          {
-            active: activeView === 'providers' && providerView === 'custom-endpoints',
-            icon: Globe,
-            id: 'pview:custom-endpoints',
-            label: t.settings.nav.providerCustomEndpoints,
-            onSelect: () => openProviderView('custom-endpoints')
-          },
-          // Local models ships behind the --local launch flag: no flag, no
-          // nav entry (the pane itself also refuses to render, so a stale
-          // ?pview=local deep link falls back to accounts-shaped emptiness
-          // rather than a hidden feature).
-          ...($localModelsEnabled.get()
-            ? [
-                {
-                  active: activeView === 'providers' && providerView === 'local',
-                  icon: Cpu,
-                  id: 'pview:local',
-                  label: t.settings.nav.providerLocalModels,
-                  onSelect: () => openProviderView('local')
-                }
-              ]
-            : [])
-        ],
+        children: harnessMode
+          ? undefined
+          : [
+              {
+                active: activeView === 'providers' && providerView === 'accounts',
+                icon: codiconIcon('account'),
+                id: 'pview:accounts',
+                label: t.settings.nav.providerAccounts,
+                onSelect: () => openProviderView('accounts')
+              },
+              {
+                active: activeView === 'providers' && providerView === 'keys',
+                icon: KeyRound,
+                id: 'pview:keys',
+                label: t.settings.nav.providerApiKeys,
+                onSelect: () => openProviderView('keys')
+              },
+              {
+                active: activeView === 'providers' && providerView === 'custom-endpoints',
+                icon: Globe,
+                id: 'pview:custom-endpoints',
+                label: t.settings.nav.providerCustomEndpoints,
+                onSelect: () => openProviderView('custom-endpoints')
+              },
+              // Local models ships behind the --local launch flag: no flag, no
+              // nav entry (the pane itself also refuses to render, so a stale
+              // ?pview=local deep link falls back to accounts-shaped emptiness
+              // rather than a hidden feature).
+              ...($localModelsEnabled.get()
+                ? [
+                    {
+                      active: activeView === 'providers' && providerView === 'local',
+                      icon: Cpu,
+                      id: 'pview:local',
+                      label: t.settings.nav.providerLocalModels,
+                      onSelect: () => openProviderView('local')
+                    }
+                  ]
+                : [])
+            ],
         gapBefore: true,
         icon: Zap,
         id: 'providers',
-        label: t.settings.nav.providers,
+        label: harnessMode ? t.settings.aiConnection.title : t.settings.nav.providers,
         onSelect: () => setActiveView('providers')
       },
       {
@@ -345,7 +349,7 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
         onSelect: () => setActiveView('about')
       }
     ],
-    [activeView, keysView, providerView, t, setActiveView, openProviderView, openKeysView]
+    [activeView, harnessMode, keysView, providerView, t, setActiveView, openProviderView, openKeysView]
   )
 
   const navGroups = useMemo(
@@ -453,6 +457,8 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
         onConfigSaved={onConfigSaved}
         onMainModelChanged={onMainModelChanged}
       />
+    ) : effectiveActiveView === 'providers' && harnessMode ? (
+      <AiConnectionSettings onConfigSaved={onConfigSaved} onMainModelChanged={onMainModelChanged} />
     ) : effectiveActiveView === 'providers' ? (
       <ProvidersSettings
         onClose={onClose}

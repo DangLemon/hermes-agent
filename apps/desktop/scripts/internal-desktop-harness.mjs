@@ -3,6 +3,7 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 export const HARNESS_RESOURCE_FILENAME = 'internal-desktop-harness.json'
+export const HARNESS_SEED_FILENAME = 'internal-desktop-harness-seed.py'
 export const HARNESS_SCHEMA_VERSION = 1
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DEFAULT_BUILD_DIR = path.join(APP_ROOT, 'build')
@@ -38,6 +39,31 @@ function validateSourceRepository(value) {
 
   if (value.includes('..') || value.endsWith('.git') || value.startsWith('-') || /^(https?:|git@)/i.test(value)) {
     fail('sourceRepository must be a safe GitHub owner/repo identity')
+  }
+}
+
+function validateInitialProvider(value) {
+  if (!isPlainObject(value)) fail('initialProvider must be an object')
+
+  for (const key of ['id', 'name', 'base_url', 'model', 'key_env']) {
+    requireNonEmptyString(value[key], `initialProvider.${key}`)
+  }
+
+  for (const key of Object.keys(value)) {
+    if (!['id', 'name', 'base_url', 'model', 'key_env', 'context_length', 'discover_models', 'models'].includes(key)) {
+      fail(`initialProvider.${key} is not allowed`)
+    }
+  }
+
+  if ('context_length' in value && (!Number.isInteger(value.context_length) || value.context_length <= 0)) {
+    fail('initialProvider.context_length must be a positive integer')
+  }
+  if ('discover_models' in value && typeof value.discover_models !== 'boolean') {
+    fail('initialProvider.discover_models must be boolean')
+  }
+  if ('models' in value) {
+    if (!Array.isArray(value.models)) fail('initialProvider.models must be an array')
+    value.models.forEach((item, index) => requireNonEmptyString(item, `initialProvider.models.${index}`))
   }
 }
 
@@ -128,6 +154,9 @@ export function validateHarnessResource(input) {
     if (!UI_KEYS.includes(key)) fail(`ui.${key} is not part of the frozen schema`)
   }
   if ('managedConfig' in input && !isPlainObject(input.managedConfig)) fail('managedConfig must be an object when present')
+  if ('initialProvider' in input) {
+    validateInitialProvider(input.initialProvider)
+  }
   if ('credentialRequirements' in input) {
     validateCredentialRequirements(input.credentialRequirements)
   }
@@ -135,24 +164,7 @@ export function validateHarnessResource(input) {
 
   if (input.managedConfig) {
     for (const key of Object.keys(input.managedConfig)) {
-      if (!['model', 'mcp_servers'].includes(key)) fail(`managedConfig.${key} is not allowed`)
-    }
-    if ('model' in input.managedConfig) {
-      const model = input.managedConfig.model
-      if (!isPlainObject(model)) fail('managedConfig.model must be an object')
-      const modelKeys = Object.keys(model)
-      for (const key of modelKeys) {
-        if (!['provider', 'default', 'base_url', 'api_key'].includes(key)) fail(`managedConfig.model.${key} is not allowed`)
-      }
-      if (!modelKeys.includes('provider') || !modelKeys.includes('default')) {
-        fail('managedConfig.model must include placeholder provider and default values')
-      }
-      requireNonEmptyString(model.provider, 'managedConfig.model.provider')
-      requireNonEmptyString(model.default, 'managedConfig.model.default')
-      if ('base_url' in model) requireNonEmptyString(model.base_url, 'managedConfig.model.base_url')
-      if ('api_key' in model && !isEnvironmentReference(model.api_key)) {
-        fail('managedConfig.model.api_key must be an environment reference')
-      }
+      if (!['mcp_servers'].includes(key)) fail(`managedConfig.${key} is not allowed`)
     }
   }
   return input
@@ -168,9 +180,11 @@ export function loadHarnessConfigInput(env = process.env) {
 
 export function generateInternalDesktopHarnessResource({ env = process.env, buildDir = DEFAULT_BUILD_DIR } = {}) {
   const outPath = path.join(buildDir, HARNESS_RESOURCE_FILENAME)
+  const seedOutPath = path.join(buildDir, HARNESS_SEED_FILENAME)
   const removeStale = () => {
     try {
       fs.rmSync(outPath, { force: true })
+      fs.rmSync(seedOutPath, { force: true })
     } catch {
       // Best-effort cleanup; validation/build failures are reported separately.
     }
@@ -191,6 +205,7 @@ export function generateInternalDesktopHarnessResource({ env = process.env, buil
 
   fs.mkdirSync(buildDir, { recursive: true })
   fs.writeFileSync(outPath, `${JSON.stringify(resource, null, 2)}\n`, 'utf8')
+  fs.copyFileSync(path.join(APP_ROOT, 'electron', HARNESS_SEED_FILENAME), path.join(buildDir, HARNESS_SEED_FILENAME))
   return { resourcePath: outPath, resource }
 }
 

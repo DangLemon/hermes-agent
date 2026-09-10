@@ -203,18 +203,68 @@ export const vi = defineLocale({
       connection: label => `Kết nối: ${label}`,
       recentActivity: 'Hoạt động gần đây',
       viewAllLogs: 'Xem tất cả log →',
-      messagingPlatforms: 'Kênh tin nhắn'
+      messagingPlatforms: 'Kênh tin nhắn',
+      aiConnectionMissingTitle: 'Chưa có kết nối AI sẵn sàng',
+      aiConnectionMissingDetail: 'Thêm kết nối AI trước khi bắt đầu trò chuyện với Lemon AI.',
+      openAiConnection: 'Mở Kết nối AI',
+      provisioningUnknownTitle: 'Chưa rõ trạng thái thiết lập',
+      provisioningUnknownDetail: 'Runtime chưa báo trạng thái sẵn sàng.',
+      provisioningIncompleteTitle: 'Thiết lập chưa hoàn tất',
+      provisioningIncompleteDetail: 'Thiếu một hoặc nhiều nhóm thiết lập bắt buộc.'
     },
     statusbar: {
       gateway: 'Kết nối',
       gatewayReady: 'Đã kết nối',
       gatewayNeedsSetup: 'Cần thiết lập',
+      gatewayNeedsAiConnection: 'Chưa có kết nối AI sẵn sàng',
       gatewayUnavailable: 'Chưa có suy luận',
       gatewayChecking: 'Đang kiểm tra',
       gatewayConnecting: 'Đang kết nối',
       gatewayOffline: 'Ngoại tuyến',
       gatewayRestarting: 'Đang khởi động lại…',
       gatewayTitle: 'Kết nối'
+    }
+  },
+
+  settings: {
+    nav: {
+      providerCustomEndpoints: 'Kết nối AI'
+    },
+    aiConnection: {
+      title: 'Kết nối AI',
+      intro: 'Thay đổi nơi Lemon AI gửi yêu cầu và model bạn muốn dùng.',
+      savedConnections: 'Kết nối đã lưu',
+      addConnection: 'Thêm kết nối',
+      currentBadge: 'Đang dùng',
+      selectedForEditing: 'Đang chọn để chỉnh sửa',
+      savedKey: 'Đã lưu khóa truy cập',
+      editTitle: 'Chỉnh sửa kết nối',
+      newTitle: 'Thêm kết nối',
+      nameLabel: 'Tên kết nối',
+      namePlaceholder: 'AI công ty',
+      urlLabel: 'Địa chỉ máy chủ',
+      urlHelp: 'Nhập đầy đủ base URL của dịch vụ tương thích OpenAI, bao gồm đường dẫn riêng nếu có.',
+      keyLabel: 'Khóa truy cập (API key)',
+      keyAriaLabel: 'API key',
+      keyExistingPlaceholder: 'Để trống để giữ khóa đã lưu',
+      keyNewPlaceholder: 'Không bắt buộc',
+      keyExistingHelp: 'Với kết nối đã lưu, để trống trường này sẽ giữ nguyên khóa hiện có.',
+      keyNewHelp: 'Có thể để trống nếu dịch vụ này không yêu cầu khóa.',
+      modelLabel: 'Model',
+      modelPlaceholder: 'ten-model',
+      modelHelp: 'Dùng tên model từ dịch vụ AI. Bạn luôn có thể nhập thủ công.',
+      saveAndUse: 'Lưu và sử dụng',
+      testConnection: 'Kiểm tra kết nối',
+      cancelChanges: 'Hủy thay đổi',
+      saveScope: 'Kết nối đã lưu sẽ dùng cho cuộc trò chuyện mới. Cuộc trò chuyện hiện có có thể giữ model đã chọn.',
+      loadFailed: 'Không thể tải kết nối AI.',
+      saveFailed: 'Không thể lưu kết nối này. Kiểm tra thông tin rồi thử lại.',
+      saved: 'Đã lưu. Cuộc trò chuyện mới sẽ dùng kết nối này.',
+      invalidUrl: 'Nhập đầy đủ địa chỉ máy chủ bắt đầu bằng http:// hoặc https://.',
+      requiredFields: 'Nhập tên kết nối, địa chỉ máy chủ và model.',
+      validationReachable: 'Dịch vụ AI đã trả lời yêu cầu danh sách model.',
+      validationModels: count => `Tìm thấy ${count} model. Bạn có thể chọn một model hoặc nhập thủ công.`,
+      validationFailed: 'Không kết nối được tới dịch vụ AI. Kiểm tra địa chỉ và khóa rồi thử lại.'
     }
   },
 

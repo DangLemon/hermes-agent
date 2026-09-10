@@ -21,6 +21,7 @@ interface GatewayMenuPanelProps {
   harnessProvisioning?: HarnessProvisioning | null
   inferenceStatus: RuntimeReadinessResult | null
   onClose: () => void
+  onOpenAiConnection?: () => void
   onOpenSystem: () => void
   statusSnapshot: StatusResponse | null
 }
@@ -98,6 +99,7 @@ export function GatewayMenuPanel({
   harnessProvisioning = null,
   inferenceStatus,
   onClose,
+  onOpenAiConnection,
   onOpenSystem,
   statusSnapshot
 }: GatewayMenuPanelProps) {
@@ -128,6 +130,11 @@ export function GatewayMenuPanel({
     void reconnectGateway()
       .catch(err => notifyError(err, copy.reconnectGateway))
       .finally(() => setReconnecting(false))
+  }
+
+  const openAiConnection = () => {
+    onClose()
+    onOpenAiConnection?.()
   }
 
   const gatewayOpen = gatewayState === 'open'
@@ -225,7 +232,9 @@ export function GatewayMenuPanel({
         </div>
       </div>
 
-      {showProvisioningNotice && harnessProvisioning && <ProvisioningNotice provisioning={harnessProvisioning} />}
+      {showProvisioningNotice && harnessProvisioning && (
+        <ProvisioningNotice onOpenAiConnection={openAiConnection} provisioning={harnessProvisioning} />
+      )}
 
       {inferenceStatus?.reason && (
         <Section className="text-xs text-muted-foreground">
@@ -275,20 +284,39 @@ export function GatewayMenuPanel({
   )
 }
 
-function ProvisioningNotice({ provisioning }: { provisioning: HarnessProvisioning }) {
-  const title = provisioning.state === 'unknown' ? 'IT setup status unknown' : 'IT setup incomplete'
+function ProvisioningNotice({
+  onOpenAiConnection,
+  provisioning
+}: {
+  onOpenAiConnection: () => void
+  provisioning: HarnessProvisioning
+}) {
+  const { t } = useI18n()
+  const copy = t.shell.gatewayMenu
+  const missingInference = provisioning.missing.includes('inference')
+
+  if (provisioning.state === 'incomplete' && missingInference) {
+    return (
+      <Section className="space-y-2 text-xs text-muted-foreground">
+        <SectionLabel>{copy.aiConnectionMissingTitle}</SectionLabel>
+        <div>{copy.aiConnectionMissingDetail}</div>
+        <Button className="h-auto px-2 py-1 text-xs" onClick={onOpenAiConnection} size="xs" type="button" variant="secondary">
+          {copy.openAiConnection}
+        </Button>
+      </Section>
+    )
+  }
+
+  const title = provisioning.state === 'unknown' ? copy.provisioningUnknownTitle : copy.provisioningIncompleteTitle
 
   const detail =
     provisioning.detail ??
-    (provisioning.state === 'unknown'
-      ? 'Runtime provisioning has not reported readiness yet.'
-      : 'One or more required setup categories are missing.')
+    (provisioning.state === 'unknown' ? copy.provisioningUnknownDetail : copy.provisioningIncompleteDetail)
 
   return (
     <Section className="space-y-1 text-xs text-muted-foreground">
       <SectionLabel>{title}</SectionLabel>
       <div>{detail}</div>
-      {provisioning.missing.length > 0 && <div>Missing: {provisioning.missing.join(', ')}</div>}
     </Section>
   )
 }

@@ -1,0 +1,75 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const hermesApi = vi.fn()
+const capabilityScoped = vi.fn()
+const profileScoped = vi.fn()
+
+vi.mock('./client', () => ({
+  STARTUP_REQUEST_TIMEOUT_MS: 60_000,
+  capabilityScoped,
+  hermesApi,
+  profileScoped
+}))
+
+describe('custom endpoint API scope', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    hermesApi.mockResolvedValue({})
+    capabilityScoped.mockImplementation(scope => {
+      if (scope && typeof scope === 'object') {
+        return { connectionId: scope.connectionId, profile: scope.profile }
+      }
+      return scope ? { profile: scope } : {}
+    })
+    profileScoped.mockImplementation(scope => (scope ? { profile: scope } : {}))
+  })
+
+  it('routes list, save, validate, activate, and delete through capability scope', async () => {
+    const api = await import('./config')
+    const scope = { connectionId: 'local', profile: 'sales' }
+    const payload = {
+      base_url: 'http://127.0.0.1:5173/v1',
+      id: 'lemon-ai-company',
+      model: 'openai-codex-gpt-5-5',
+      name: 'AI cong ty'
+    }
+
+    await api.getCustomEndpoints(scope)
+    await api.saveCustomEndpoint(payload, scope)
+    await api.validateCustomEndpoint(payload, scope)
+    await api.activateCustomEndpoint('lemon-ai-company', scope)
+    await api.deleteCustomEndpoint('lemon-ai-company', scope)
+
+    expect(hermesApi).toHaveBeenNthCalledWith(1, {
+      connectionId: 'local',
+      profile: 'sales',
+      path: '/api/providers/custom-endpoints'
+    })
+    expect(hermesApi).toHaveBeenNthCalledWith(2, {
+      connectionId: 'local',
+      profile: 'sales',
+      path: '/api/providers/custom-endpoints',
+      method: 'POST',
+      body: payload
+    })
+    expect(hermesApi).toHaveBeenNthCalledWith(3, {
+      connectionId: 'local',
+      profile: 'sales',
+      path: '/api/providers/custom-endpoints/validate',
+      method: 'POST',
+      body: payload
+    })
+    expect(hermesApi).toHaveBeenNthCalledWith(4, {
+      connectionId: 'local',
+      profile: 'sales',
+      path: '/api/providers/custom-endpoints/lemon-ai-company/activate',
+      method: 'POST'
+    })
+    expect(hermesApi).toHaveBeenNthCalledWith(5, {
+      connectionId: 'local',
+      profile: 'sales',
+      path: '/api/providers/custom-endpoints/lemon-ai-company',
+      method: 'DELETE'
+    })
+  })
+})

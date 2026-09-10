@@ -7,6 +7,7 @@ import { initialInternalCompanyCapabilities } from '@/app/internal-company/capab
 import { resetInternalCompanyCapabilitiesForTest, setInternalCompanyCapabilitiesForTest } from '@/app/internal-company/store'
 
 vi.mock('./about-settings', () => ({ AboutSettings: () => <div>About panel</div> }))
+vi.mock('./ai-connection-settings', () => ({ AiConnectionSettings: () => <div>AI connection panel</div> }))
 vi.mock('./appearance-settings', () => ({ AppearanceSettings: () => <div>Appearance panel</div> }))
 vi.mock('./billing', () => ({ BillingSettings: () => <div>Billing panel</div> }))
 vi.mock('./config-settings', () => ({ ConfigSettings: ({ activeSectionId }: { activeSectionId: string }) => <div>Config {activeSectionId}</div> }))
@@ -41,19 +42,22 @@ afterEach(() => {
 })
 
 describe('SettingsView internal harness policy', () => {
-  it('redirects blocked settings tabs to appearance and hides managed settings surfaces', async () => {
+  it('routes providers to the friendly AI connection screen and hides managed settings surfaces', async () => {
     setInternalCompanyCapabilitiesForTest(initialInternalCompanyCapabilities(true))
 
-    const view = await renderSettings('/settings?tab=providers')
+    const view = await renderSettings('/settings?tab=providers&pview=custom-endpoints')
 
-    expect(await screen.findByText('Appearance panel')).not.toBeNull()
+    expect(await screen.findByText('AI connection panel')).not.toBeNull()
     expect(screen.queryByText('Providers panel')).toBeNull()
 
     await waitFor(() => {
-      expect(view.container.querySelector('[data-tour="nav-config:appearance"]')).not.toBeNull()
+      expect(view.container.querySelector('[data-tour="nav-providers"]')).not.toBeNull()
     })
 
-    expect(view.container.querySelector('[data-tour="nav-providers"]')).toBeNull()
+    expect(screen.getAllByText('AI Connection')).toHaveLength(2)
+    expect(view.container.querySelector('[data-tour="nav-pview:accounts"]')).toBeNull()
+    expect(view.container.querySelector('[data-tour="nav-pview:keys"]')).toBeNull()
+    expect(view.container.querySelector('[data-tour="nav-pview:custom-endpoints"]')).toBeNull()
     expect(view.container.querySelector('[data-tour="nav-gateway"]')).toBeNull()
     expect(view.container.querySelector('[data-tour="nav-keys"]')).toBeNull()
     expect(view.container.querySelector('[data-tour="nav-billing"]')).toBeNull()

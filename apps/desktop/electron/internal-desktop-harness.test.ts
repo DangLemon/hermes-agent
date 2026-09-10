@@ -5,11 +5,14 @@ import path from 'node:path'
 
 import { test } from 'vitest'
 
+import type { InternalDesktopSeedExec } from './internal-desktop-harness'
 import {
+  buildInternalDesktopInitialProviderSeedInvocation,
   HARNESS_RESOURCE_FILENAME,
   initializeInternalDesktopHarness,
   loadInternalDesktopHarnessResource,
   materializeInternalDesktopManagedConfig,
+  runInternalDesktopInitialProviderSeed,
   validateInternalDesktopHarnessResource
 } from './internal-desktop-harness'
 
@@ -24,12 +27,14 @@ const validResource = {
     webhooks: false
   },
   managedConfig: {
-    model: {
-      provider: '<COMPANY_PROVIDER_ID>',
-      default: '<COMPANY_MODEL_ID>',
-      base_url: '<COMPANY_PROVIDER_BASE_URL_IF_REQUIRED>',
-      api_key: '${COMPANY_PROVIDER_API_KEY}'
-    }
+    mcp_servers: {}
+  },
+  initialProvider: {
+    id: '<COMPANY_PROVIDER_ID>',
+    name: '<COMPANY_PROVIDER_NAME>',
+    base_url: '<COMPANY_PROVIDER_BASE_URL>',
+    model: '<COMPANY_MODEL_ID>',
+    key_env: 'COMPANY_PROVIDER_API_KEY'
   },
   credentialRequirements: {
     provider: {
@@ -92,6 +97,8 @@ test('materializeInternalDesktopManagedConfig writes only managedConfig as JSON 
     assert.deepEqual(config, validResource.managedConfig)
     assert.equal(JSON.stringify(config).includes('credentialRequirements'), false)
     assert.equal(JSON.stringify(config).includes('ui'), false)
+    assert.equal(JSON.stringify(config).includes('initialProvider'), false)
+    assert.equal(JSON.stringify(config).includes('<COMPANY_MODEL_ID>'), false)
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true })
   }
@@ -105,6 +112,8 @@ test('initializeInternalDesktopHarness returns inactive instead of reusing stale
     assert.deepEqual(state, {
       active: false,
       managedDir: null,
+      resourcePath: null,
+      seedScriptPath: null,
       requested: false,
       resource: null,
       suppressRemoteBackends: false,
@@ -120,7 +129,6 @@ test('validateInternalDesktopHarnessResource permits credential metadata and env
   const withEnvRef = {
     ...validResource,
     managedConfig: {
-      ...validResource.managedConfig,
       mcp_servers: {
         '<COMPANY_MCP_SERVER_ID>': {
           url: '<COMPANY_MCP_SERVER_URL_IF_HTTP>',
@@ -151,12 +159,18 @@ test('validateInternalDesktopHarnessResource accepts real nonsecret deployment i
     ...validResource,
     sourceRepository: 'DangLemon/hermes-agent',
     managedConfig: {
-      model: { provider: 'openai-compatible', default: 'company-approved-model', base_url: 'https://models.company.example/v1', api_key: '${COMPANY_PROVIDER_API_KEY}' },
       mcp_servers: { company_search: { url: 'https://mcp.company.example/sse', headers: { 'X-Company-Auth': '${MCP_COMPANY_AUTH}' } } }
+    },
+    initialProvider: {
+      id: 'lemon-ai-company',
+      name: 'AI công ty',
+      base_url: 'https://models.company.example/v1',
+      model: 'company-approved-model',
+      key_env: 'HERMES_COMPANY_API_KEY'
     }
   }
 
-  assert.equal(validateInternalDesktopHarnessResource(resource).managedConfig?.model, resource.managedConfig.model)
+  assert.equal(validateInternalDesktopHarnessResource(resource).initialProvider?.id, 'lemon-ai-company')
   assert.equal(validateInternalDesktopHarnessResource(resource).sourceRepository, 'DangLemon/hermes-agent')
 })
 
@@ -170,8 +184,8 @@ test('validateInternalDesktopHarnessResource rejects unsafe source repositories 
     /sourceRepository/i
   )
   assert.throws(
-    () => validateInternalDesktopHarnessResource({ ...validResource, managedConfig: { model: { provider: 'p', default: 'm', api_key: 'sk-live-secret-value' } } }),
-    /secret-shaped|environment reference/i
+    () => validateInternalDesktopHarnessResource({ ...validResource, initialProvider: { ...validResource.initialProvider, api_key: 'sk-live-secret-value' } }),
+    /initialProvider\.api_key/i
   )
 })
 
@@ -212,7 +226,6 @@ test('validateInternalDesktopHarnessResource allows stdio MCP commands and Autho
   const resource = {
     ...validResource,
     managedConfig: {
-      model: { provider: 'company-provider', default: 'company-model' },
       mcp_servers: {
         company_stdio: { cmd: 'company-mcp', argv: ['--stdio'], env: { COMPANY_MCP_TOKEN: '${COMPANY_MCP_TOKEN}' } },
         company_http: { url: 'https://mcp.company.example/sse', headers: { Authorization: 'Bearer ${COMPANY_MCP_OAUTH}' } }
@@ -261,4 +274,206 @@ test('requested WSL harness is unavailable but still suppresses remote/profile f
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true })
   }
+})
+
+test('runInternalDesktopInitialProviderSeed invokes the packaged seed helper before backend spawn', async () => {
+  const calls: Array<{ command: string; args: string[]; options: Parameters<InternalDesktopSeedExec>[2] }> = []
+
+  const run: InternalDesktopSeedExec = (command, args, options) => {
+    calls.push({ command, args, options })
+
+    return Promise.resolve('')
+  }
+
+  await runInternalDesktopInitialProviderSeed(validResource, {
+    backend: {
+      command: '/venv/bin/python',
+      env: { PYTHONPATH: '/app' },
+      root: '/runtime'
+    },
+    environment: { HERMES_COMPANY_API_KEY: 'from-env' },
+    execFile: run,
+    hermesHome: '/tmp/hermes-home',
+    profile: 'sales',
+    resourcePath: '/Applications/Lemon AI.app/Contents/Resources/internal-desktop-harness.json',
+    seedScriptPath: '/Applications/Lemon AI.app/Contents/Resources/internal-desktop-harness-seed.py'
+  })
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].command, '/venv/bin/python')
+  assert.deepEqual(calls[0].args, [
+    '/Applications/Lemon AI.app/Contents/Resources/internal-desktop-harness-seed.py',
+    '--resource',
+    '/Applications/Lemon AI.app/Contents/Resources/internal-desktop-harness.json',
+    '--hermes-home',
+    '/tmp/hermes-home',
+    '--profile',
+    'sales'
+  ])
+  assert.equal(calls[0].options.env['HERMES_HOME'], '/tmp/hermes-home')
+  assert.equal(calls[0].options.env['PYTHONPATH'], '/app')
+  assert.equal(calls[0].options.env['HERMES_COMPANY_API_KEY'], 'from-env')
+  assert.equal(calls[0].options.timeout, 15_000)
+  assert.equal(calls[0].options.shell, false)
+})
+
+
+test('buildInternalDesktopInitialProviderSeedInvocation replaces hermes module args without keeping serve args', () => {
+  const invocation = buildInternalDesktopInitialProviderSeedInvocation(
+    {
+      command: 'wsl.exe',
+      args: ['--distribution', 'Ubuntu', '--exec', '/opt/hermes/venv/bin/python', '-m', 'hermes_cli.main', '--profile', 'sales', 'serve', '--port', '0'],
+      shell: false
+    },
+    '/mnt/c/Program Files/Lemon AI/resources/internal-desktop-harness-seed.py',
+    {
+      hermesHome: '/home/alex/.hermes',
+      profile: 'sales',
+      resourcePath: '/mnt/c/Program Files/Lemon AI/resources/internal-desktop-harness.json'
+    }
+  )
+
+  assert.equal(invocation.command, 'wsl.exe')
+  assert.deepEqual(invocation.args, [
+    '--distribution',
+    'Ubuntu',
+    '--exec',
+    '/opt/hermes/venv/bin/python',
+    '/mnt/c/Program Files/Lemon AI/resources/internal-desktop-harness-seed.py',
+    '--resource',
+    '/mnt/c/Program Files/Lemon AI/resources/internal-desktop-harness.json',
+    '--hermes-home',
+    '/home/alex/.hermes',
+    '--profile',
+    'sales'
+  ])
+})
+
+test('buildInternalDesktopInitialProviderSeedInvocation resolves sibling python for hermes shim commands', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-harness-shim-'))
+
+  try {
+    const bin = path.join(tempRoot, 'venv', 'bin')
+    fs.mkdirSync(bin, { recursive: true })
+    fs.writeFileSync(path.join(bin, 'hermes'), '', 'utf8')
+    fs.writeFileSync(path.join(bin, 'python'), '', 'utf8')
+
+    const invocation = buildInternalDesktopInitialProviderSeedInvocation(
+      { command: path.join(bin, 'hermes'), args: ['serve', '--port', '0'], shell: false },
+      '/Applications/Lemon AI.app/Contents/Resources/internal-desktop-harness-seed.py',
+      {
+        hermesHome: '/Users/alex/.hermes',
+        profile: null,
+        resourcePath: '/Applications/Lemon AI.app/Contents/Resources/internal-desktop-harness.json'
+      }
+    )
+
+    assert.equal(invocation.command, path.join(bin, 'python'))
+    assert.deepEqual(invocation.args, [
+      '/Applications/Lemon AI.app/Contents/Resources/internal-desktop-harness-seed.py',
+      '--resource',
+      '/Applications/Lemon AI.app/Contents/Resources/internal-desktop-harness.json',
+      '--hermes-home',
+      '/Users/alex/.hermes',
+      '--profile',
+      ''
+    ])
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
+
+test('buildInternalDesktopInitialProviderSeedInvocation reads shebang python for plain hermes command backends', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-harness-pipx-'))
+
+  try {
+    const bin = path.join(tempRoot, 'bin')
+    fs.mkdirSync(bin, { recursive: true })
+    const hermes = path.join(bin, 'hermes')
+    fs.writeFileSync(hermes, '#!/usr/bin/env python3\nimport hermes_cli.main\n', 'utf8')
+
+    const invocation = buildInternalDesktopInitialProviderSeedInvocation(
+      { command: hermes, args: ['serve', '--port', '0'], kind: 'command', shell: false },
+      '/Applications/Lemon AI.app/Contents/Resources/internal-desktop-harness-seed.py',
+      {
+        hermesHome: '/Users/alex/.hermes',
+        profile: null,
+        resourcePath: '/Applications/Lemon AI.app/Contents/Resources/internal-desktop-harness.json'
+      }
+    )
+
+    assert.equal(invocation.command, '/usr/bin/env')
+    assert.deepEqual(invocation.args, [
+      'python3',
+      '/Applications/Lemon AI.app/Contents/Resources/internal-desktop-harness-seed.py',
+      '--resource',
+      '/Applications/Lemon AI.app/Contents/Resources/internal-desktop-harness.json',
+      '--hermes-home',
+      '/Users/alex/.hermes',
+      '--profile',
+      ''
+    ])
+    assert.equal(invocation.shell, false)
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test('buildInternalDesktopInitialProviderSeedInvocation reads Windows command script python for hermes command backends', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-harness-cmd-'))
+
+  try {
+    const hermes = path.join(tempRoot, 'hermes.cmd')
+    fs.writeFileSync(
+      hermes,
+      '@"C:\\Users\\alex\\.local\\pipx\\venvs\\hermes\\Scripts\\python.exe" "%~dp0hermes.exe" %*\r\n',
+      'utf8'
+    )
+
+    const invocation = buildInternalDesktopInitialProviderSeedInvocation(
+      { command: hermes, args: ['serve', '--port', '0'], kind: 'command', shell: true },
+      'C:\\Program Files\\Lemon AI\\resources\\internal-desktop-harness-seed.py',
+      {
+        hermesHome: 'C:\\Users\\alex\\.hermes',
+        profile: null,
+        resourcePath: 'C:\\Program Files\\Lemon AI\\resources\\internal-desktop-harness.json'
+      }
+    )
+
+    assert.equal(invocation.command, 'C:\\Users\\alex\\.local\\pipx\\venvs\\hermes\\Scripts\\python.exe')
+    assert.deepEqual(invocation.args, [
+      'C:\\Program Files\\Lemon AI\\resources\\internal-desktop-harness-seed.py',
+      '--resource',
+      'C:\\Program Files\\Lemon AI\\resources\\internal-desktop-harness.json',
+      '--hermes-home',
+      'C:\\Users\\alex\\.hermes',
+      '--profile',
+      ''
+    ])
+    assert.equal(invocation.shell, false)
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test('runInternalDesktopInitialProviderSeed skips when no initial provider is configured', async () => {
+  const calls: Parameters<InternalDesktopSeedExec>[] = []
+
+  const run: InternalDesktopSeedExec = (...args) => {
+    calls.push(args)
+
+    return Promise.resolve('')
+  }
+
+  await runInternalDesktopInitialProviderSeed({ ...validResource, initialProvider: undefined } as any, {
+    backend: { command: '/venv/bin/python', env: {}, root: '/runtime' },
+    execFile: run,
+    hermesHome: '/tmp/hermes-home',
+    profile: null,
+    resourcePath: '/tmp/internal-desktop-harness.json',
+    seedScriptPath: '/tmp/internal-desktop-harness-seed.py'
+  })
+
+  assert.equal(calls.length, 0)
 })
