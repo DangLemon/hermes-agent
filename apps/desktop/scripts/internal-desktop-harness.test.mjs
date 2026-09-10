@@ -24,18 +24,19 @@ const validResource = {
     webhooks: false
   },
   managedConfig: {
-    model: {
-      provider: '<COMPANY_PROVIDER_ID>',
-      default: '<COMPANY_MODEL_ID>',
-      base_url: '<COMPANY_PROVIDER_BASE_URL_IF_REQUIRED>',
-      api_key: '${COMPANY_PROVIDER_API_KEY}'
-    },
     mcp_servers: {
       '<COMPANY_MCP_SERVER_ID>': {
         url: '<COMPANY_MCP_SERVER_URL_IF_HTTP>',
         auth: 'oauth'
       }
     }
+  },
+  initialProvider: {
+    id: '<COMPANY_PROVIDER_ID>',
+    name: '<COMPANY_PROVIDER_NAME>',
+    base_url: '<COMPANY_PROVIDER_BASE_URL>',
+    model: '<COMPANY_MODEL_ID>',
+    key_env: 'COMPANY_PROVIDER_API_KEY'
   },
   credentialRequirements: {
     provider: {
@@ -52,7 +53,6 @@ test('validateHarnessResource permits credentialRequirements metadata and enviro
   const resource = {
     ...validResource,
     managedConfig: {
-      ...validResource.managedConfig,
       mcp_servers: {
         '<COMPANY_MCP_SERVER_ID>': {
           url: '<COMPANY_MCP_SERVER_URL_IF_HTTP>',
@@ -76,12 +76,18 @@ test('validateHarnessResource accepts real nonsecret deployment identifiers in p
     ...validResource,
     sourceRepository: 'DangLemon/hermes-agent',
     managedConfig: {
-      model: { provider: 'openai-compatible', default: 'company-approved-model', base_url: 'https://models.company.example/v1', api_key: '${COMPANY_PROVIDER_API_KEY}' },
       mcp_servers: { company_search: { url: 'https://mcp.company.example/sse', headers: { 'X-Company-Auth': '${MCP_COMPANY_AUTH}' } } }
+    },
+    initialProvider: {
+      id: 'lemon-ai-company',
+      name: 'AI công ty',
+      base_url: 'https://models.company.example/v1',
+      model: 'company-approved-model',
+      key_env: 'HERMES_COMPANY_API_KEY'
     }
   }
 
-  assert.equal(validateHarnessResource(resource).managedConfig.model.provider, 'openai-compatible')
+  assert.equal(validateHarnessResource(resource).initialProvider.id, 'lemon-ai-company')
   assert.equal(validateHarnessResource(resource).sourceRepository, 'DangLemon/hermes-agent')
 })
 
@@ -95,8 +101,8 @@ test('validateHarnessResource rejects unsafe source repositories and literal mod
     /sourceRepository/i
   )
   assert.throws(
-    () => validateHarnessResource({ ...validResource, managedConfig: { model: { provider: 'p', default: 'm', api_key: 'sk-live-secret-value' } } }),
-    /secret-shaped|environment reference/i
+    () => validateHarnessResource({ ...validResource, initialProvider: { ...validResource.initialProvider, api_key: 'sk-live-secret-value' } }),
+    /initialProvider\.api_key/i
   )
 })
 
@@ -112,11 +118,13 @@ test('configured internal manifest pins approved repo, model, and MCP env refs',
     terminal: true,
     webhooks: false
   })
-  assert.deepEqual(resource.managedConfig.model, {
-    provider: 'custom',
-    default: 'openai-codex-gpt-5-5',
+  assert.equal(resource.managedConfig.model, undefined)
+  assert.deepEqual(resource.initialProvider, {
+    id: 'lemon-ai-company',
+    name: 'AI công ty',
     base_url: 'http://127.0.0.1:5173/v1',
-    api_key: '${HERMES_COMPANY_API_KEY}'
+    model: 'openai-codex-gpt-5-5',
+    key_env: 'HERMES_COMPANY_API_KEY'
   })
   assert.deepEqual(Object.keys(resource.managedConfig.mcp_servers).sort(), ['algolia', 'amazon-ads', 'tiktok-ads'])
   assert.equal(resource.managedConfig.mcp_servers.algolia.enabled, false)
@@ -161,16 +169,18 @@ test('generateInternalDesktopHarnessResource writes selected input and removes s
     const input = path.join(tempRoot, 'input.json')
     fs.writeFileSync(input, JSON.stringify(validResource), 'utf8')
 
-    const written = generateInternalDesktopHarnessResource({
-      env: { HERMES_DESKTOP_HARNESS_CONFIG: input },
-      buildDir
-    })
-    assert.equal(written.resourcePath, path.join(buildDir, HARNESS_RESOURCE_FILENAME))
-    assert.equal(JSON.parse(fs.readFileSync(written.resourcePath, 'utf8')).profile, 'internal')
+  const written = generateInternalDesktopHarnessResource({
+    env: { HERMES_DESKTOP_HARNESS_CONFIG: input },
+    buildDir
+  })
+  assert.equal(written.resourcePath, path.join(buildDir, HARNESS_RESOURCE_FILENAME))
+  assert.equal(JSON.parse(fs.readFileSync(written.resourcePath, 'utf8')).profile, 'internal')
+  assert.equal(fs.existsSync(path.join(buildDir, 'internal-desktop-harness-seed.py')), true)
 
-    const absent = generateInternalDesktopHarnessResource({ env: {}, buildDir })
-    assert.equal(absent.resourcePath, null)
-    assert.equal(fs.existsSync(path.join(buildDir, HARNESS_RESOURCE_FILENAME)), false)
+  const absent = generateInternalDesktopHarnessResource({ env: {}, buildDir })
+  assert.equal(absent.resourcePath, null)
+  assert.equal(fs.existsSync(path.join(buildDir, HARNESS_RESOURCE_FILENAME)), false)
+  assert.equal(fs.existsSync(path.join(buildDir, 'internal-desktop-harness-seed.py')), false)
 
     fs.writeFileSync(path.join(buildDir, HARNESS_RESOURCE_FILENAME), JSON.stringify(validResource), 'utf8')
     const invalidInput = path.join(tempRoot, 'invalid.json')
@@ -179,7 +189,8 @@ test('generateInternalDesktopHarnessResource writes selected input and removes s
       () => generateInternalDesktopHarnessResource({ env: { HERMES_DESKTOP_HARNESS_CONFIG: invalidInput }, buildDir }),
       /schemaVersion/
     )
-    assert.equal(fs.existsSync(path.join(buildDir, HARNESS_RESOURCE_FILENAME)), false)
+  assert.equal(fs.existsSync(path.join(buildDir, HARNESS_RESOURCE_FILENAME)), false)
+  assert.equal(fs.existsSync(path.join(buildDir, 'internal-desktop-harness-seed.py')), false)
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true })
   }
@@ -210,7 +221,6 @@ test('validateHarnessResource allows stdio MCP command fields and Authorization 
   const resource = {
     ...validResource,
     managedConfig: {
-      model: { provider: 'company-provider', default: 'company-model' },
       mcp_servers: {
         company_stdio: { command: 'company-mcp', args: ['--profile', 'internal'], env: { COMPANY_MCP_TOKEN: '${COMPANY_MCP_TOKEN}' } },
         company_http: { url: 'https://mcp.company.example/sse', headers: { Authorization: 'Bearer ${COMPANY_MCP_OAUTH}' } }
@@ -223,7 +233,7 @@ test('validateHarnessResource allows stdio MCP command fields and Authorization 
 
 test('validateHarnessResource rejects literal secrets in MCP config and credentialRequirements metadata', () => {
   assert.throws(
-    () => validateHarnessResource({ ...validResource, managedConfig: { model: { provider: 'p', default: 'm' }, mcp_servers: { a: { headers: { Authorization: 'Bearer literal-secret-value' } } } } }),
+    () => validateHarnessResource({ ...validResource, managedConfig: { mcp_servers: { a: { headers: { Authorization: 'Bearer literal-secret-value' } } } } }),
     /secret-shaped/i
   )
   assert.throws(

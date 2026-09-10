@@ -232,7 +232,7 @@ import { snapHudBounds } from './hud-snap'
 import { createHudSnapShortcut } from './hud-snap-shortcut'
 import { buildHudWindowUrl } from './hud-url'
 import { resolveHudWindowing } from './hud-windowing'
-import { initializeInternalDesktopHarness } from './internal-desktop-harness'
+import { initializeInternalDesktopHarness, runInternalDesktopInitialProviderSeed } from './internal-desktop-harness'
 import { createLinkTitleWindow, guardLinkTitleSession, readLinkTitleWindowTitle } from './link-title-window'
 import { ensureMainWindow } from './main-window-lifecycle'
 import {
@@ -839,6 +839,24 @@ function internalDesktopHarnessSuppressesRemoteBackends() {
 
 function internalDesktopHarnessRequested() {
   return INTERNAL_DESKTOP_HARNESS.requested
+}
+
+async function seedInternalDesktopInitialProvider(backend, profile) {
+  if (!INTERNAL_DESKTOP_HARNESS.active || !INTERNAL_DESKTOP_HARNESS.resourcePath) {
+    return
+  }
+
+  try {
+    await runInternalDesktopInitialProviderSeed(INTERNAL_DESKTOP_HARNESS.resource, {
+      backend,
+      hermesHome: HERMES_HOME,
+      profile,
+      resourcePath: INTERNAL_DESKTOP_HARNESS.resourcePath,
+      seedScriptPath: INTERNAL_DESKTOP_HARNESS.seedScriptPath
+    })
+  } catch (error) {
+    throw new Error(`Could not seed editable Lemon AI provider: ${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 function pathWithHermesManagedNode(...entries) {
@@ -12537,6 +12555,7 @@ async function spawnPoolBackend(profile, entry, opts: { forceLocal?: boolean; po
   // --port 0: the OS assigns an ephemeral port; the child announces it on stdout.
   const backendArgs = ['--profile', profile, 'serve', '--host', '127.0.0.1', '--port', '0']
   const backend = await ensureRuntime(resolveHermesBackend(backendArgs))
+  await seedInternalDesktopInitialProvider(backend, profile)
   // Route old runtimes (no `serve`) through the legacy `dashboard --no-open`.
   backend.args = getBackendArgsForRuntime(backend)
   const hermesCwd = resolveHermesCwd()
@@ -12956,6 +12975,7 @@ async function startHermes() {
     setWslBridgeProfileState(primaryProfile, true)
 
     const backend = setup.backend
+    await seedInternalDesktopInitialProvider(backend, launchScope.primaryProfile)
     // Route old runtimes (no `serve`) through the legacy `dashboard --no-open`.
     backend.args = getBackendArgsForRuntime(backend)
     const hermesCwd = resolveHermesCwd()

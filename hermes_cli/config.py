@@ -19,7 +19,7 @@ import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple, Set
+from typing import Dict, Any, Optional, List, Tuple, Set, Iterator, ContextManager
 
 import yaml
 
@@ -197,6 +197,92 @@ def validate_env_var_name_for_write(key: str) -> None:
 # (approval, browser, setup flows) load/save config concurrently during long agent runs.
 # RLock because save_config internally calls read_raw_config.
 _CONFIG_LOCK = threading.RLock()
+
+_CONFIG_FILE_LOCK_STATE = threading.local()
+
+def _ensure_lock_byte(handle) -> None:
+    handle.seek(0, os.SEEK_END)
+    if handle.tell() == 0:
+        handle.write(b"0")
+        handle.flush()
+    handle.seek(0)
+
+
+def _lock_config_file(handle, lock: bool) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK if lock else msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX if lock else fcntl.LOCK_UN)
+
+
+def _held_config_lock_paths() -> set[str]:
+    held = getattr(_CONFIG_FILE_LOCK_STATE, "paths", None)
+    if held is None:
+        held = set()
+        _CONFIG_FILE_LOCK_STATE.paths = held
+    return held
+
+
+def config_file_lock(config_path: Optional[Path] = None) -> ContextManager[None]:
+    """Cross-process file lock for one config.yaml path.
+
+    Prefer config_write_transaction() for read/modify/write operations. This
+    lower-level context is keyed by config path so nesting lock(A) then lock(B)
+    still acquires B instead of treating all config locks as equivalent.
+    """
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _manager() -> Iterator[None]:
+        ensure_hermes_home()
+        target = Path(config_path) if config_path is not None else get_config_path()
+        lock_path = target.with_name(f".{target.name}.lock")
+        key = str(lock_path.resolve())
+        held = _held_config_lock_paths()
+        if key in held:
+            yield
+            return
+
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+b") as handle:
+            _ensure_lock_byte(handle)
+            _lock_config_file(handle, True)
+            held.add(key)
+            try:
+                yield
+            finally:
+                held.remove(key)
+                _lock_config_file(handle, False)
+
+    return _manager()
+
+
+def config_write_transaction(config_path: Optional[Path] = None) -> ContextManager[None]:
+    """Canonical transaction context for config.yaml read/modify/write.
+
+    Lock order is always process RLock first, then the per-config file lock.
+    That keeps same-process threads and sidecar helper processes from acquiring
+    the two locks in opposite orders. The guarantee covers cooperating Hermes
+    writers that use save_config() or this transaction; external editors that
+    write config.yaml directly are outside this lock protocol.
+    """
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _manager() -> Iterator[None]:
+        with _CONFIG_LOCK:
+            ensure_hermes_home()
+            target = Path(config_path) if config_path is not None else get_config_path()
+            with config_file_lock(target):
+                yield
+
+    return _manager()
+
 # path -> last successfully loaded (expanded) config; served after a parse failure so a
 # mid-edit broken YAML never silently drops user overrides (e.g. approvals.deny rules).
 _LAST_EXPANDED_CONFIG_BY_PATH: Dict[str, Any] = {}
@@ -2342,29 +2428,30 @@ def save_config(
 
         ensure_hermes_home()
         config_path = get_config_path()
-        require_readable_config_before_write(config_path)
-        # Explicit user paths come from the RAW dict BEFORE normalisation (which may inject
-        # agent.max_turns) so _strip_default_values keeps exactly what the user set.
-        _raw_for_paths = read_raw_config()
-        if merge_existing and _raw_for_paths:
-            config = _merge_partial_save(_raw_for_paths, config)
+        with config_file_lock(config_path):
+            require_readable_config_before_write(config_path)
+            # Explicit user paths come from the RAW dict BEFORE normalisation (which may inject
+            # agent.max_turns) so _strip_default_values keeps exactly what the user set.
+            _raw_for_paths = read_raw_config()
+            if merge_existing and _raw_for_paths:
+                config = _merge_partial_save(_raw_for_paths, config)
 
-        current_normalized = _canonicalize_config(config)
-        normalized = current_normalized
-        if _raw_for_paths:
-            normalized = _preserve_env_ref_templates(
-                normalized, _canonicalize_config(_raw_for_paths),
-                _LAST_EXPANDED_CONFIG_BY_PATH.get(str(config_path)))
+            current_normalized = _canonicalize_config(config)
+            normalized = current_normalized
+            if _raw_for_paths:
+                normalized = _preserve_env_ref_templates(
+                    normalized, _canonicalize_config(_raw_for_paths),
+                    _LAST_EXPANDED_CONFIG_BY_PATH.get(str(config_path)))
 
-        if strip_defaults:
-            # ``_strip_default_values`` always preserves ``_config_version`` itself.
-            effective_preserve_keys = _explicit_config_paths(_raw_for_paths) | set(preserve_keys or ())
-            normalized = _strip_default_values(normalized, DEFAULT_CONFIG, preserve_keys=effective_preserve_keys)
+            if strip_defaults:
+                # ``_strip_default_values`` always preserves ``_config_version`` itself.
+                effective_preserve_keys = _explicit_config_paths(_raw_for_paths) | set(preserve_keys or ())
+                normalized = _strip_default_values(normalized, DEFAULT_CONFIG, preserve_keys=effective_preserve_keys)
 
-        atomic_yaml_write(config_path, normalized, extra_content=_commented_sections_for_save(normalized))
-        _secure_file(config_path)
-        _RAW_CONFIG_CACHE.pop(str(config_path), None)
-        _LAST_EXPANDED_CONFIG_BY_PATH[str(config_path)] = copy.deepcopy(current_normalized)
+            atomic_yaml_write(config_path, normalized, extra_content=_commented_sections_for_save(normalized))
+            _secure_file(config_path)
+            _RAW_CONFIG_CACHE.pop(str(config_path), None)
+            _LAST_EXPANDED_CONFIG_BY_PATH[str(config_path)] = copy.deepcopy(current_normalized)
 
 
 def _parse_env_value(raw_value: str) -> str:

@@ -351,6 +351,42 @@ export interface Translations {
       notifications: string
       plugins: string
     }
+    aiConnection: {
+      title: string
+      intro: string
+      savedConnections: string
+      addConnection: string
+      currentBadge: string
+      selectedForEditing: string
+      savedKey: string
+      editTitle: string
+      newTitle: string
+      nameLabel: string
+      namePlaceholder: string
+      urlLabel: string
+      urlHelp: string
+      keyLabel: string
+      keyAriaLabel: string
+      keyExistingPlaceholder: string
+      keyNewPlaceholder: string
+      keyExistingHelp: string
+      keyNewHelp: string
+      modelLabel: string
+      modelPlaceholder: string
+      modelHelp: string
+      saveAndUse: string
+      testConnection: string
+      cancelChanges: string
+      saveScope: string
+      loadFailed: string
+      saveFailed: string
+      saved: string
+      invalidUrl: string
+      requiredFields: string
+      validationReachable: string
+      validationModels: (count: number) => string
+      validationFailed: string
+    }
     plugins: {
       title: string
       blurb: string
@@ -2630,6 +2666,13 @@ export interface Translations {
       recentActivity: string
       viewAllLogs: string
       messagingPlatforms: string
+      aiConnectionMissingTitle: string
+      aiConnectionMissingDetail: string
+      openAiConnection: string
+      provisioningUnknownTitle: string
+      provisioningUnknownDetail: string
+      provisioningIncompleteTitle: string
+      provisioningIncompleteDetail: string
     }
     approvalMode: {
       title: string
@@ -2666,6 +2709,7 @@ export interface Translations {
       gateway: string
       gatewayReady: string
       gatewayNeedsSetup: string
+      gatewayNeedsAiConnection: string
       gatewayUnavailable: string
       gatewayChecking: string
       gatewayConnecting: string

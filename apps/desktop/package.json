@@ -224,7 +224,8 @@
         "from": "build",
         "to": ".",
         "filter": [
-          "internal-desktop-harness.json"
+          "internal-desktop-harness.json",
+          "internal-desktop-harness-seed.py"
         ]
       }
     ],

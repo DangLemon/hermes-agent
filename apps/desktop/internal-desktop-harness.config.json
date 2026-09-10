@@ -10,12 +10,6 @@
     "webhooks": false
   },
   "managedConfig": {
-    "model": {
-      "provider": "custom",
-      "default": "openai-codex-gpt-5-5",
-      "base_url": "http://127.0.0.1:5173/v1",
-      "api_key": "${HERMES_COMPANY_API_KEY}"
-    },
     "mcp_servers": {
       "tiktok-ads": {
         "url": "https://business-api.tiktok.com/open_mcp/tt-ads-mcp-layer",
@@ -37,6 +31,13 @@
         }
       }
     }
+  },
+  "initialProvider": {
+    "id": "lemon-ai-company",
+    "name": "AI công ty",
+    "base_url": "http://127.0.0.1:5173/v1",
+    "model": "openai-codex-gpt-5-5",
+    "key_env": "HERMES_COMPANY_API_KEY"
   },
   "credentialRequirements": {
     "provider": {

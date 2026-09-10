@@ -35,6 +35,7 @@ _profile_scope = late("_profile_scope", "hermes_cli.web_server_profiles")
 _require_token = late("_require_token")
 load_config = late("load_config", "hermes_cli.config")
 load_env = late("load_env", "hermes_cli.config")
+get_env_value = late("get_env_value", "hermes_cli.config")
 remove_env_value = late("remove_env_value", "hermes_cli.config")
 save_config = late("save_config", "hermes_cli.config")
 save_env_value = late("save_env_value", "hermes_cli.config")
@@ -607,8 +608,24 @@ def delete_custom_endpoint(endpoint_id: str, profile: Optional[str] = None):
         return response
 
 
+def _custom_endpoint_validation_key(body: CustomEndpointUpdate, cfg: Dict[str, Any]) -> str:
+    if body.api_key is not None:
+        return body.api_key.strip()
+
+    provider_key = _custom_endpoint_id(body.id or body.name)
+    _stored, entry = find_provider_entry(cfg.get("providers"), provider_key)
+    if not isinstance(entry, dict):
+        return ""
+
+    key_env = str(entry.get("key_env") or "").strip()
+    if key_env:
+        return str(get_env_value(key_env) or "").strip()
+
+    return str(entry.get("api_key") or "").strip()
+
+
 @router.post("/api/providers/custom-endpoints/validate")
-async def validate_custom_endpoint(body: CustomEndpointUpdate):
+async def validate_custom_endpoint(body: CustomEndpointUpdate, profile: Optional[str] = None):
     """Probe a custom endpoint by calling its OpenAI-compatible /models URL."""
     import httpx
 
@@ -618,8 +635,10 @@ async def validate_custom_endpoint(body: CustomEndpointUpdate):
 
     url = base_url + "/models"
     headers = {"Accept": "application/json"}
-    if body.api_key and body.api_key.strip():
-        headers["Authorization"] = f"Bearer {body.api_key.strip()}"
+    with _config_profile_scope(profile):
+        api_key = _custom_endpoint_validation_key(body, load_config())
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(8.0)) as client:

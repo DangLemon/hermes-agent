@@ -1,4 +1,6 @@
 import crypto from 'node:crypto'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -10,6 +12,8 @@ const SECRET_KEY_RE = /(^|[_-])(api[_-]?key|authorization|bearer|client[_-]?secr
 const SECRET_VALUE_RE = /\b(?:bearer\s+(?!\$\{)[a-z0-9._~+/=-]{12,}|sk-[a-z0-9_-]{12,}|[a-z0-9_]*token[a-z0-9_]*\s*[:=]\s*[a-z0-9._~+/=-]{12,})\b/i
 const OPAQUE_SECRET_VALUE_RE = /^[A-Za-z0-9._~+/=-]{16,}$/
 const AUTH_LIKE_KEY_RE = /(auth|authorization|token|secret|password|credential|api[-_]?key)/i
+const INITIAL_PROVIDER_SEED_TIMEOUT_MS = 15_000
+const execFileAsync = promisify(execFile)
 
 export interface InternalDesktopHarnessResource {
   schemaVersion: 1
@@ -17,6 +21,16 @@ export interface InternalDesktopHarnessResource {
   sourceRepository?: string
   ui: Record<(typeof UI_KEYS)[number], boolean>
   managedConfig?: Record<string, unknown>
+  initialProvider?: {
+    id: string
+    name: string
+    base_url: string
+    model: string
+    key_env: string
+    context_length?: number
+    discover_models?: boolean
+    models?: string[]
+  }
   credentialRequirements?: Record<string, unknown>
 }
 
@@ -27,10 +41,23 @@ export interface InternalDesktopHarnessLoadResult {
   resource: InternalDesktopHarnessResource | null
 }
 
+export type InternalDesktopSeedExec = (
+  command: string,
+  args: string[],
+  options: {
+    cwd: string
+    env: Record<string, string | undefined>
+    shell?: boolean
+    timeout: number
+  }
+) => Promise<unknown>
+
 export interface InternalDesktopHarnessState {
   active: boolean
   diagnostic: string | null
   managedDir: string | null
+  resourcePath: string | null
+  seedScriptPath: string | null
   requested: boolean
   resource: InternalDesktopHarnessResource | null
   suppressRemoteBackends: boolean
@@ -64,6 +91,36 @@ function validateSourceRepository(value: unknown): void {
 
   if (value.includes('..') || value.endsWith('.git') || value.startsWith('-') || /^(https?:|git@)/i.test(value)) {
     fail('sourceRepository must be a safe GitHub owner/repo identity')
+  }
+}
+
+function validateInitialProvider(value: unknown): void {
+  if (!isPlainObject(value)) {fail('initialProvider must be an object')}
+
+  for (const key of ['id', 'name', 'base_url', 'model', 'key_env']) {
+    requireNonEmptyString(value[key], `initialProvider.${key}`)
+  }
+
+  for (const key of Object.keys(value)) {
+    if (!['id', 'name', 'base_url', 'model', 'key_env', 'context_length', 'discover_models', 'models'].includes(key)) {
+      fail(`initialProvider.${key} is not allowed`)
+    }
+  }
+
+  if ('context_length' in value) {
+    const contextLength = value.context_length
+    if (!Number.isInteger(contextLength) || typeof contextLength !== 'number' || contextLength <= 0) {
+      fail('initialProvider.context_length must be a positive integer')
+    }
+  }
+
+  if ('discover_models' in value && typeof value.discover_models !== 'boolean') {
+    fail('initialProvider.discover_models must be boolean')
+  }
+
+  if ('models' in value) {
+    if (!Array.isArray(value.models)) {fail('initialProvider.models must be an array')}
+    value.models.forEach((item, index) => requireNonEmptyString(item, `initialProvider.models.${index}`))
   }
 }
 
@@ -168,6 +225,10 @@ export function validateInternalDesktopHarnessResource(input: unknown): Internal
 
   if ('managedConfig' in input && !isPlainObject(input.managedConfig)) {fail('managedConfig must be an object when present')}
 
+  if ('initialProvider' in input) {
+    validateInitialProvider(input.initialProvider)
+  }
+
   if ('credentialRequirements' in input) {
     validateCredentialRequirements(input.credentialRequirements)
   }
@@ -176,31 +237,7 @@ export function validateInternalDesktopHarnessResource(input: unknown): Internal
 
   if (isPlainObject(input.managedConfig)) {
     for (const key of Object.keys(input.managedConfig)) {
-      if (!['model', 'mcp_servers'].includes(key)) {fail(`managedConfig.${key} is not allowed`)}
-    }
-
-    if ('model' in input.managedConfig) {
-      const model = input.managedConfig.model
-
-      if (!isPlainObject(model)) {fail('managedConfig.model must be an object')}
-      const modelKeys = Object.keys(model)
-
-      for (const key of modelKeys) {
-        if (!['provider', 'default', 'base_url', 'api_key'].includes(key)) {fail(`managedConfig.model.${key} is not allowed`)}
-      }
-
-      if (!modelKeys.includes('provider') || !modelKeys.includes('default')) {
-        fail('managedConfig.model must include placeholder provider and default values')
-      }
-
-      requireNonEmptyString(model.provider, 'managedConfig.model.provider')
-      requireNonEmptyString(model.default, 'managedConfig.model.default')
-
-      if ('base_url' in model) {requireNonEmptyString(model.base_url, 'managedConfig.model.base_url')}
-
-      if ('api_key' in model && !isEnvironmentReference(model.api_key)) {
-        fail('managedConfig.model.api_key must be an environment reference')
-      }
+      if (!['mcp_servers'].includes(key)) {fail(`managedConfig.${key} is not allowed`)}
     }
   }
 
@@ -257,6 +294,165 @@ export function materializeInternalDesktopManagedConfig(
   return managedDir
 }
 
+export function resolveInternalDesktopSeedScriptPath(resourcePath: string | null, appRoot: string): string | null {
+  const candidates = [
+    resourcePath ? path.join(path.dirname(resourcePath), 'internal-desktop-harness-seed.py') : null,
+    path.join(appRoot, 'build', 'internal-desktop-harness-seed.py'),
+    path.join(appRoot, 'electron', 'internal-desktop-harness-seed.py')
+  ].filter(Boolean) as string[]
+
+  return candidates.find(candidate => fs.existsSync(candidate)) ?? null
+}
+
+
+function executableName(command: string): string {
+  return command.split(/[\\/]+/).pop()?.toLowerCase() || command.toLowerCase()
+}
+
+function siblingPythonForCommand(command: string): string | null {
+  const name = executableName(command)
+  if (!/^hermes(?:\.exe|\.cmd|\.bat)?$/i.test(name)) {return null}
+
+  const directory = path.dirname(command)
+  for (const candidate of [path.join(directory, 'python.exe'), path.join(directory, 'python3'), path.join(directory, 'python')]) {
+    if (fs.existsSync(candidate)) {return candidate}
+  }
+
+  return null
+}
+
+
+function splitShebang(line: string): string[] {
+  return line.trim().split(/\s+/).filter(Boolean)
+}
+
+function shebangPythonForCommand(command: string): { command: string; argsPrefix: string[] } | null {
+  const name = executableName(command)
+  if (!/^hermes(?:\.exe|\.cmd|\.bat)?$/i.test(name)) {return null}
+
+  let script = command
+  try {
+    script = fs.realpathSync(command)
+    const text = fs.readFileSync(script, 'utf8')
+    const firstLine = text.split(/\r?\n/, 1)[0] || ''
+
+    if (/\.(?:cmd|bat)$/i.test(name)) {
+      const match = text.match(/@?(?:"([^"\r\n]*python(?:3(?:\.\d+)?)?\.exe)"|(\S*python(?:3(?:\.\d+)?)?\.exe))/i)
+      const python = match?.[1] || match?.[2]
+      return python ? { command: python, argsPrefix: [] } : null
+    }
+
+    if (!firstLine.startsWith('#!')) {return null}
+
+    const parts = splitShebang(firstLine.slice(2))
+    if (parts.length === 0) {return null}
+
+    const interpreter = parts[0]
+    const argsPrefix = parts.slice(1)
+    const invokesPython = [interpreter, ...argsPrefix].some(part => /^python(?:3(?:\.\d+)?)?(?:\.exe)?$/i.test(executableName(part)))
+    if (!invokesPython) {return null}
+
+    return { command: interpreter, argsPrefix }
+  } catch (_error) {
+    return null
+  }
+}
+
+function pythonFromBackendRoot(root: string | undefined): string | null {
+  if (!root) {return null}
+
+  const candidates = process.platform === 'win32'
+    ? [path.join(root, 'venv', 'Scripts', 'python.exe'), path.join(root, '.venv', 'Scripts', 'python.exe')]
+    : [path.join(root, 'venv', 'bin', 'python'), path.join(root, '.venv', 'bin', 'python'), path.join(root, 'venv', 'bin', 'python3'), path.join(root, '.venv', 'bin', 'python3')]
+
+  return candidates.find(candidate => fs.existsSync(candidate)) ?? null
+}
+
+function seedArgs(seedScriptPath: string, { hermesHome, profile, resourcePath }: { hermesHome: string; profile?: null | string; resourcePath: string }): string[] {
+  return [seedScriptPath, '--resource', resourcePath, '--hermes-home', hermesHome, '--profile', String(profile || '')]
+}
+
+export function buildInternalDesktopInitialProviderSeedInvocation(
+  backend: { args?: string[]; command?: string; kind?: string; root?: string; shell?: boolean },
+  seedScriptPath: string,
+  options: { hermesHome: string; profile?: null | string; resourcePath: string }
+): { command: string; args: string[]; shell: boolean } {
+  if (!backend.command) {fail('cannot seed initial provider without a backend command')}
+
+  const backendArgs = Array.isArray(backend.args) ? backend.args : []
+  const moduleIndex = backendArgs.findIndex((arg, index) => arg === '-m' && backendArgs[index + 1] === 'hermes_cli.main')
+  if (moduleIndex >= 0) {
+    return {
+      command: backend.command,
+      args: [...backendArgs.slice(0, moduleIndex), ...seedArgs(seedScriptPath, options)],
+      shell: Boolean(backend.shell)
+    }
+  }
+
+  if (/^python(?:3(?:\.\d+)?)?(?:\.exe)?$/i.test(executableName(backend.command))) {
+    return { command: backend.command, args: seedArgs(seedScriptPath, options), shell: Boolean(backend.shell) }
+  }
+
+  const siblingPython = siblingPythonForCommand(backend.command)
+  if (siblingPython) {
+    return { command: siblingPython, args: seedArgs(seedScriptPath, options), shell: false }
+  }
+
+  const shebangPython = shebangPythonForCommand(backend.command)
+  if (shebangPython) {
+    return { command: shebangPython.command, args: [...shebangPython.argsPrefix, ...seedArgs(seedScriptPath, options)], shell: false }
+  }
+
+  const rootPython = pythonFromBackendRoot(backend.root)
+  if (rootPython) {
+    return { command: rootPython, args: seedArgs(seedScriptPath, options), shell: false }
+  }
+
+  fail(`cannot resolve Python interpreter for editable provider seed from backend command ${executableName(backend.command)}`)
+}
+
+export async function runInternalDesktopInitialProviderSeed(
+  resource: InternalDesktopHarnessResource | null,
+  {
+    backend,
+    environment = process['env'],
+    execFile: run = execFileAsync,
+    hermesHome,
+    profile,
+    resourcePath,
+    seedScriptPath
+  }: {
+    backend: { args?: string[]; command?: string; env?: Record<string, string>; kind?: string; root?: string; shell?: boolean }
+    environment?: NodeJS.ProcessEnv | Record<string, string | undefined>
+    execFile?: InternalDesktopSeedExec
+    hermesHome: string
+    profile?: null | string
+    resourcePath: string
+    seedScriptPath: string | null
+  }
+): Promise<void> {
+  if (!resource?.initialProvider) {return}
+  if (!backend?.command) {fail('cannot seed initial provider without a backend command')}
+  if (!seedScriptPath) {fail('initial provider seed helper is missing')}
+
+  const invocation = buildInternalDesktopInitialProviderSeedInvocation(backend, seedScriptPath, {
+    hermesHome,
+    profile,
+    resourcePath
+  })
+
+  await run(invocation.command, invocation.args, {
+    cwd: backend.root || hermesHome,
+    env: {
+      ...environment,
+      ...(backend['env'] || {}),
+      HERMES_HOME: hermesHome
+    },
+    shell: invocation.shell,
+    timeout: INITIAL_PROVIDER_SEED_TIMEOUT_MS
+  })
+}
+
 export function initializeInternalDesktopHarness({
   resourcesPath,
   appRoot,
@@ -276,6 +472,8 @@ export function initializeInternalDesktopHarness({
     return {
       active: false,
       managedDir: null,
+      resourcePath: loaded.path,
+      seedScriptPath: resolveInternalDesktopSeedScriptPath(loaded.path, appRoot),
       requested: true,
       resource: loaded.resource,
       suppressRemoteBackends: true,
@@ -287,6 +485,8 @@ export function initializeInternalDesktopHarness({
     return {
       active: false,
       managedDir: null,
+      resourcePath: null,
+      seedScriptPath: null,
       requested: false,
       resource: null,
       suppressRemoteBackends: false,
@@ -298,6 +498,8 @@ export function initializeInternalDesktopHarness({
     return {
       active: true,
       managedDir: materializeInternalDesktopManagedConfig(loaded.resource, { userDataPath }),
+      resourcePath: loaded.path,
+      seedScriptPath: resolveInternalDesktopSeedScriptPath(loaded.path, appRoot),
       requested: true,
       resource: loaded.resource,
       suppressRemoteBackends: true,
@@ -307,6 +509,8 @@ export function initializeInternalDesktopHarness({
     return {
       active: false,
       managedDir: null,
+      resourcePath: loaded.path,
+      seedScriptPath: resolveInternalDesktopSeedScriptPath(loaded.path, appRoot),
       requested: true,
       resource: null,
       suppressRemoteBackends: true,

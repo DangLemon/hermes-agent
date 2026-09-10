@@ -29,10 +29,17 @@ vi.mock('@/i18n', () => ({
           inferenceReady: 'Inference ready',
           messagingPlatforms: 'Messaging platforms',
           offline: 'Offline',
+          openAiConnection: 'Open AI Connection',
           openSystem: 'Open system panel',
           recentActivity: 'Recent activity',
           reconnectGateway: 'Reconnect gateway',
-          viewAllLogs: 'View all logs'
+          viewAllLogs: 'View all logs',
+          aiConnectionMissingTitle: 'No AI connection ready',
+          aiConnectionMissingDetail: 'Add an AI connection before starting Lemon AI conversations.',
+          provisioningUnknownTitle: 'IT setup status unknown',
+          provisioningUnknownDetail: 'Runtime provisioning has not reported readiness yet.',
+          provisioningIncompleteTitle: 'IT setup incomplete',
+          provisioningIncompleteDetail: 'One or more required setup categories are missing.'
         }
       }
     }
@@ -106,20 +113,30 @@ describe('GatewayMenuPanel reconnect action', () => {
 describe('GatewayMenuPanel internal harness chrome', () => {
   afterEach(() => cleanup())
 
-  it('renders provisioning setup state and hides System and restart admin chrome', async () => {
+  it('renders a friendly AI connection action for missing inference and hides admin chrome', async () => {
     mocks.getLogs.mockResolvedValue({ lines: ['2026-09-07 10:00:00 setup check failed'] })
+    const onClose = vi.fn()
+    const onOpenAiConnection = vi.fn()
 
     renderPanel('open', {
       harnessMode: true,
-      harnessProvisioning: { detail: 'No inference provider configured.', missing: ['inference'], state: 'incomplete' }
+      harnessProvisioning: { detail: 'No inference provider configured.', missing: ['inference'], state: 'incomplete' },
+      onClose,
+      onOpenAiConnection
     })
 
-    expect(await screen.findByText('IT setup incomplete')).toBeTruthy()
-    expect(screen.getByText('No inference provider configured.')).toBeTruthy()
-    expect(screen.getByText('Missing: inference')).toBeTruthy()
+    expect(await screen.findByText('No AI connection ready')).toBeTruthy()
+    expect(screen.getByText('Add an AI connection before starting Lemon AI conversations.')).toBeTruthy()
+    expect(screen.queryByText('No inference provider configured.')).toBeNull()
+    expect(screen.queryByText('Missing: inference')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Open system panel' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Restart gateway' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'View all logs' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open AI Connection' }))
+
+    expect(onClose).toHaveBeenCalledOnce()
+    expect(onOpenAiConnection).toHaveBeenCalledOnce()
   })
 
   it('renders an unknown provisioning notice without blocking the menu', () => {

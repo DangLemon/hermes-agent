@@ -100,6 +100,7 @@ export function useStatusbarItems({
   toggleCommandCenter
 }: StatusbarItemsOptions) {
   const { t } = useI18n()
+  const navigate = useNavigate()
   const copy = t.shell.statusbar
   const fileMenu = t.fileMenu
   const primaryActiveSessionId = useStore($activeSessionId)
@@ -297,6 +298,7 @@ export function useStatusbarItems({
         harnessProvisioning={internalCompany.provisioning}
         inferenceStatus={inferenceStatus}
         onClose={close}
+        onOpenAiConnection={() => navigate(`${SETTINGS_ROUTE}?tab=providers`)}
         onOpenSystem={() => openCommandCenterSection('system')}
         statusSnapshot={statusSnapshot}
       />
@@ -306,6 +308,7 @@ export function useStatusbarItems({
       inferenceStatus,
       internalCompany.mode,
       internalCompany.provisioning,
+      navigate,
       openCommandCenterSection,
       statusSnapshot
     ]
@@ -320,10 +323,12 @@ export function useStatusbarItems({
   const harnessProvisioning = internalCompany.mode === 'harness' ? internalCompany.provisioning : null
 
   const gatewayDetail =
-    harnessProvisioning?.state === 'incomplete'
-      ? 'IT setup incomplete'
-      : harnessProvisioning?.state === 'unknown'
-        ? 'setup status unknown'
+    harnessProvisioning?.state === 'incomplete' && harnessProvisioning.missing.includes('inference')
+      ? copy.gatewayNeedsAiConnection
+      : harnessProvisioning?.state === 'incomplete'
+        ? copy.gatewayNeedsSetup
+        : harnessProvisioning?.state === 'unknown'
+          ? copy.gatewayNeedsSetup
         : gatewayOpen
           ? {
               checking: copy.gatewayChecking,

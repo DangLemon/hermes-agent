@@ -6,6 +6,7 @@ import path from 'node:path'
 import { test } from 'vitest'
 
 import {
+  assertCanonicalSeedHelperBytes,
   readMachOArchitectures,
   readPEMachine,
   readWindowsVersionInfo,
@@ -65,12 +66,6 @@ function validManifest() {
       webhooks: false
     },
     managedConfig: {
-      model: {
-        provider: 'custom',
-        default: 'openai-codex-gpt-5-5',
-        base_url: 'http://127.0.0.1:5173/v1',
-        api_key: '${HERMES_COMPANY_API_KEY}'
-      },
       mcp_servers: {
         'tiktok-ads': {
           url: 'https://business-api.tiktok.com/open_mcp/tt-ads-mcp-layer',
@@ -92,6 +87,13 @@ function validManifest() {
           }
         }
       }
+    },
+    initialProvider: {
+      id: 'lemon-ai-company',
+      name: 'AI công ty',
+      base_url: 'http://127.0.0.1:5173/v1',
+      model: 'openai-codex-gpt-5-5',
+      key_env: 'HERMES_COMPANY_API_KEY'
     },
     credentialRequirements: {
       provider: {
@@ -221,8 +223,11 @@ function makeMacFixture(root) {
 
   const manifest = validManifest()
   writeJson(path.join(resources, 'internal-desktop-harness.json'), manifest)
+  fs.writeFileSync(path.join(resources, 'internal-desktop-harness-seed.py'), '# seed helper\n', 'utf8')
   writeJson(path.join(resources, 'install-stamp.json'), validStamp())
   writeJson(path.join(root, 'apps', 'desktop', 'internal-desktop-harness.config.json'), manifest)
+  fs.mkdirSync(path.join(root, 'apps', 'desktop', 'electron'), { recursive: true })
+  fs.writeFileSync(path.join(root, 'apps', 'desktop', 'electron', 'internal-desktop-harness-seed.py'), '# seed helper\n', 'utf8')
   writeJson(path.join(root, 'apps', 'desktop', 'build', 'electron-builder.generated.json'), validGeneratedConfig())
   fs.writeFileSync(path.join(root, 'release', `Lemon-AI-${VERSION}-mac-arm64.dmg`), 'dmg-bytes')
 
@@ -234,7 +239,8 @@ function makeMacFixture(root) {
     canonicalManifestPath: path.join(root, 'apps', 'desktop', 'internal-desktop-harness.config.json'),
     generatedConfigPath: path.join(root, 'apps', 'desktop', 'build', 'electron-builder.generated.json'),
     outputDir: path.join(root, 'verified'),
-    repoRoot: root
+    repoRoot: root,
+    sourceSeedHelperPath: path.join(root, 'apps', 'desktop', 'electron', 'internal-desktop-harness-seed.py')
   }
 }
 
@@ -257,8 +263,11 @@ function makeWindowsFixture(root) {
 
   const manifest = validManifest()
   writeJson(path.join(resources, 'internal-desktop-harness.json'), manifest)
+  fs.writeFileSync(path.join(resources, 'internal-desktop-harness-seed.py'), '# seed helper\n', 'utf8')
   writeJson(path.join(resources, 'install-stamp.json'), validStamp())
   writeJson(path.join(root, 'apps', 'desktop', 'internal-desktop-harness.config.json'), manifest)
+  fs.mkdirSync(path.join(root, 'apps', 'desktop', 'electron'), { recursive: true })
+  fs.writeFileSync(path.join(root, 'apps', 'desktop', 'electron', 'internal-desktop-harness-seed.py'), '# seed helper\n', 'utf8')
   writeJson(path.join(root, 'apps', 'desktop', 'build', 'electron-builder.generated.json'), validGeneratedConfig())
   fs.writeFileSync(path.join(root, 'release', `Lemon-AI-${VERSION}-win-x64.exe`), 'exe-installer-bytes')
 
@@ -270,7 +279,8 @@ function makeWindowsFixture(root) {
     canonicalManifestPath: path.join(root, 'apps', 'desktop', 'internal-desktop-harness.config.json'),
     generatedConfigPath: path.join(root, 'apps', 'desktop', 'build', 'electron-builder.generated.json'),
     outputDir: path.join(root, 'verified'),
-    repoRoot: root
+    repoRoot: root,
+    sourceSeedHelperPath: path.join(root, 'apps', 'desktop', 'electron', 'internal-desktop-harness-seed.py')
   }
 }
 
@@ -342,12 +352,6 @@ function changedCanonicalManifest() {
       webhooks: true
     },
     managedConfig: {
-      model: {
-        provider: 'company-openai-compatible',
-        default: 'company-approved-gpt-5.6',
-        base_url: 'https://models.lemon.example/v1',
-        api_key: '${LEMON_MODEL_API_KEY}'
-      },
       mcp_servers: {
         company_search: {
           url: 'https://mcp.lemon.example/sse',
@@ -356,6 +360,13 @@ function changedCanonicalManifest() {
           }
         }
       }
+    },
+    initialProvider: {
+      id: 'lemon-ai-company',
+      name: 'Lemon AI',
+      base_url: 'https://models.lemon.example/v1',
+      model: 'company-approved-gpt-5.6',
+      key_env: 'LEMON_MODEL_API_KEY'
     },
     credentialRequirements: {
       provider: {
@@ -403,8 +414,8 @@ test('validateHarnessManifest requires the approved fork and canonical harness r
     /sourceRepository/
   )
   const literalSecret = validManifest()
-  literalSecret.managedConfig.model.api_key = 'sk-live-secret'
-  assert.throws(() => validateHarnessManifest(literalSecret), /secret-shaped|environment reference/)
+  literalSecret.initialProvider.api_key = 'sk-live-secret'
+  assert.throws(() => validateHarnessManifest(literalSecret), /initialProvider\.api_key/)
 })
 
 test('verification accepts valid canonical model, UI, and MCP changes when packaged bytes match', () => {
@@ -422,7 +433,7 @@ test('verification accepts valid canonical model, UI, and MCP changes when packa
       codeSignSpawn: codeSignSpawn()
     })
 
-    assert.equal(result.manifest.managedConfig.model.default, 'company-approved-gpt-5.6')
+    assert.equal(result.manifest.initialProvider.model, 'company-approved-gpt-5.6')
     assert.deepEqual(Object.keys(result.manifest.managedConfig.mcp_servers), ['company_search'])
   })
 })
@@ -678,6 +689,40 @@ test('verification ignores unused foreign native prebuilds and writes installer 
     assert.equal(receipt.sourceRepository, 'DangLemon/hermes-agent')
     assert.equal(receipt.checksumFile, `${installerName}.sha256`)
     assert.equal(result.nativePayload.nodePtyBinaries.length, 1)
+  })
+})
+
+
+test('assertCanonicalSeedHelperBytes rejects packaged seed helper drift', () => {
+  withTempDir(root => {
+    const source = path.join(root, 'source.py')
+    const packaged = path.join(root, 'packaged.py')
+    fs.writeFileSync(source, '# seed helper\n', 'utf8')
+    fs.writeFileSync(packaged, '# changed seed helper\n', 'utf8')
+
+    assert.throws(
+      () => assertCanonicalSeedHelperBytes({ sourceSeedHelperPath: source, packagedSeedHelperPath: packaged }),
+      /seed helper bytes differ/
+    )
+  })
+})
+
+test('verification rejects missing packaged seed helper', () => {
+  withTempDir(root => {
+    const options = makeMacFixture(root)
+    fs.rmSync(path.join(options.appPath, 'Contents', 'Resources', 'internal-desktop-harness-seed.py'))
+
+    assert.throws(
+      () =>
+        verifyInternalInstaller({
+          ...options,
+          expectedSha: VALID_SHA,
+          expectedRef: VALID_REF,
+          spawn: gitSpawn(),
+          codeSignSpawn: codeSignSpawn()
+        }),
+      /missing packaged seed helper/
+    )
   })
 })
 
