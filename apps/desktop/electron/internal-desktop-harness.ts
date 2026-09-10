@@ -1,8 +1,8 @@
-import crypto from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { promisify } from 'node:util'
 
 export const HARNESS_RESOURCE_FILENAME = 'internal-desktop-harness.json'
 const HARNESS_SCHEMA_VERSION = 1
@@ -109,6 +109,7 @@ function validateInitialProvider(value: unknown): void {
 
   if ('context_length' in value) {
     const contextLength = value.context_length
+
     if (!Number.isInteger(contextLength) || typeof contextLength !== 'number' || contextLength <= 0) {
       fail('initialProvider.context_length must be a positive integer')
     }
@@ -311,9 +312,11 @@ function executableName(command: string): string {
 
 function siblingPythonForCommand(command: string): string | null {
   const name = executableName(command)
+
   if (!/^hermes(?:\.exe|\.cmd|\.bat)?$/i.test(name)) {return null}
 
   const directory = path.dirname(command)
+
   for (const candidate of [path.join(directory, 'python.exe'), path.join(directory, 'python3'), path.join(directory, 'python')]) {
     if (fs.existsSync(candidate)) {return candidate}
   }
@@ -328,9 +331,11 @@ function splitShebang(line: string): string[] {
 
 function shebangPythonForCommand(command: string): { command: string; argsPrefix: string[] } | null {
   const name = executableName(command)
+
   if (!/^hermes(?:\.exe|\.cmd|\.bat)?$/i.test(name)) {return null}
 
   let script = command
+
   try {
     script = fs.realpathSync(command)
     const text = fs.readFileSync(script, 'utf8')
@@ -339,17 +344,20 @@ function shebangPythonForCommand(command: string): { command: string; argsPrefix
     if (/\.(?:cmd|bat)$/i.test(name)) {
       const match = text.match(/@?(?:"([^"\r\n]*python(?:3(?:\.\d+)?)?\.exe)"|(\S*python(?:3(?:\.\d+)?)?\.exe))/i)
       const python = match?.[1] || match?.[2]
+
       return python ? { command: python, argsPrefix: [] } : null
     }
 
     if (!firstLine.startsWith('#!')) {return null}
 
     const parts = splitShebang(firstLine.slice(2))
+
     if (parts.length === 0) {return null}
 
     const interpreter = parts[0]
     const argsPrefix = parts.slice(1)
     const invokesPython = [interpreter, ...argsPrefix].some(part => /^python(?:3(?:\.\d+)?)?(?:\.exe)?$/i.test(executableName(part)))
+
     if (!invokesPython) {return null}
 
     return { command: interpreter, argsPrefix }
@@ -381,6 +389,7 @@ export function buildInternalDesktopInitialProviderSeedInvocation(
 
   const backendArgs = Array.isArray(backend.args) ? backend.args : []
   const moduleIndex = backendArgs.findIndex((arg, index) => arg === '-m' && backendArgs[index + 1] === 'hermes_cli.main')
+
   if (moduleIndex >= 0) {
     return {
       command: backend.command,
@@ -394,16 +403,19 @@ export function buildInternalDesktopInitialProviderSeedInvocation(
   }
 
   const siblingPython = siblingPythonForCommand(backend.command)
+
   if (siblingPython) {
     return { command: siblingPython, args: seedArgs(seedScriptPath, options), shell: false }
   }
 
   const shebangPython = shebangPythonForCommand(backend.command)
+
   if (shebangPython) {
     return { command: shebangPython.command, args: [...shebangPython.argsPrefix, ...seedArgs(seedScriptPath, options)], shell: false }
   }
 
   const rootPython = pythonFromBackendRoot(backend.root)
+
   if (rootPython) {
     return { command: rootPython, args: seedArgs(seedScriptPath, options), shell: false }
   }
@@ -432,7 +444,9 @@ export async function runInternalDesktopInitialProviderSeed(
   }
 ): Promise<void> {
   if (!resource?.initialProvider) {return}
+
   if (!backend?.command) {fail('cannot seed initial provider without a backend command')}
+
   if (!seedScriptPath) {fail('initial provider seed helper is missing')}
 
   const invocation = buildInternalDesktopInitialProviderSeedInvocation(backend, seedScriptPath, {

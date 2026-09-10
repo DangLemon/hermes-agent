@@ -4,15 +4,15 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { test } from 'vitest'
-import type { InternalDesktopSeedExec } from './internal-desktop-harness'
 
+import type { InternalDesktopSeedExec } from './internal-desktop-harness'
 import {
-  HARNESS_RESOURCE_FILENAME,
   buildInternalDesktopInitialProviderSeedInvocation,
-  runInternalDesktopInitialProviderSeed,
+  HARNESS_RESOURCE_FILENAME,
   initializeInternalDesktopHarness,
   loadInternalDesktopHarnessResource,
   materializeInternalDesktopManagedConfig,
+  runInternalDesktopInitialProviderSeed,
   validateInternalDesktopHarnessResource
 } from './internal-desktop-harness'
 
@@ -278,8 +278,10 @@ test('requested WSL harness is unavailable but still suppresses remote/profile f
 
 test('runInternalDesktopInitialProviderSeed invokes the packaged seed helper before backend spawn', async () => {
   const calls: Array<{ command: string; args: string[]; options: Parameters<InternalDesktopSeedExec>[2] }> = []
+
   const run: InternalDesktopSeedExec = (command, args, options) => {
     calls.push({ command, args, options })
+
     return Promise.resolve('')
   }
 
@@ -457,8 +459,10 @@ test('buildInternalDesktopInitialProviderSeedInvocation reads Windows command sc
 
 test('runInternalDesktopInitialProviderSeed skips when no initial provider is configured', async () => {
   const calls: Parameters<InternalDesktopSeedExec>[] = []
+
   const run: InternalDesktopSeedExec = (...args) => {
     calls.push(args)
+
     return Promise.resolve('')
   }
 
