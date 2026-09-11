@@ -27,6 +27,7 @@ const HERMES_MAC_COPY = {
 
 const LEMON_MAC_COPY = {
   CFBundleDisplayName: 'Lemon AI',
+  CFBundleExecutable: 'Lemon AI',
   CFBundleName: 'Lemon AI',
   NSAudioCaptureUsageDescription: 'Lemon AI uses audio capture for voice conversations.',
   NSCameraUsageDescription: 'Lemon AI uses the camera when a plugin or feature you enable requests it.',

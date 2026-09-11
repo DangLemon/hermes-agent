@@ -132,7 +132,10 @@ function validGeneratedConfig() {
     artifactName: 'Lemon-AI-${version}-${os}-${arch}.${ext}',
     icon: 'assets/lemon-icon',
     mac: {
-      executableName: 'Lemon AI'
+      executableName: 'Lemon AI',
+      extendInfo: {
+        CFBundleExecutable: 'Lemon AI'
+      }
     },
     dmg: {
       title: 'Install Lemon AI'
@@ -813,6 +816,19 @@ test('validateGeneratedConfig requires Lemon product and executable identity', (
   assert.throws(
     () => validateGeneratedConfig({ ...validGeneratedConfig(), executableName: 'Hermes' }),
     /executableName/
+  )
+  assert.throws(
+    () =>
+      validateGeneratedConfig({
+        ...validGeneratedConfig(),
+        mac: {
+          ...validGeneratedConfig().mac,
+          extendInfo: {
+            CFBundleExecutable: 'Hermes'
+          }
+        }
+      }),
+    /CFBundleExecutable/
   )
   assert.throws(
     () => validateGeneratedConfig({ ...validGeneratedConfig(), appId: 'com.nousresearch.hermes' }),
