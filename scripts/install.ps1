@@ -377,6 +377,10 @@ $script:NormalizedProfilePaths = Set-LongProfileEnvVars
 # rather than replaced, so a caller's choice is never overwritten by a default.
 # $PSBoundParameters is only meaningful at script scope, so this stays inline.
 $InternalDesktopBuild = Test-InternalHarnessConfig
+$ProductName = if ($InternalDesktopBuild) { "Lemon AI" } else { "Hermes Agent" }
+$ProductShortName = if ($InternalDesktopBuild) { "Lemon AI" } else { "Hermes" }
+$RepositoryStageTitle = if ($InternalDesktopBuild) { "Cloning Lemon AI source" } else { "Cloning Hermes repository" }
+$PathStageTitle = if ($InternalDesktopBuild) { "Adding Lemon AI command" } else { "Adding Hermes to PATH" }
 $Repository = if ($Repository) {
     $Repository
 } elseif ($env:HERMES_INSTALL_REPOSITORY) {
@@ -583,9 +587,13 @@ function Get-WindowsArch {
 function Write-Banner {
     Write-Host ""
     Write-Host "+---------------------------------------------------------+" -ForegroundColor Magenta
-    Write-Host "|             * Hermes Agent Installer                    |" -ForegroundColor Magenta
+    Write-Host ("|             * {0,-38} |" -f "$ProductName Installer") -ForegroundColor Magenta
     Write-Host "+---------------------------------------------------------+" -ForegroundColor Magenta
-    Write-Host "|  An open source AI agent by Nous Research.              |" -ForegroundColor Magenta
+    if ($InternalDesktopBuild) {
+        Write-Host "|  Internal AI desktop harness by Lemon Digital.          |" -ForegroundColor Magenta
+    } else {
+        Write-Host "|  An open source AI agent by Nous Research.              |" -ForegroundColor Magenta
+    }
     Write-Host "+---------------------------------------------------------+" -ForegroundColor Magenta
     Write-Host ""
 }
@@ -3445,7 +3453,7 @@ function Write-BootstrapMarker {
     if (-not (Test-SafeFileName $markerName)) {
         throw "HERMES_BOOTSTRAP_MARKER_NAME must be a safe file name"
     }
-    if ([string]::IsNullOrWhiteSpace($markerName) -or $markerName.IndexOfAny([char[]]@('/', '\')) -ge 0) { $markerName = ".hermes-bootstrap-complete" }
+    if ([string]::IsNullOrWhiteSpace($markerName) -or $markerName.IndexOfAny([char[]]@('/', '\')) -ge 0) { $markerName = $defaultMarkerName }
     $markerPath = Join-Path $InstallDir $markerName
     $marker = [ordered]@{
         schemaVersion = 1
@@ -4494,7 +4502,9 @@ function New-DesktopShortcuts {
 
         $targets = @(
             (Join-Path ([Environment]::GetFolderPath('Programs')) 'Hermes.lnk'),
-            (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Hermes.lnk')
+            (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Hermes.lnk'),
+            (Join-Path ([Environment]::GetFolderPath('Programs')) 'Lemon AI.lnk'),
+            (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Lemon AI.lnk')
         )
 
         foreach ($lnkPath in $targets) {
@@ -4507,7 +4517,7 @@ function New-DesktopShortcuts {
                 $sc.TargetPath = $TargetExe
                 $sc.WorkingDirectory = $workDir
                 $sc.IconLocation = $iconLocation
-                $sc.Description = 'Hermes Agent'
+                $sc.Description = $ProductName
                 $sc.Save()
                 Write-Success "Shortcut created: $lnkPath"
             } catch {
@@ -4883,7 +4893,7 @@ $InstallStages = @(
     @{ Name = "git";              Title = "Installing Git";                       Category = "prereqs";      NeedsUserInput = $false; Worker = "Stage-Git" }
     @{ Name = "node";             Title = "Detecting Node.js";                    Category = "prereqs";      NeedsUserInput = $false; Worker = "Stage-Node" }
     @{ Name = "system-packages";  Title = "Installing ripgrep and ffmpeg";        Category = "prereqs";      NeedsUserInput = $false; Worker = "Stage-SystemPackages" }
-    @{ Name = "repository";       Title = "Cloning Hermes repository";            Category = "install";      NeedsUserInput = $false; Worker = "Stage-Repository" }
+    @{ Name = "repository";       Title = $RepositoryStageTitle;                    Category = "install";      NeedsUserInput = $false; Worker = "Stage-Repository" }
     # Managed Python lives under $InstallDir\.hermes-runtime, so the checkout
     # must exist before this stage creates that directory. Otherwise the later
     # repository stage treats the runtime-only directory as a broken checkout,
@@ -4900,7 +4910,7 @@ if ($IncludeDesktop) {
     $InstallStages += @{ Name = "desktop"; Title = "Building desktop app"; Category = "install"; NeedsUserInput = $false; Worker = "Stage-Desktop" }
 }
 $InstallStages += @(
-    @{ Name = "path";             Title = "Adding Hermes to PATH";                Category = "finalize";     NeedsUserInput = $false; Worker = "Stage-Path" }
+    @{ Name = "path";             Title = $PathStageTitle;                          Category = "finalize";     NeedsUserInput = $false; Worker = "Stage-Path" }
     @{ Name = "config-templates"; Title = "Writing configuration templates";      Category = "finalize";     NeedsUserInput = $false; Worker = "Stage-ConfigTemplates" }
     @{ Name = "platform-sdks";    Title = "Installing messaging platform SDKs";   Category = "finalize";     NeedsUserInput = $false; Worker = "Stage-PlatformSdks" }
     @{ Name = "bootstrap-marker"; Title = "Marking install complete";              Category = "finalize";     NeedsUserInput = $false; Worker = "Stage-BootstrapMarker" }

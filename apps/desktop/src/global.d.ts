@@ -1176,6 +1176,7 @@ export interface DesktopBootstrapSetupChoice {
 
 export interface DesktopBootstrapState {
   active: boolean
+  logRoot: string | null
   manifest: { type: 'manifest'; stages: DesktopBootstrapStageDescriptor[]; protocolVersion: number | null } | null
   stages: Record<string, DesktopBootstrapStageResult>
   error: string | null

@@ -12,9 +12,9 @@ import PACKAGE_JSON from '../package.json' with { type: 'json' }
 const DESKTOP_ROOT = path.resolve(import.meta.dirname, '..')
 const REPO_ROOT = path.resolve(DESKTOP_ROOT, '..', '..')
 const DEFAULT_RELEASE_ROOT = path.join(DESKTOP_ROOT, 'release')
-const DEFAULT_CANONICAL_MANIFEST = path.join(DESKTOP_ROOT, 'internal-desktop-harness.config.json')
+const DEFAULT_CANONICAL_MANIFEST = path.join(DESKTOP_ROOT, 'lemon-ai-desktop.config.json')
 const DEFAULT_GENERATED_CONFIG = path.join(DESKTOP_ROOT, 'build', 'electron-builder.generated.json')
-const DEFAULT_SEED_HELPER = path.join(DESKTOP_ROOT, 'electron', 'internal-desktop-harness-seed.py')
+const DEFAULT_SEED_HELPER = path.join(DESKTOP_ROOT, 'electron', 'lemon-ai-harness-seed.py')
 const RECEIPT_FILENAME = 'installer-receipt.json'
 
 const EXPECTED_REPOSITORY = 'DangLemon/hermes-agent'
@@ -87,18 +87,18 @@ function parseArgs(argv = process.argv.slice(2), env = process.env) {
   }
 
   return {
-    platform: args.platform ?? env.HERMES_INSTALLER_PLATFORM ?? process.platform,
-    arch: args.arch ?? env.HERMES_INSTALLER_ARCH ?? process.arch,
-    expectedSha: args.sha ?? env.HERMES_INSTALLER_SHA ?? env.GITHUB_SHA,
-    expectedRef: args.ref ?? env.HERMES_INSTALLER_REF ?? env.GITHUB_REF_NAME ?? env.GITHUB_HEAD_REF,
-    appPath: args.app ?? env.HERMES_INSTALLER_APP,
-    installerPath: args.installer ?? env.HERMES_INSTALLER_ARTIFACT,
-    canonicalManifestPath: args.canonical ?? env.HERMES_INSTALLER_CANONICAL_MANIFEST ?? DEFAULT_CANONICAL_MANIFEST,
-    generatedConfigPath: args['builder-config'] ?? env.HERMES_INSTALLER_BUILDER_CONFIG ?? DEFAULT_GENERATED_CONFIG,
-    sourceSeedHelperPath: args['seed-helper'] ?? env.HERMES_INSTALLER_SEED_HELPER ?? DEFAULT_SEED_HELPER,
-    outputDir: args.out ?? env.HERMES_INSTALLER_OUTPUT_DIR,
-    releaseRoot: args['release-root'] ?? env.HERMES_INSTALLER_RELEASE_ROOT ?? DEFAULT_RELEASE_ROOT,
-    repoRoot: args['repo-root'] ?? env.HERMES_INSTALLER_REPO_ROOT ?? REPO_ROOT
+    platform: args.platform ?? env.LEMON_AI_INSTALLER_PLATFORM ?? env.HERMES_INSTALLER_PLATFORM ?? process.platform,
+    arch: args.arch ?? env.LEMON_AI_INSTALLER_ARCH ?? env.HERMES_INSTALLER_ARCH ?? process.arch,
+    expectedSha: args.sha ?? env.LEMON_AI_INSTALLER_SHA ?? env.HERMES_INSTALLER_SHA ?? env.GITHUB_SHA,
+    expectedRef: args.ref ?? env.LEMON_AI_INSTALLER_REF ?? env.HERMES_INSTALLER_REF ?? env.GITHUB_REF_NAME ?? env.GITHUB_HEAD_REF,
+    appPath: args.app ?? env.LEMON_AI_INSTALLER_APP ?? env.HERMES_INSTALLER_APP,
+    installerPath: args.installer ?? env.LEMON_AI_INSTALLER_ARTIFACT ?? env.HERMES_INSTALLER_ARTIFACT,
+    canonicalManifestPath: args.canonical ?? env.LEMON_AI_INSTALLER_CANONICAL_MANIFEST ?? env.HERMES_INSTALLER_CANONICAL_MANIFEST ?? DEFAULT_CANONICAL_MANIFEST,
+    generatedConfigPath: args['builder-config'] ?? env.LEMON_AI_INSTALLER_BUILDER_CONFIG ?? env.HERMES_INSTALLER_BUILDER_CONFIG ?? DEFAULT_GENERATED_CONFIG,
+    sourceSeedHelperPath: args['seed-helper'] ?? env.LEMON_AI_INSTALLER_SEED_HELPER ?? env.HERMES_INSTALLER_SEED_HELPER ?? DEFAULT_SEED_HELPER,
+    outputDir: args.out ?? env.LEMON_AI_INSTALLER_OUTPUT_DIR ?? env.HERMES_INSTALLER_OUTPUT_DIR,
+    releaseRoot: args['release-root'] ?? env.LEMON_AI_INSTALLER_RELEASE_ROOT ?? env.HERMES_INSTALLER_RELEASE_ROOT ?? DEFAULT_RELEASE_ROOT,
+    repoRoot: args['repo-root'] ?? env.LEMON_AI_INSTALLER_REPO_ROOT ?? env.HERMES_INSTALLER_REPO_ROOT ?? REPO_ROOT
   }
 }
 
@@ -141,8 +141,8 @@ export function resolveLayout({
     installerPath: resolvedInstallerPath,
     resourcesPath,
     binaryPath,
-    packagedManifestPath: path.join(resourcesPath, 'internal-desktop-harness.json'),
-    packagedSeedHelperPath: path.join(resourcesPath, 'internal-desktop-harness-seed.py'),
+    packagedManifestPath: path.join(resourcesPath, 'lemon-ai-harness.json'),
+    packagedSeedHelperPath: path.join(resourcesPath, 'lemon-ai-harness-seed.py'),
     stampPath: path.join(resourcesPath, 'install-stamp.json'),
     unpackedDistIndex: path.join(resourcesPath, 'app.asar.unpacked', 'dist', 'index.html'),
     nodePtyRoot: path.join(resourcesPath, 'app.asar.unpacked', 'dist', 'node_modules', 'node-pty'),
@@ -200,6 +200,11 @@ export function validateGeneratedConfig(config) {
   assertEqual(config.productName, 'Lemon AI', 'electron-builder productName')
   assertEqual(config.executableName, 'Lemon AI', 'electron-builder executableName')
   assertEqual(config.mac?.executableName, 'Lemon AI', 'electron-builder mac.executableName')
+  assertEqual(
+    config.mac?.extendInfo?.CFBundleExecutable,
+    'Lemon AI',
+    'electron-builder mac.extendInfo.CFBundleExecutable'
+  )
   assertEqual(config.appId, 'com.lemondigital.lemonai', 'electron-builder appId')
 }
 
@@ -642,7 +647,7 @@ function usage() {
     --ref <branch-or-tag> \\
     --app <release/mac-arm64/Lemon AI.app|release/win-unpacked> \\
     --installer <Lemon-AI-version-platform-arch.dmg|exe> \\
-    --canonical <internal-desktop-harness.config.json> \\
+    --canonical <lemon-ai-desktop.config.json> \\
     --builder-config <build/electron-builder.generated.json> \\
     --out <clean-output-dir>
 `

@@ -13,9 +13,22 @@ import path from 'node:path'
 // process and want our errors to stay visible.
 
 const host = process.env.TAURI_DEV_HOST
+const installerBrand = String(process.env.HERMES_INSTALLER_BRAND || '').trim().toLowerCase()
+
+const installerProductTitle = installerBrand === 'lemon' ? 'Lemon AI Setup' : 'Hermes'
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  define: {
+    __LEMON_INSTALLER__: JSON.stringify(installerBrand === 'lemon')
+  },
+  plugins: [
+    {
+      name: 'bootstrap-installer-title',
+      transformIndexHtml: html => html.replace('<title>Hermes</title>', `<title>${installerProductTitle}</title>`)
+    },
+    react(),
+    tailwindcss()
+  ],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src')

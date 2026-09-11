@@ -27,7 +27,7 @@ def _resource(tmp_path: Path, **provider):
             "name": "AI công ty",
             "base_url": "http://127.0.0.1:5173/v1",
             "model": "openai-codex-gpt-5-5",
-            "key_env": "HERMES_COMPANY_API_KEY",
+            "key_env": "LEMON_AI_COMPANY_API_KEY",
             **provider,
         },
     }
@@ -42,7 +42,7 @@ def _seed(tmp_path: Path, home: Path, profile: str = ""):
         / "apps"
         / "desktop"
         / "electron"
-        / "internal-desktop-harness-seed.py"
+        / "lemon-ai-harness-seed.py"
     )
     spec = importlib.util.spec_from_file_location("internal_desktop_harness_seed", module_path)
     assert spec and spec.loader
@@ -75,12 +75,12 @@ def test_empty_profile_seeds_company_and_selects_it(tmp_path, monkeypatch):
 
     saved = _read_yaml(home / "config.yaml")
     assert result == {"ok": True, "seeded_provider": True, "selected_provider": True}
-    assert saved["providers"]["lemon-ai-company"]["key_env"] == "HERMES_COMPANY_API_KEY"
+    assert saved["providers"]["lemon-ai-company"]["key_env"] == "LEMON_AI_COMPANY_API_KEY"
     assert saved["model"] == {
         "provider": "lemon-ai-company",
         "default": "openai-codex-gpt-5-5",
         "base_url": "http://127.0.0.1:5173/v1",
-        "key_env": "HERMES_COMPANY_API_KEY",
+        "key_env": "LEMON_AI_COMPANY_API_KEY",
     }
     assert "sk-" not in (home / "config.yaml").read_text(encoding="utf-8")
 
@@ -292,7 +292,7 @@ def test_seed_save_merges_concurrent_user_config_writes(tmp_path, monkeypatch):
         / "apps"
         / "desktop"
         / "electron"
-        / "internal-desktop-harness-seed.py"
+        / "lemon-ai-harness-seed.py"
     )
     spec = importlib.util.spec_from_file_location("internal_desktop_harness_seed_merge", module_path)
     assert spec and spec.loader
@@ -318,7 +318,7 @@ def test_seed_save_merges_concurrent_user_config_writes(tmp_path, monkeypatch):
     assert result["seeded_provider"] is True
     assert saved["features"]["new_during_boot"] is True
     assert saved["ui"]["theme"] == "dark"
-    assert saved["providers"]["lemon-ai-company"]["key_env"] == "HERMES_COMPANY_API_KEY"
+    assert saved["providers"]["lemon-ai-company"]["key_env"] == "LEMON_AI_COMPANY_API_KEY"
 
 
 
@@ -451,7 +451,7 @@ def test_seed_fallback_lock_initializes_fresh_lock_file(tmp_path):
         / "apps"
         / "desktop"
         / "electron"
-        / "internal-desktop-harness-seed.py"
+        / "lemon-ai-harness-seed.py"
     )
     spec = importlib.util.spec_from_file_location("internal_desktop_harness_seed_lock_init", module_path)
     assert spec and spec.loader

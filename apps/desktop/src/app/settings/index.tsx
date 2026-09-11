@@ -73,7 +73,15 @@ const SETTINGS_VIEWS: readonly SettingsViewId[] = [
   'about'
 ]
 
-const HARNESS_ALLOWED_CONFIG_SECTIONS = new Set(['appearance', 'browser', 'chat', 'memory', 'safety', 'voice', 'workspace'])
+const HARNESS_ALLOWED_CONFIG_SECTIONS = new Set([
+  'appearance',
+  'browser',
+  'chat',
+  'memory',
+  'safety',
+  'voice',
+  'workspace'
+])
 
 const HARNESS_ALLOWED_SETTINGS_VIEWS: readonly SettingsViewId[] = [
   'config:appearance',
@@ -185,7 +193,7 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = 'hermes-config.json'
+      a.download = harnessMode ? 'lemon-ai-config.json' : 'hermes-config.json'
       a.click()
       URL.revokeObjectURL(url)
       triggerHaptic('success')

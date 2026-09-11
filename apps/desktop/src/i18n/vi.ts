@@ -88,8 +88,8 @@ export const vi = defineLocale({
       copyPath: 'Sao chép đường dẫn',
       removeFromSidebar: 'Ẩn khỏi thanh bên',
       createFailed: 'Không thể tạo dự án',
-      staleBackend: 'Cập nhật backend Hermes để tạo dự án.',
-      deleteConfirm: 'Thao tác này chỉ gỡ dự án khỏi Hermes. File và repo git vẫn được giữ nguyên.',
+      staleBackend: 'Cập nhật runtime Lemon AI để tạo dự án.',
+      deleteConfirm: 'Thao tác này chỉ gỡ dự án khỏi Lemon AI. File và repo git vẫn được giữ nguyên.',
       startWork: 'Nhánh làm việc mới',
       newWorktreeTitle: 'Nhánh làm việc mới',
       newWorktreeDesc: 'Đặt tên nhánh cho phần việc này.',
@@ -226,9 +226,43 @@ export const vi = defineLocale({
     }
   },
 
+  boot: {
+    ready: 'Lemon AI đã sẵn sàng',
+    steps: {
+      loadingSettings: 'Đang tải cài đặt Lemon AI',
+      retryingRemoteBackend: 'Đang kết nối lại tới backend từ xa…',
+      startingHermesDesktop: 'Đang khởi động Lemon AI…'
+    },
+    errors: {
+      backgroundExited: 'Tiến trình nền Lemon AI đã thoát.',
+      backgroundExitedDuringStartup: 'Tiến trình nền Lemon AI đã thoát khi khởi động.'
+    },
+    failure: {
+      title: 'Lemon AI không khởi động được',
+      description:
+        'Gateway nền chưa chạy được. Thử một bước khôi phục bên dưới; cuộc trò chuyện và cài đặt vẫn được giữ nguyên.',
+      repairInstall: 'Sửa cài đặt',
+      useLocalGateway: 'Dùng gateway trên máy',
+      gatewaySettings: 'Cài đặt kết nối',
+      openLogs: 'Mở log',
+      repairHint: 'Sửa cài đặt sẽ chạy lại bộ cài và có thể mất vài phút trên máy mới.'
+    }
+  },
+
   settings: {
     nav: {
+      about: 'Về Lemon AI',
       providerCustomEndpoints: 'Kết nối AI'
+    },
+    resetConfirm: 'Đặt lại toàn bộ cài đặt Lemon AI về mặc định?',
+    about: {
+      heading: 'Lemon AI',
+      bundleOutOfSyncDesc:
+        'Runtime Lemon AI đã được cập nhật, nhưng app desktop vẫn là bản cũ. Cập nhật hoặc cài lại bằng bộ cài mới nhất.',
+      bundleSwapPendingDesc:
+        'Bản cập nhật đã được cài. Khởi động lại Lemon AI để dùng phiên bản mới; cuộc trò chuyện và cài đặt vẫn được giữ nguyên.',
+      bundleSwapPendingAction: 'Khởi động lại Lemon AI',
+      automaticUpdatesDesc: 'Lemon AI tự kiểm tra bản cập nhật trong nền và báo khi có bản mới.'
     },
     aiConnection: {
       title: 'Kết nối AI',
@@ -266,6 +300,72 @@ export const vi = defineLocale({
       validationModels: count => `Tìm thấy ${count} model. Bạn có thể chọn một model hoặc nhập thủ công.`,
       validationFailed: 'Không kết nối được tới dịch vụ AI. Kiểm tra địa chỉ và khóa rồi thử lại.'
     }
+  },
+
+  install: {
+    stageStates: {
+      pending: 'Đang chờ',
+      running: 'Đang cài',
+      succeeded: 'Xong',
+      skipped: 'Bỏ qua',
+      failed: 'Thất bại'
+    },
+    oneTimeTitle: 'Lemon AI cần cài đặt lần đầu',
+    unsupportedDesc: platform =>
+      `Chưa hỗ trợ cài tự động lần đầu trên ${platform}. Mở Terminal, chạy lệnh bên dưới rồi mở lại Lemon AI. Các lần sau sẽ bỏ qua bước này.`,
+    installCommand: 'Lệnh cài đặt',
+    copyCommand: 'Sao chép lệnh',
+    viewDocs: 'Xem hướng dẫn cài đặt',
+    installTo: 'Sẽ cài vào',
+    retryAfterRun: 'Tôi đã chạy lệnh - thử lại',
+    setupChoiceTitle: 'Thiết lập Lemon AI',
+    setupChoiceDesc: 'Kết nối app với gateway đang chạy, hoặc cài runtime Lemon AI trên máy này.',
+    connectExistingTitle: 'Kết nối gateway có sẵn',
+    connectExistingShort: 'Kết nối có sẵn',
+    connectExistingDesc: 'Dùng backend từ xa với token phiên hoặc đăng nhập trình duyệt. Không bắt đầu cài local.',
+    installLocalTitle: 'Cài trên máy này',
+    installLocalDesc: 'Tải runtime Lemon AI, tạo môi trường Python và chạy backend trên máy này.',
+    localStartUnavailable: 'Không thể bắt đầu cài trên máy này. Khởi động lại Lemon AI rồi thử lại.',
+    remoteSetupTitle: 'Kết nối gateway có sẵn',
+    remoteSetupDesc: 'Nhập URL gateway. Lemon AI sẽ kiểm tra cần token hay đăng nhập trình duyệt.',
+    remoteUrlDesc: 'Dùng base URL của gateway, bao gồm https:// nếu là máy từ xa.',
+    remoteUrlPlaceholder: 'https://gateway.example.com/lemon-ai',
+    probeError: 'Không kết nối được tới gateway này.',
+    signInIncomplete: 'Cửa sổ đăng nhập đã đóng trước khi xác thực hoàn tất.',
+    failedTitle: 'Cài đặt thất bại',
+    settingUpTitle: 'Đang thiết lập Lemon AI',
+    failedDesc:
+      'Một bước cài đặt thất bại. Trên Windows, lỗi này có thể xảy ra nếu một phiên CLI hoặc desktop khác đang chạy. Đóng phiên đang chạy rồi thử lại. Xem chi tiết bên dưới hoặc log desktop để có transcript đầy đủ.',
+    activeDesc:
+      'Đây là bước cài một lần. Bộ cài Lemon AI đang tải dependency và cấu hình máy. Các lần mở sau sẽ bỏ qua bước này.',
+    fetchingManifest: 'Đang tải manifest cài đặt...',
+    hideOutput: 'Ẩn log cài đặt',
+    showOutput: 'Hiện log cài đặt',
+    noOutput: 'Chưa có log.',
+    cancelling: 'Đang hủy...',
+    cancelInstall: 'Hủy cài đặt',
+    transcriptSaved: 'Transcript đầy đủ đã lưu tại',
+    logsFolderFallback: 'thư mục log của app',
+    copiedOutput: 'Đã sao chép!',
+    copyOutput: 'Sao chép log',
+    reloadRetry: 'Tải lại và thử lại'
+  },
+
+  onboarding: {
+    headerTitle: 'Thiết lập Lemon AI',
+    headerDesc: 'Kết nối dịch vụ AI để bắt đầu trò chuyện.',
+    preparingInstall: 'Lemon AI đang hoàn tất cài đặt. Lần đầu thường mất dưới một phút.',
+    starting: 'Đang khởi động Lemon AI…',
+    featuredPitch: 'Kết nối AI công ty - cách dùng Lemon AI được khuyến nghị',
+    localModelsPitch: 'Chạy model trên máy này nếu công ty bật lựa chọn local.',
+    apiKeyOptions: {
+      local: {
+        description: 'Trỏ Lemon AI tới endpoint tương thích OpenAI nội bộ hoặc tự host.'
+      }
+    },
+    authorizeThere: 'Xác nhận Lemon AI tại đó.',
+    autoBrowser: provider =>
+      `Đã mở ${provider} trong trình duyệt. Xác nhận Lemon AI tại đó và app sẽ tự kết nối - không cần copy/paste.`
   },
 
   internalWorkspace: {

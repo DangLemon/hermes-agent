@@ -2534,6 +2534,7 @@ export interface Translations {
     cancelling: string
     cancelInstall: string
     transcriptSaved: string
+    logsFolderFallback: string
     copiedOutput: string
     copyOutput: string
     reloadRetry: string

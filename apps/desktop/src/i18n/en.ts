@@ -2982,6 +2982,7 @@ export const en: Translations = {
     cancelling: 'Cancelling...',
     cancelInstall: 'Cancel install',
     transcriptSaved: 'Full transcript saved to',
+    logsFolderFallback: 'the app logs folder',
     copiedOutput: 'Copied!',
     copyOutput: 'Copy output',
     reloadRetry: 'Reload and retry'

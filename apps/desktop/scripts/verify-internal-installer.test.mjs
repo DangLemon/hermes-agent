@@ -93,11 +93,11 @@ function validManifest() {
       name: 'AI công ty',
       base_url: 'http://127.0.0.1:5173/v1',
       model: 'openai-codex-gpt-5-5',
-      key_env: 'HERMES_COMPANY_API_KEY'
+      key_env: 'LEMON_AI_COMPANY_API_KEY'
     },
     credentialRequirements: {
       provider: {
-        requiredEnv: ['HERMES_COMPANY_API_KEY'],
+        requiredEnv: ['LEMON_AI_COMPANY_API_KEY'],
         label: 'Company provider API key'
       },
       mcpServers: {
@@ -132,7 +132,10 @@ function validGeneratedConfig() {
     artifactName: 'Lemon-AI-${version}-${os}-${arch}.${ext}',
     icon: 'assets/lemon-icon',
     mac: {
-      executableName: 'Lemon AI'
+      executableName: 'Lemon AI',
+      extendInfo: {
+        CFBundleExecutable: 'Lemon AI'
+      }
     },
     dmg: {
       title: 'Install Lemon AI'
@@ -222,12 +225,12 @@ function makeMacFixture(root) {
   makeMachO(path.join(nodePty, 'prebuilds', 'darwin-x64', 'pty.node'), 'x64')
 
   const manifest = validManifest()
-  writeJson(path.join(resources, 'internal-desktop-harness.json'), manifest)
-  fs.writeFileSync(path.join(resources, 'internal-desktop-harness-seed.py'), '# seed helper\n', 'utf8')
+  writeJson(path.join(resources, 'lemon-ai-harness.json'), manifest)
+  fs.writeFileSync(path.join(resources, 'lemon-ai-harness-seed.py'), '# seed helper\n', 'utf8')
   writeJson(path.join(resources, 'install-stamp.json'), validStamp())
-  writeJson(path.join(root, 'apps', 'desktop', 'internal-desktop-harness.config.json'), manifest)
+  writeJson(path.join(root, 'apps', 'desktop', 'lemon-ai-desktop.config.json'), manifest)
   fs.mkdirSync(path.join(root, 'apps', 'desktop', 'electron'), { recursive: true })
-  fs.writeFileSync(path.join(root, 'apps', 'desktop', 'electron', 'internal-desktop-harness-seed.py'), '# seed helper\n', 'utf8')
+  fs.writeFileSync(path.join(root, 'apps', 'desktop', 'electron', 'lemon-ai-harness-seed.py'), '# seed helper\n', 'utf8')
   writeJson(path.join(root, 'apps', 'desktop', 'build', 'electron-builder.generated.json'), validGeneratedConfig())
   fs.writeFileSync(path.join(root, 'release', `Lemon-AI-${VERSION}-mac-arm64.dmg`), 'dmg-bytes')
 
@@ -236,11 +239,11 @@ function makeMacFixture(root) {
     arch: 'arm64',
     appPath,
     installerPath: path.join(root, 'release', `Lemon-AI-${VERSION}-mac-arm64.dmg`),
-    canonicalManifestPath: path.join(root, 'apps', 'desktop', 'internal-desktop-harness.config.json'),
+    canonicalManifestPath: path.join(root, 'apps', 'desktop', 'lemon-ai-desktop.config.json'),
     generatedConfigPath: path.join(root, 'apps', 'desktop', 'build', 'electron-builder.generated.json'),
     outputDir: path.join(root, 'verified'),
     repoRoot: root,
-    sourceSeedHelperPath: path.join(root, 'apps', 'desktop', 'electron', 'internal-desktop-harness-seed.py')
+    sourceSeedHelperPath: path.join(root, 'apps', 'desktop', 'electron', 'lemon-ai-harness-seed.py')
   }
 }
 
@@ -262,12 +265,12 @@ function makeWindowsFixture(root) {
   })
 
   const manifest = validManifest()
-  writeJson(path.join(resources, 'internal-desktop-harness.json'), manifest)
-  fs.writeFileSync(path.join(resources, 'internal-desktop-harness-seed.py'), '# seed helper\n', 'utf8')
+  writeJson(path.join(resources, 'lemon-ai-harness.json'), manifest)
+  fs.writeFileSync(path.join(resources, 'lemon-ai-harness-seed.py'), '# seed helper\n', 'utf8')
   writeJson(path.join(resources, 'install-stamp.json'), validStamp())
-  writeJson(path.join(root, 'apps', 'desktop', 'internal-desktop-harness.config.json'), manifest)
+  writeJson(path.join(root, 'apps', 'desktop', 'lemon-ai-desktop.config.json'), manifest)
   fs.mkdirSync(path.join(root, 'apps', 'desktop', 'electron'), { recursive: true })
-  fs.writeFileSync(path.join(root, 'apps', 'desktop', 'electron', 'internal-desktop-harness-seed.py'), '# seed helper\n', 'utf8')
+  fs.writeFileSync(path.join(root, 'apps', 'desktop', 'electron', 'lemon-ai-harness-seed.py'), '# seed helper\n', 'utf8')
   writeJson(path.join(root, 'apps', 'desktop', 'build', 'electron-builder.generated.json'), validGeneratedConfig())
   fs.writeFileSync(path.join(root, 'release', `Lemon-AI-${VERSION}-win-x64.exe`), 'exe-installer-bytes')
 
@@ -276,11 +279,11 @@ function makeWindowsFixture(root) {
     arch: 'x64',
     appPath,
     installerPath: path.join(root, 'release', `Lemon-AI-${VERSION}-win-x64.exe`),
-    canonicalManifestPath: path.join(root, 'apps', 'desktop', 'internal-desktop-harness.config.json'),
+    canonicalManifestPath: path.join(root, 'apps', 'desktop', 'lemon-ai-desktop.config.json'),
     generatedConfigPath: path.join(root, 'apps', 'desktop', 'build', 'electron-builder.generated.json'),
     outputDir: path.join(root, 'verified'),
     repoRoot: root,
-    sourceSeedHelperPath: path.join(root, 'apps', 'desktop', 'electron', 'internal-desktop-harness-seed.py')
+    sourceSeedHelperPath: path.join(root, 'apps', 'desktop', 'electron', 'lemon-ai-harness-seed.py')
   }
 }
 
@@ -297,7 +300,7 @@ function fixturePackagedManifestPath(options) {
     options.platform === 'darwin'
       ? path.join(options.appPath, 'Contents', 'Resources')
       : path.join(options.appPath, 'resources')
-  return path.join(resourcesPath, 'internal-desktop-harness.json')
+  return path.join(resourcesPath, 'lemon-ai-harness.json')
 }
 
 function gitSpawn(expectedSha = VALID_SHA) {
@@ -710,7 +713,7 @@ test('assertCanonicalSeedHelperBytes rejects packaged seed helper drift', () => 
 test('verification rejects missing packaged seed helper', () => {
   withTempDir(root => {
     const options = makeMacFixture(root)
-    fs.rmSync(path.join(options.appPath, 'Contents', 'Resources', 'internal-desktop-harness-seed.py'))
+    fs.rmSync(path.join(options.appPath, 'Contents', 'Resources', 'lemon-ai-harness-seed.py'))
 
     assert.throws(
       () =>
@@ -744,7 +747,7 @@ test('verification compares packaged manifest to generated canonical bytes, not 
 test('verification rejects packaged manifest byte drift from canonical input', () => {
   withTempDir(root => {
     const options = makeMacFixture(root)
-    fs.appendFileSync(path.join(options.appPath, 'Contents', 'Resources', 'internal-desktop-harness.json'), '\n')
+    fs.appendFileSync(path.join(options.appPath, 'Contents', 'Resources', 'lemon-ai-harness.json'), '\n')
     assert.throws(
       () =>
         verifyInternalInstaller({
@@ -813,6 +816,19 @@ test('validateGeneratedConfig requires Lemon product and executable identity', (
   assert.throws(
     () => validateGeneratedConfig({ ...validGeneratedConfig(), executableName: 'Hermes' }),
     /executableName/
+  )
+  assert.throws(
+    () =>
+      validateGeneratedConfig({
+        ...validGeneratedConfig(),
+        mac: {
+          ...validGeneratedConfig().mac,
+          extendInfo: {
+            CFBundleExecutable: 'Hermes'
+          }
+        }
+      }),
+    /CFBundleExecutable/
   )
   assert.throws(
     () => validateGeneratedConfig({ ...validGeneratedConfig(), appId: 'com.nousresearch.hermes' }),

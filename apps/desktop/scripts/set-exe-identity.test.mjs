@@ -21,9 +21,9 @@ const validHarnessResource = {
 }
 
 function withTempExe(fn) {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-exe-identity-'))
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lemon-ai-exe-identity-'))
   try {
-    const exe = path.join(tempRoot, 'Hermes.exe')
+    const exe = path.join(tempRoot, 'Lemon AI.exe')
     const config = path.join(tempRoot, 'internal.json')
     fs.writeFileSync(exe, '')
     fs.writeFileSync(config, JSON.stringify(validHarnessResource), 'utf8')
@@ -33,8 +33,18 @@ function withTempExe(fn) {
   }
 }
 
-test('resolveExeIdentity keeps Hermes resources without an internal selector', () => {
+test('resolveExeIdentity defaults to Lemon resources', () => {
   assert.deepEqual(resolveExeIdentity({ desktopRoot, env: {} }), {
+    icon: path.join(desktopRoot, 'assets', 'lemon-icon.ico'),
+    productName: 'Lemon AI',
+    fileDescription: 'Lemon AI',
+    companyName: 'Lemon Digital',
+    legalCopyright: 'Copyright (c) 2026 Lemon Digital'
+  })
+})
+
+test('resolveExeIdentity keeps Hermes resources only when the Lemon harness is explicitly disabled', () => {
+  assert.deepEqual(resolveExeIdentity({ desktopRoot, env: { LEMON_AI_DESKTOP_HARNESS_CONFIG: 'disabled' } }), {
     icon: path.join(desktopRoot, 'assets', 'icon.ico'),
     productName: 'Hermes',
     fileDescription: 'Hermes',
@@ -43,12 +53,12 @@ test('resolveExeIdentity keeps Hermes resources without an internal selector', (
   })
 })
 
-test('resolveExeIdentity uses Lemon resources only for a validated internal selector', () => {
+test('resolveExeIdentity uses Lemon resources for a validated internal selector', () => {
   withTempExe((_exe, config) => {
     assert.deepEqual(
       resolveExeIdentity({
         desktopRoot,
-        env: { HERMES_DESKTOP_HARNESS_CONFIG: config }
+        env: { LEMON_AI_DESKTOP_HARNESS_CONFIG: config }
       }),
       {
         icon: path.join(desktopRoot, 'assets', 'lemon-icon.ico'),
@@ -67,7 +77,7 @@ test('stampExeIdentity passes the selected identity to rcedit', async () => {
 
     await stampExeIdentity(exe, {
       desktopRoot,
-      env: { HERMES_DESKTOP_HARNESS_CONFIG: config },
+      env: { LEMON_AI_DESKTOP_HARNESS_CONFIG: config },
       rcedit: async (...args) => {
         calls.push(args)
       }

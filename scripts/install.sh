@@ -93,6 +93,17 @@ if [ "${HERMES_DESKTOP_INTERNAL:-}" = "1" ] || valid_internal_harness_config "${
     INTERNAL_DESKTOP_BUILD=true
 fi
 if [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
+    PRODUCT_NAME="Lemon AI"
+    PRODUCT_DESCRIPTION="Internal AI desktop harness by Lemon Digital."
+    REPOSITORY_STAGE_TITLE="Download Lemon AI source"
+    PATH_STAGE_TITLE="Install Lemon AI command"
+else
+    PRODUCT_NAME="Hermes Agent"
+    PRODUCT_DESCRIPTION="An open source AI agent by Nous Research."
+    REPOSITORY_STAGE_TITLE="Download Hermes Agent"
+    PATH_STAGE_TITLE="Install hermes command"
+fi
+if [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
     DEFAULT_REPOSITORY="$LEMON_DEFAULT_REPOSITORY"
 else
     DEFAULT_REPOSITORY="$HERMES_DEFAULT_REPOSITORY"
@@ -240,7 +251,7 @@ while [[ $# -gt 0 ]]; do
             ;;
 
         -h|--help)
-            echo "Hermes Agent Installer"
+            echo "$PRODUCT_NAME Installer"
             echo ""
             echo "Usage: install.sh [OPTIONS]"
             echo ""
@@ -298,9 +309,9 @@ print_banner() {
     echo ""
     echo -e "${MAGENTA}${BOLD}"
     echo "┌─────────────────────────────────────────────────────────┐"
-    echo "│             ⚕ Hermes Agent Installer                    │"
+    printf "│             ⚕ %-39s │\n" "$PRODUCT_NAME Installer"
     echo "├─────────────────────────────────────────────────────────┤"
-    echo "│  An open source AI agent by Nous Research.              │"
+    printf "│  %-53s │\n" "$PRODUCT_DESCRIPTION"
     echo "└─────────────────────────────────────────────────────────┘"
     echo -e "${NC}"
 }
@@ -591,7 +602,7 @@ emit_manifest() {
     if [ "$INCLUDE_DESKTOP" = true ]; then
         desktop_stage='{"name":"desktop","title":"Build desktop app","category":"runtime","needs_user_input":false},'
     fi
-    printf '%s' '{"protocol_version":1,"stages":[{"name":"prerequisites","title":"System prerequisites","category":"runtime","needs_user_input":false},{"name":"repository","title":"Download Hermes Agent","category":"runtime","needs_user_input":false},{"name":"venv","title":"Create Python virtual environment","category":"runtime","needs_user_input":false},{"name":"python-deps","title":"Install Python dependencies","category":"runtime","needs_user_input":false},{"name":"node-deps","title":"Install browser-tool dependencies","category":"runtime","needs_user_input":false},{"name":"path","title":"Install hermes command","category":"runtime","needs_user_input":false},{"name":"config","title":"Prepare config and skills","category":"configuration","needs_user_input":false},{"name":"setup","title":"Configure API keys and settings","category":"configuration","needs_user_input":true},{"name":"gateway","title":"Configure gateway service","category":"configuration","needs_user_input":true},'"$desktop_stage"'{"name":"complete","title":"Finish install","category":"runtime","needs_user_input":false}]}'
+    printf '%s' '{"protocol_version":1,"stages":[{"name":"prerequisites","title":"System prerequisites","category":"runtime","needs_user_input":false},{"name":"repository","title":"'"$REPOSITORY_STAGE_TITLE"'","category":"runtime","needs_user_input":false},{"name":"venv","title":"Create Python virtual environment","category":"runtime","needs_user_input":false},{"name":"python-deps","title":"Install Python dependencies","category":"runtime","needs_user_input":false},{"name":"node-deps","title":"Install browser-tool dependencies","category":"runtime","needs_user_input":false},{"name":"path","title":"'"$PATH_STAGE_TITLE"'","category":"runtime","needs_user_input":false},{"name":"config","title":"Prepare config and skills","category":"configuration","needs_user_input":false},{"name":"setup","title":"Configure API keys and settings","category":"configuration","needs_user_input":true},{"name":"gateway","title":"Configure gateway service","category":"configuration","needs_user_input":true},'"$desktop_stage"'{"name":"complete","title":"Finish install","category":"runtime","needs_user_input":false}]}'
     printf '\n'
 }
 
@@ -3386,7 +3397,7 @@ write_bootstrap_marker() {
         log_error "HERMES_BOOTSTRAP_MARKER_NAME must be a safe file name"
         return 1
     fi
-    case "$marker_name" in ""|*/*) marker_name=".hermes-bootstrap-complete" ;; esac
+    case "$marker_name" in ""|*/*) marker_name="$default_marker_name" ;; esac
     local marker_path="$INSTALL_DIR/$marker_name"
     local tmp_path="$marker_path.tmp"
 
