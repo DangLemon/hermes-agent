@@ -163,9 +163,9 @@ import { resolveDesktopRemoteRoute } from './desktop-remote-route'
 import {
   resolveDefaultDesktopHome,
   resolveDesktopHomeOverride,
+  resolveDesktopRuntimeDirNameOverride,
   resolveDesktopRuntimeIdentity,
   resolveDesktopRuntimeRoot,
-  resolveDesktopRuntimeDirNameOverride,
   shouldReadWindowsHermesHomeRegistry
 } from './desktop-runtime-identity'
 import {
@@ -776,7 +776,7 @@ const INTERNAL_DESKTOP_HARNESS = initializeInternalDesktopHarness({
 })
 
 const DESKTOP_RUNTIME_IDENTITY = resolveDesktopRuntimeIdentity({
-  internalHarnessRequested: INTERNAL_DESKTOP_HARNESS.active
+  internalHarnessRequested: INTERNAL_DESKTOP_HARNESS.requested
 })
 
 // HERMES_HOME — the user-facing root for desktop runtime data. The env var
@@ -874,12 +874,17 @@ const HANDOFF_RESULT_OPTIONS = Object.freeze({
 })
 
 function desktopRuntimeEnv() {
+  const runtimeDirName = path.basename(ACTIVE_HERMES_ROOT)
+
   return {
     HERMES_BOOTSTRAP_MARKER_NAME: DESKTOP_RUNTIME_IDENTITY.bootstrapMarkerName,
     HERMES_DESKTOP_HARNESS_CONFIG:
       INTERNAL_DESKTOP_HARNESS.resourcePath || process.env['HERMES_DESKTOP_HARNESS_CONFIG'] || undefined,
-    HERMES_DESKTOP_INTERNAL: INTERNAL_DESKTOP_HARNESS.active ? '1' : undefined,
-    HERMES_INSTALL_RUNTIME_DIR_NAME: path.basename(ACTIVE_HERMES_ROOT),
+    HERMES_DESKTOP_HOME_OVERRIDE: HERMES_HOME,
+    HERMES_DESKTOP_INTERNAL: INTERNAL_DESKTOP_HARNESS.requested ? '1' : undefined,
+    HERMES_DESKTOP_RUNTIME_DIR_NAME: runtimeDirName,
+    HERMES_HOME,
+    HERMES_INSTALL_RUNTIME_DIR_NAME: runtimeDirName,
     HERMES_UPDATE_HANDOFF_LOG_NAME: DESKTOP_RUNTIME_IDENTITY.updateHandoffLogName,
     HERMES_UPDATE_MARKER_NAME: DESKTOP_RUNTIME_IDENTITY.updateMarkerName,
     HERMES_UPDATE_PRODUCT_NAME: DESKTOP_RUNTIME_IDENTITY.appName,
@@ -902,7 +907,9 @@ async function seedInternalDesktopInitialProvider(backend, profile) {
       seedScriptPath: INTERNAL_DESKTOP_HARNESS.seedScriptPath
     })
   } catch (error) {
-    throw new Error(`Could not seed editable Lemon AI provider: ${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(
+      `Could not seed editable Lemon AI provider: ${error instanceof Error ? error.message : String(error)}`
+    )
   }
 }
 
@@ -2478,7 +2485,11 @@ async function waitForUpdateToFinish() {
   if (outcome === 'timeout') {
     rememberLog('[updates] update still in progress after wait timeout; starting backend anyway')
   } else if (relaunchIntoSwappedBundle()) {
-    await advanceBootProgress('backend.update-restart', `Restarting ${DESKTOP_RUNTIME_IDENTITY.appName} to load the updated app…`, 14)
+    await advanceBootProgress(
+      'backend.update-restart',
+      `Restarting ${DESKTOP_RUNTIME_IDENTITY.appName} to load the updated app…`,
+      14
+    )
     // Park while the scheduled exit lands so this stale build never starts a
     // backend; the failsafe below only runs if the exit somehow does not.
     await new Promise(resolve => setTimeout(resolve, BUNDLE_SWAP_RELAUNCH_FAILSAFE_MS))
@@ -3429,7 +3440,11 @@ let quitConfirmedWithActiveWork = false
 // see resolveStagedUpdaterBinary for the policy and for #74836. Returns null
 // whenever no hand-off applies; callers degrade gracefully.
 function resolveUpdaterBinary() {
-  return resolveStagedUpdaterBinary(HERMES_HOME, { fileExists, isWindows: IS_WINDOWS, stagedUpdaterNames: DESKTOP_RUNTIME_IDENTITY.stagedUpdaterNames })
+  return resolveStagedUpdaterBinary(HERMES_HOME, {
+    fileExists,
+    isWindows: IS_WINDOWS,
+    stagedUpdaterNames: DESKTOP_RUNTIME_IDENTITY.stagedUpdaterNames
+  })
 }
 
 function repairMacUpdaterHelper(updater) {
@@ -4069,8 +4084,7 @@ async function applyUpdates(opts: { stopSafeBlockers?: boolean } = {}) {
 
     emitUpdateProgress({
       stage: 'restart',
-      message:
-        `Updating ${DESKTOP_RUNTIME_IDENTITY.appName} — this window will close and the updater will open. Don’t reopen ${DESKTOP_RUNTIME_IDENTITY.appName} yourself; it restarts automatically when the update finishes.`,
+      message: `Updating ${DESKTOP_RUNTIME_IDENTITY.appName} — this window will close and the updater will open. Don’t reopen ${DESKTOP_RUNTIME_IDENTITY.appName} yourself; it restarts automatically when the update finishes.`,
       percent: 100
     })
     repairMacUpdaterHelper(updater)
@@ -4381,7 +4395,8 @@ async function handOffWindowsBootstrapRecovery(reason) {
   // gentle update path. Partial or missing runtimes go through full repair.
   const updaterArgs = chooseUpdaterArgs(
     {
-      hasBootstrapMarker: fileExists(path.join(updateRoot, DESKTOP_RUNTIME_IDENTITY.bootstrapMarkerName)) ||
+      hasBootstrapMarker:
+        fileExists(path.join(updateRoot, DESKTOP_RUNTIME_IDENTITY.bootstrapMarkerName)) ||
         DESKTOP_RUNTIME_IDENTITY.legacyBootstrapMarkerNames.some(name => fileExists(path.join(updateRoot, name))),
       hasVenvHermes: fileExists(venvHermes),
       hasVenvPython: fileExists(venvPython)
@@ -4644,8 +4659,7 @@ async function applyUpdatesPosixHandoff(opts: any) {
   rememberLog(`[updates] launched posix hand-off: ${handoff.scriptPath} (branch ${branch}); quitting to hand off`)
   emitUpdateProgress({
     stage: 'restart',
-    message:
-      `Updating ${DESKTOP_RUNTIME_IDENTITY.appName} — this window will close. Don’t reopen ${DESKTOP_RUNTIME_IDENTITY.appName} yourself; it restarts automatically when the update finishes.`,
+    message: `Updating ${DESKTOP_RUNTIME_IDENTITY.appName} — this window will close. Don’t reopen ${DESKTOP_RUNTIME_IDENTITY.appName} yourself; it restarts automatically when the update finishes.`,
     percent: 100
   })
 
@@ -5293,7 +5307,10 @@ async function ensureRuntime(backend) {
       writeMarker: writeBootstrapMarker,
       desktopHarnessConfigPath: INTERNAL_DESKTOP_HARNESS.resourcePath,
       bootstrapMarkerName: DESKTOP_RUNTIME_IDENTITY.bootstrapMarkerName,
+      desktopInternal: INTERNAL_DESKTOP_HARNESS.requested,
+      desktopHomeOverride: HERMES_HOME,
       legacyBootstrapMarkerNames: DESKTOP_RUNTIME_IDENTITY.legacyBootstrapMarkerNames,
+      runtimeDirName: path.basename(ACTIVE_HERMES_ROOT),
       runtimeRootDirNames: [path.basename(ACTIVE_HERMES_ROOT)]
     })
 
@@ -10720,6 +10737,7 @@ async function bootstrapSshConnectionInner(profile, sshConfig, reuseToken, sourc
     ssh = new SshConnection(
       { host: sshConfig.host, user: sshConfig.user, port: sshConfig.port, keyPath: sshConfig.keyPath },
       {
+        controlDir: path.join(HERMES_HOME, 'desktop-ssh'),
         rememberLog: sshRememberLog,
         ownershipId: sshOwnershipKey(profile),
         scope,

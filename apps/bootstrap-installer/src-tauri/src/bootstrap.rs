@@ -243,19 +243,52 @@ fn desktop_exe_candidates(internal: bool) -> &'static [(&'static str, &'static s
             ]
         }
     } else {
-        &[("linux-unpacked", "hermes")]
+        linux_desktop_exe_candidates(internal)
     }
 }
 
-pub(crate) fn resolve_hermes_desktop_exe(install_root: &std::path::Path) -> Option<PathBuf> {
+fn linux_desktop_exe_candidates(internal: bool) -> &'static [(&'static str, &'static str)] {
+    if internal {
+        &[
+            ("linux-unpacked", "Lemon AI"),
+            ("linux-arm64-unpacked", "Lemon AI"),
+            ("linux-unpacked", "lemon-ai"),
+            ("linux-arm64-unpacked", "lemon-ai"),
+            ("linux-unpacked", "hermes"),
+            ("linux-arm64-unpacked", "hermes"),
+            ("linux-unpacked", "Hermes"),
+            ("linux-arm64-unpacked", "Hermes"),
+        ]
+    } else {
+        &[
+            ("linux-unpacked", "hermes"),
+            ("linux-arm64-unpacked", "hermes"),
+            ("linux-unpacked", "Hermes"),
+            ("linux-arm64-unpacked", "Hermes"),
+        ]
+    }
+}
+
+fn resolve_desktop_exe_from_candidates(
+    install_root: &std::path::Path,
+    candidates: &[(&str, &str)],
+) -> Option<PathBuf> {
     let release_dir = install_root.join("apps").join("desktop").join("release");
-    for (subdir, exe) in desktop_exe_candidates(crate::paths::internal_desktop_build()) {
+    for (subdir, exe) in candidates {
         let p = release_dir.join(subdir).join(exe);
         if p.exists() {
             return Some(p);
         }
     }
     None
+}
+
+fn resolve_desktop_exe_for(install_root: &std::path::Path, internal: bool) -> Option<PathBuf> {
+    resolve_desktop_exe_from_candidates(install_root, desktop_exe_candidates(internal))
+}
+
+pub(crate) fn resolve_hermes_desktop_exe(install_root: &std::path::Path) -> Option<PathBuf> {
+    resolve_desktop_exe_for(install_root, crate::paths::internal_desktop_build())
 }
 
 pub(crate) fn resolve_hermes_desktop_app(install_root: &std::path::Path) -> Option<PathBuf> {
@@ -1097,9 +1130,43 @@ mod tests {
             assert_eq!(internal[0], ("mac/Lemon AI.app/Contents/MacOS", "Lemon AI"));
             assert!(internal.contains(&("mac/Hermes.app/Contents/MacOS", "Hermes")));
         } else {
-            assert_eq!(ordinary, internal);
             assert_eq!(ordinary[0], ("linux-unpacked", "hermes"));
+            assert_eq!(internal[0], ("linux-unpacked", "Lemon AI"));
+            assert!(internal.contains(&("linux-unpacked", "hermes")));
         }
+    }
+
+    #[test]
+    fn linux_internal_desktop_candidates_prefer_lemon_and_keep_hermes_fallbacks() {
+        let ordinary = linux_desktop_exe_candidates(false);
+        let internal = linux_desktop_exe_candidates(true);
+
+        assert_eq!(ordinary[0], ("linux-unpacked", "hermes"));
+        assert_eq!(internal[0], ("linux-unpacked", "Lemon AI"));
+        assert!(internal.contains(&("linux-unpacked", "lemon-ai")));
+        assert!(internal.contains(&("linux-unpacked", "hermes")));
+        assert!(internal.contains(&("linux-unpacked", "Hermes")));
+    }
+
+    #[test]
+    fn linux_internal_desktop_resolver_prefers_lemon_executable() {
+        let root = unique_tmp_dir("linux-lemon-resolver");
+        let release = root.join("apps").join("desktop").join("release");
+        let lemon = release.join("linux-unpacked").join("Lemon AI");
+        let legacy = release.join("linux-unpacked").join("hermes");
+        std::fs::create_dir_all(lemon.parent().unwrap()).unwrap();
+        std::fs::write(&lemon, b"stub").unwrap();
+        std::fs::write(&legacy, b"stub").unwrap();
+
+        assert_eq!(
+            resolve_desktop_exe_from_candidates(&root, linux_desktop_exe_candidates(true)),
+            Some(lemon)
+        );
+        assert_eq!(
+            resolve_desktop_exe_from_candidates(&root, linux_desktop_exe_candidates(false)),
+            Some(legacy)
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -19,6 +19,7 @@ import {
   modeRemovesAgent,
   modeRemovesUserData,
   resolveRemovableAppPath,
+  safeRuntimeEnvEntries,
   shouldRemoveAppBundle,
   UNINSTALL_MODES,
   uninstallArgsForMode
@@ -186,6 +187,19 @@ test('buildPosixCleanupScript carries validated Lemon identity into detached cle
   assert.match(script, /export HERMES_UPDATE_PRODUCT_NAME='Lemon AI'/)
   assert.doesNotMatch(script, /should\/not\/override/)
   assert.doesNotMatch(script, /BAD-NAME/)
+})
+
+test('safeRuntimeEnvEntries preserves Lemon home and runtime overrides', () => {
+  const entries = safeRuntimeEnvEntries({
+    HERMES_DESKTOP_HOME_OVERRIDE: '/Users/dang/.lemon-ai',
+    HERMES_DESKTOP_RUNTIME_DIR_NAME: 'lemon-agent',
+    HERMES_HOME: '/should/not/be duplicated'
+  })
+
+  assert.deepEqual(entries, [
+    ['HERMES_DESKTOP_HOME_OVERRIDE', '/Users/dang/.lemon-ai'],
+    ['HERMES_DESKTOP_RUNTIME_DIR_NAME', 'lemon-agent']
+  ])
 })
 
 test('buildPosixCleanupScript omits PYTHONPATH when pythonPath is null (gui)', () => {

@@ -566,19 +566,44 @@ function resolveWindowsPowerShell() {
   return 'powershell.exe'
 }
 
-function installerRuntimeEnv({ hermesHome, desktopHarnessConfigPath, bootstrapMarkerName }: any = {}) {
-  return {
+function installerRuntimeEnv({
+  hermesHome,
+  desktopHarnessConfigPath,
+  bootstrapMarkerName,
+  desktopInternal = false,
+  desktopHomeOverride,
+  runtimeDirName
+}: any = {}): Record<string, string | undefined> {
+  const env = {
     HERMES_BOOTSTRAP_MARKER_NAME: bootstrapMarkerName || process.env['HERMES_BOOTSTRAP_MARKER_NAME'] || undefined,
     HERMES_DESKTOP_HARNESS_CONFIG:
       desktopHarnessConfigPath || process.env['HERMES_DESKTOP_HARNESS_CONFIG'] || undefined,
     HERMES_HOME: hermesHome || process.env.HERMES_HOME || ''
   }
+
+  if (desktopInternal) {
+    env['HERMES_DESKTOP_INTERNAL'] = '1'
+    env['HERMES_DESKTOP_HOME_OVERRIDE'] = desktopHomeOverride || hermesHome || ''
+    env['HERMES_DESKTOP_RUNTIME_DIR_NAME'] = runtimeDirName || undefined
+  }
+
+  return env
 }
 
 function spawnPowerShell(
   scriptPath,
   args,
-  { emit, stageName, abortSignal, hermesHome, desktopHarnessConfigPath, bootstrapMarkerName }: any = {}
+  {
+    emit,
+    stageName,
+    abortSignal,
+    hermesHome,
+    desktopHarnessConfigPath,
+    bootstrapMarkerName,
+    desktopInternal,
+    desktopHomeOverride,
+    runtimeDirName
+  }: any = {}
 ) {
   return new Promise<any>((resolve, reject) => {
     const ps = process.platform === 'win32' ? resolveWindowsPowerShell() : 'pwsh'
@@ -594,7 +619,14 @@ function spawnPowerShell(
           // Pass HERMES_HOME through so install.ps1 respects the caller's
           // choice rather than re-computing the default. Internal builds also
           // pass the harness resource so installer-driven rebuilds keep Lemon identity.
-          ...installerRuntimeEnv({ hermesHome, desktopHarnessConfigPath, bootstrapMarkerName })
+          ...installerRuntimeEnv({
+            hermesHome,
+            desktopHarnessConfigPath,
+            bootstrapMarkerName,
+            desktopInternal,
+            desktopHomeOverride,
+            runtimeDirName
+          })
         }
       })
     )
@@ -687,14 +719,31 @@ function spawnPowerShell(
 function spawnBash(
   scriptPath,
   args,
-  { emit, stageName, abortSignal, hermesHome, desktopHarnessConfigPath, bootstrapMarkerName }: any = {}
+  {
+    emit,
+    stageName,
+    abortSignal,
+    hermesHome,
+    desktopHarnessConfigPath,
+    bootstrapMarkerName,
+    desktopInternal,
+    desktopHomeOverride,
+    runtimeDirName
+  }: any = {}
 ) {
   return new Promise<any>((resolve, reject) => {
     const child = spawn('bash', [scriptPath, ...args], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
-        ...installerRuntimeEnv({ hermesHome, desktopHarnessConfigPath, bootstrapMarkerName })
+        ...installerRuntimeEnv({
+          hermesHome,
+          desktopHarnessConfigPath,
+          bootstrapMarkerName,
+          desktopInternal,
+          desktopHomeOverride,
+          runtimeDirName
+        })
       }
     })
 
@@ -844,7 +893,10 @@ async function fetchManifest({
   pinCommit,
   sourceRepository,
   desktopHarnessConfigPath,
-  bootstrapMarkerName
+  bootstrapMarkerName,
+  desktopInternal,
+  desktopHomeOverride,
+  runtimeDirName
 }) {
   const isPosix = installerKind === 'posix'
 
@@ -864,7 +916,10 @@ async function fetchManifest({
     stageName: '__manifest__',
     hermesHome,
     desktopHarnessConfigPath,
-    bootstrapMarkerName
+    bootstrapMarkerName,
+    desktopInternal,
+    desktopHomeOverride,
+    runtimeDirName
   })
 
   if (result.code !== 0) {
@@ -928,7 +983,10 @@ async function runStage({
   pinCommit,
   sourceRepository,
   desktopHarnessConfigPath,
-  bootstrapMarkerName
+  bootstrapMarkerName,
+  desktopInternal,
+  desktopHomeOverride,
+  runtimeDirName
 }) {
   const startedAt = Date.now()
   emit({ type: 'stage', name: stage.name, state: 'running' })
@@ -961,7 +1019,10 @@ async function runStage({
     abortSignal,
     hermesHome,
     desktopHarnessConfigPath,
-    bootstrapMarkerName
+    bootstrapMarkerName,
+    desktopInternal,
+    desktopHomeOverride,
+    runtimeDirName
   })
 
   const durationMs = Date.now() - startedAt
@@ -1049,8 +1110,16 @@ async function runBootstrap(opts) {
     desktopHarnessConfigPath,
     bootstrapMarkerName,
     legacyBootstrapMarkerNames = [],
-    runtimeRootDirNames = ['hermes-agent']
+    runtimeRootDirNames,
+    desktopInternal = false,
+    desktopHomeOverride,
+    runtimeDirName
   } = opts
+
+  const effectiveRuntimeRootDirNames =
+    Array.isArray(runtimeRootDirNames) && runtimeRootDirNames.length > 0
+      ? runtimeRootDirNames
+      : [runtimeDirName || (desktopInternal ? 'lemon-agent' : 'hermes-agent')]
 
   const installSourceRepository = validateSourceRepository(sourceRepository)
 
@@ -1119,7 +1188,7 @@ async function runBootstrap(opts) {
       sourceRepoRoot,
       hermesHome,
       activeRoot,
-      runtimeRootDirNames,
+      runtimeRootDirNames: effectiveRuntimeRootDirNames,
       sourceRepository: installSourceRepository,
       emit
     })
@@ -1137,7 +1206,10 @@ async function runBootstrap(opts) {
       pinCommit,
       sourceRepository: installSourceRepository,
       desktopHarnessConfigPath,
-      bootstrapMarkerName
+      bootstrapMarkerName,
+      desktopInternal,
+      desktopHomeOverride,
+      runtimeDirName
     })
 
     emit({
@@ -1169,7 +1241,10 @@ async function runBootstrap(opts) {
         pinCommit,
         sourceRepository: installSourceRepository,
         desktopHarnessConfigPath,
-        bootstrapMarkerName
+        bootstrapMarkerName,
+        desktopInternal,
+        desktopHomeOverride,
+        runtimeDirName
       })
 
       if (ev.state === 'failed') {
@@ -1229,6 +1304,7 @@ export {
   cachedScriptPath,
   hasExistingGitCheckout,
   installedAgentInstallScript,
+  installerRuntimeEnv,
   installRefForStamp,
   isPinnedCommit,
   // Exposed for testability

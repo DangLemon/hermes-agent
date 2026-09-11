@@ -422,11 +422,11 @@ interface FakeStage {
   title: string
 }
 
-const FAKE_INSTALL_STAGES: FakeStage[] = [
+const fakeInstallStages = (productName: string): FakeStage[] => [
   { name: 'system-packages', title: 'System packages' },
   { name: 'uv', title: 'uv' },
   { name: 'python', title: 'Python environment' },
-  { name: 'repo', title: 'Hermes repository' },
+  { name: 'repo', title: `${productName} repository` },
   { name: 'dependencies', title: 'Python dependencies' },
   { name: 'node', title: 'Node runtime' },
   { name: 'desktop', title: 'Desktop app' }
@@ -460,7 +460,7 @@ async function runFakeBoot(kind: FakeMode): Promise<void> {
   fakeCancelled = false
 
   try {
-    const stages = kind === 'update' ? FAKE_UPDATE_STAGES : FAKE_INSTALL_STAGES
+    const stages = kind === 'update' ? FAKE_UPDATE_STAGES : fakeInstallStages($productName.get())
 
     const cancelled = () => {
       if (!fakeCancelled) {

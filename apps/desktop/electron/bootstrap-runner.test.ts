@@ -11,6 +11,7 @@ import {
   cachedScriptPath,
   hasExistingGitCheckout,
   installedAgentInstallScript,
+  installerRuntimeEnv,
   installRefForStamp,
   isPinnedCommit,
   resolveBootstrapSourceRepository,
@@ -385,4 +386,20 @@ test('resolveInstallScript rethrows when the 404 fallback is unavailable', async
   } finally {
     fs.rmSync(home, { recursive: true, force: true })
   }
+})
+
+test('installerRuntimeEnv carries Lemon home and runtime overrides to child scripts', () => {
+  const env = installerRuntimeEnv({
+    hermesHome: '/Users/dang/.lemon-ai',
+    desktopHarnessConfigPath: '/app/resources/internal-desktop-harness.json',
+    bootstrapMarkerName: '.lemon-ai-bootstrap-complete',
+    desktopInternal: true,
+    runtimeDirName: 'lemon-agent'
+  })
+
+  assert.equal(env.HERMES_HOME, '/Users/dang/.lemon-ai')
+  assert.equal(env.HERMES_DESKTOP_HOME_OVERRIDE, '/Users/dang/.lemon-ai')
+  assert.equal(env.HERMES_DESKTOP_RUNTIME_DIR_NAME, 'lemon-agent')
+  assert.equal(env.HERMES_DESKTOP_INTERNAL, '1')
+  assert.equal(env.HERMES_DESKTOP_HARNESS_CONFIG, '/app/resources/internal-desktop-harness.json')
 })

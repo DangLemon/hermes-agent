@@ -145,7 +145,9 @@ pub fn hermes_home() -> PathBuf {
 
     if let Some(override_path) = home_override_for(
         internal,
-        std::env::var("HERMES_DESKTOP_HOME_OVERRIDE").ok().as_deref(),
+        std::env::var("HERMES_DESKTOP_HOME_OVERRIDE")
+            .ok()
+            .as_deref(),
         std::env::var("HERMES_HOME").ok().as_deref(),
     ) {
         return override_path;
@@ -178,7 +180,9 @@ fn home_override_for(
     desktop_override: Option<&str>,
     legacy_override: Option<&str>,
 ) -> Option<PathBuf> {
-    let desktop = desktop_override.map(str::trim).filter(|value| !value.is_empty());
+    let desktop = desktop_override
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
 
     if let Some(value) = desktop {
         return Some(PathBuf::from(value));
@@ -258,11 +262,9 @@ fn desktop_identity_child_env_for(
     update_marker_name: String,
     product_name: &'static str,
 ) -> Vec<(&'static str, OsString)> {
+    let runtime_dir_name = OsString::from(runtime_dir_name);
     let mut envs = vec![
-        (
-            "HERMES_INSTALL_RUNTIME_DIR_NAME",
-            OsString::from(runtime_dir_name),
-        ),
+        ("HERMES_INSTALL_RUNTIME_DIR_NAME", runtime_dir_name.clone()),
         (
             "HERMES_BOOTSTRAP_MARKER_NAME",
             OsString::from(bootstrap_marker_name),
@@ -282,6 +284,7 @@ fn desktop_identity_child_env_for(
         ),
     ];
     if internal {
+        envs.push(("HERMES_DESKTOP_RUNTIME_DIR_NAME", runtime_dir_name));
         envs.push(("HERMES_DESKTOP_INTERNAL", OsString::from("1")));
     }
     envs
@@ -292,10 +295,7 @@ pub(crate) fn desktop_identity_child_env() -> Vec<(&'static str, OsString)> {
 
     desktop_identity_child_env_for(
         internal,
-        safe_file_name_from_env(
-            "HERMES_INSTALL_RUNTIME_DIR_NAME",
-            default_runtime_dir_name(internal),
-        ),
+        runtime_dir_name(),
         safe_file_name_from_env(
             "HERMES_BOOTSTRAP_MARKER_NAME",
             default_bootstrap_marker_name(internal),
@@ -624,7 +624,7 @@ mod tests {
         ));
         let envs = desktop_identity_child_env_for(
             true,
-            default_runtime_dir_name(true).to_string(),
+            "lemon-custom".to_string(),
             default_bootstrap_marker_name(true).to_string(),
             default_update_marker_name(true).to_string(),
             product_name_for(true),
@@ -640,7 +640,11 @@ mod tests {
         assert_eq!(lookup("HERMES_DESKTOP_INTERNAL"), Some("1"));
         assert_eq!(
             lookup("HERMES_INSTALL_RUNTIME_DIR_NAME"),
-            Some("lemon-agent")
+            Some("lemon-custom")
+        );
+        assert_eq!(
+            lookup("HERMES_DESKTOP_RUNTIME_DIR_NAME"),
+            Some("lemon-custom")
         );
         assert_eq!(
             lookup("HERMES_BOOTSTRAP_MARKER_NAME"),

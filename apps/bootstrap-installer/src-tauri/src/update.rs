@@ -304,10 +304,12 @@ async fn run_update(app: AppHandle) -> Result<()> {
                 format!("{secs}s")
             };
             let msg = format!(
-                "Another Hermes update is already running (PID {}, started {} ago). \
+                "Another {} update is already running (PID {}, started {} ago). \
                  Wait for it to finish, or close the window or dashboard tab that \
                  started it, then try again.",
-                owner.pid, elapsed
+                crate::paths::product_name(),
+                owner.pid,
+                elapsed
             );
             emit(
                 &app,
@@ -492,9 +494,10 @@ async fn run_update(app: AppHandle) -> Result<()> {
             emit_stage(&app, "update", StageState::Succeeded, Some(update_ms), None);
         }
         Some(code) if code == UPDATE_EXIT_CONCURRENT => {
-            let msg = "Hermes is still running. Close all Hermes windows and try \
-                       the update again."
-                .to_string();
+            let product_name = crate::paths::product_name();
+            let msg = format!(
+                "{product_name} is still running. Close all {product_name} windows and try the update again."
+            );
             emit_stage(
                 &app,
                 "update",
@@ -671,7 +674,10 @@ async fn run_update(app: AppHandle) -> Result<()> {
                 &app,
                 None,
                 LogStream::Stderr,
-                &format!("[update] could not auto-launch desktop: {err}. Launch Hermes manually."),
+                &format!(
+                    "[update] could not auto-launch desktop: {err}. Launch {} manually.",
+                    crate::paths::product_name()
+                ),
             );
         }
     } else if let Err(err) = crate::bootstrap::launch_hermes_desktop(
@@ -687,7 +693,10 @@ async fn run_update(app: AppHandle) -> Result<()> {
             &app,
             None,
             LogStream::Stdout,
-            &format!("[update] could not auto-launch desktop: {err}. Launch Hermes manually."),
+            &format!(
+                "[update] could not auto-launch desktop: {err}. Launch {} manually.",
+                crate::paths::product_name()
+            ),
         );
     }
 

@@ -7,6 +7,7 @@
 //! On Unix we shell out to `bash <script>` since install.sh expects bash.
 
 use anyhow::{Context, Result};
+use std::ffi::OsString;
 use std::path::Path;
 use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
@@ -278,10 +279,18 @@ where
     })
 }
 
+fn script_home_env_for(internal: bool, home: &str) -> Vec<(&'static str, OsString)> {
+    let mut envs = vec![("HERMES_HOME", OsString::from(home))];
+    if internal {
+        envs.push(("HERMES_DESKTOP_HOME_OVERRIDE", OsString::from(home)));
+    }
+    envs
+}
+
 /// Spawns install.ps1 / install.sh with the given args and streams output.
 ///
-/// `hermes_home_override` propagates to the child as $HERMES_HOME so the
-/// install script writes to the same directory the installer is reading from.
+/// `hermes_home_override` propagates through both the public Python/CLI
+/// contract and the internal desktop override consumed by installer scripts.
 pub async fn run_script(
     script_path: &Path,
     args: &[String],
@@ -304,7 +313,9 @@ pub async fn run_script(
     }
 
     if let Some(home) = hermes_home_override {
-        cmd.env("HERMES_HOME", home);
+        for (key, value) in script_home_env_for(crate::paths::internal_desktop_build(), home) {
+            cmd.env(key, value);
+        }
     }
 
     cmd.stdin(Stdio::null())
@@ -529,6 +540,27 @@ use std::os::windows::process::CommandExt;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn internal_script_home_env_carries_desktop_override_and_legacy_compatibility() {
+        let envs = script_home_env_for(true, "/company/lemon");
+        let lookup = |name: &str| {
+            envs.iter()
+                .find(|(key, _)| *key == name)
+                .and_then(|(_, value)| value.to_str())
+        };
+
+        assert_eq!(lookup("HERMES_HOME"), Some("/company/lemon"));
+        assert_eq!(
+            lookup("HERMES_DESKTOP_HOME_OVERRIDE"),
+            Some("/company/lemon")
+        );
+
+        let ordinary_envs = script_home_env_for(false, "/users/hermes");
+        assert_eq!(ordinary_envs.len(), 1);
+        assert_eq!(ordinary_envs[0].0, "HERMES_HOME");
+        assert_eq!(ordinary_envs[0].1, OsString::from("/users/hermes"));
+    }
 
     #[test]
     fn parse_stage_result_picks_last_json_line() {
