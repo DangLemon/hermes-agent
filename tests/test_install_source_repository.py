@@ -171,6 +171,26 @@ def test_install_sh_internal_help_reports_only_lemon_default_paths(tmp_path: Pat
     assert ".hermes/hermes-agent" not in result.stdout
 
 
+
+
+def test_install_sh_internal_manifest_uses_lemon_stage_labels(tmp_path: Path) -> None:
+    env = os.environ.copy()
+    env.update({"HOME": str(tmp_path / "home"), "HERMES_DESKTOP_INTERNAL": "1"})
+
+    result = subprocess.run(
+        ["bash", str(INSTALL_SH), "--manifest"],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=True,
+    )
+
+    assert "Download Lemon AI source" in result.stdout
+    assert "Install Lemon AI command" in result.stdout
+    assert "Download Hermes Agent" not in result.stdout
+    assert "Install hermes command" not in result.stdout
+
 def test_install_sh_rejects_traversal_runtime_dir_name(tmp_path: Path) -> None:
     env = os.environ.copy()
     env.update({"HOME": str(tmp_path / "home"), "HERMES_INSTALL_RUNTIME_DIR_NAME": "../hermes-agent"})

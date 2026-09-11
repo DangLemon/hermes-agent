@@ -2,6 +2,11 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { atom, computed } from 'nanostores'
 
+declare const __LEMON_INSTALLER__: boolean
+
+const DEFAULT_PRODUCT_NAME = typeof __LEMON_INSTALLER__ !== 'undefined' && __LEMON_INSTALLER__ ? 'Lemon AI' : 'Hermes'
+const DEFAULT_HOME = typeof __LEMON_INSTALLER__ !== 'undefined' && __LEMON_INSTALLER__ ? '~/.lemon-ai' : '~/.hermes'
+
 /*
  * Bootstrap state store — single source of truth for installer screens.
  *
@@ -76,7 +81,7 @@ export const $mode = atom<AppMode>('install')
 export const $bootstrap = atom<BootstrapStateModel>(INITIAL)
 export const $logPath = atom<string | null>(null)
 export const $hermesHome = atom<string | null>(null)
-export const $productName = atom<string>('Hermes')
+export const $productName = atom<string>(DEFAULT_PRODUCT_NAME)
 
 export const $progress = computed($bootstrap, b => {
   const total = b.stageOrder.length
@@ -182,9 +187,9 @@ export async function initialize(): Promise<void> {
 
   if (fake) {
     unlisten = () => {}
-    $logPath.set('~/.hermes/logs/bootstrap-installer.log')
-    $hermesHome.set('~/.hermes')
-    $productName.set('Hermes')
+    $logPath.set(`${DEFAULT_HOME}/logs/bootstrap-installer.log`)
+    $hermesHome.set(DEFAULT_HOME)
+    $productName.set(DEFAULT_PRODUCT_NAME)
     $mode.set(fake === 'update' ? 'update' : 'install')
 
     // Update auto-runs (it's a hand-off); install/failure wait for the welcome click.
@@ -206,7 +211,7 @@ export async function initialize(): Promise<void> {
 
     $logPath.set(logPath)
     $hermesHome.set(hermesHome)
-    $productName.set(productName || 'Hermes')
+    $productName.set(productName || DEFAULT_PRODUCT_NAME)
     $mode.set(mode)
   } catch (err) {
     console.warn('failed to fetch installer paths', err)
@@ -405,7 +410,7 @@ const FAKE_INSTALL_STAGES: FakeStage[] = [
   { name: 'system-packages', title: 'System packages' },
   { name: 'uv', title: 'uv' },
   { name: 'python', title: 'Python environment' },
-  { name: 'repo', title: 'Hermes repository' },
+  { name: 'repo', title: DEFAULT_PRODUCT_NAME === 'Lemon AI' ? 'Lemon AI source' : 'Hermes repository' },
   { name: 'dependencies', title: 'Python dependencies' },
   { name: 'node', title: 'Node runtime' },
   { name: 'desktop', title: 'Desktop app' }

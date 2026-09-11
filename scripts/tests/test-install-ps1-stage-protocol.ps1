@@ -99,6 +99,31 @@ if ($manifest) {
     Assert-True ($interactive -contains "gateway") -Label "'gateway' stage flagged needs_user_input"
 }
 
+
+# -----------------------------------------------------------------------------
+# Test: internal Lemon manifest uses Lemon stage labels
+# -----------------------------------------------------------------------------
+Write-Host ""
+Write-Host "-- -Manifest internal Lemon --"
+$oldInternal = $env:HERMES_DESKTOP_INTERNAL
+try {
+    $env:HERMES_DESKTOP_INTERNAL = "1"
+    $internalManifestJson = & powershell -NoProfile -ExecutionPolicy Bypass -File $installScript -Manifest
+    Assert-Equal -Expected 0 -Actual $LASTEXITCODE -Label "internal -Manifest exits 0"
+    $internalManifest = $internalManifestJson | ConvertFrom-Json
+    $internalTitles = $internalManifest.stages | ForEach-Object { $_.title }
+    Assert-True ($internalTitles -contains "Cloning Lemon AI source") -Label "internal manifest clones Lemon AI source"
+    Assert-True ($internalTitles -contains "Adding Lemon AI command") -Label "internal manifest adds Lemon AI command"
+    Assert-True (-not ($internalTitles -contains "Cloning Hermes repository")) -Label "internal manifest omits Hermes repository label"
+    Assert-True (-not ($internalTitles -contains "Adding Hermes to PATH")) -Label "internal manifest omits Hermes PATH label"
+} finally {
+    if ($null -eq $oldInternal) {
+        Remove-Item Env:HERMES_DESKTOP_INTERNAL -ErrorAction SilentlyContinue
+    } else {
+        $env:HERMES_DESKTOP_INTERNAL = $oldInternal
+    }
+}
+
 # -----------------------------------------------------------------------------
 # Test: unknown stage name -> exit 2, structured JSON error
 # -----------------------------------------------------------------------------

@@ -1,5 +1,11 @@
 import './styles.css'
 
+declare const __LEMON_INSTALLER__: boolean
+
+if (typeof __LEMON_INSTALLER__ !== 'undefined' && __LEMON_INSTALLER__) {
+  document.title = 'Lemon AI Setup'
+}
+
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
