@@ -165,6 +165,29 @@ test('buildPosixCleanupScript exports PYTHONPATH when pythonPath is set (lite/fu
   assert.match(script, /'\/usr\/bin\/python3' '-m' 'hermes_cli\.uninstall' '--mode' 'full'/)
 })
 
+test('buildPosixCleanupScript carries validated Lemon identity into detached cleanup', () => {
+  const script = buildPosixCleanupScript({
+    desktopPid: 1,
+    pythonExe: '/usr/bin/python3',
+    pythonPath: '/home/x/.lemon-ai/lemon-agent',
+    agentRoot: '/home/x/.lemon-ai/lemon-agent',
+    uninstallArgs: ['-m', 'hermes_cli.uninstall', '--mode', 'full'],
+    appPath: '/Applications/Lemon AI.app',
+    hermesHome: '/home/x/.lemon-ai',
+    runtimeEnv: {
+      HERMES_DESKTOP_INTERNAL: '1',
+      HERMES_UPDATE_PRODUCT_NAME: 'Lemon AI',
+      HERMES_HOME: '/should/not/override',
+      'BAD-NAME': 'ignored'
+    }
+  })
+
+  assert.match(script, /export HERMES_DESKTOP_INTERNAL='1'/)
+  assert.match(script, /export HERMES_UPDATE_PRODUCT_NAME='Lemon AI'/)
+  assert.doesNotMatch(script, /should\/not\/override/)
+  assert.doesNotMatch(script, /BAD-NAME/)
+})
+
 test('buildPosixCleanupScript omits PYTHONPATH when pythonPath is null (gui)', () => {
   const script = buildPosixCleanupScript({
     desktopPid: 1,
@@ -252,4 +275,27 @@ test('buildWindowsCleanupScript omits PYTHONPATH + rmdir when not needed (gui, n
 
   assert.doesNotMatch(script, /rmdir/)
   assert.doesNotMatch(script, /set "PYTHONPATH=/)
+})
+
+test('buildWindowsCleanupScript carries validated Lemon identity into detached cleanup', () => {
+  const script = buildWindowsCleanupScript({
+    desktopPid: 2,
+    pythonExe: 'C:\\Python313\\python.exe',
+    pythonPath: null,
+    agentRoot: 'C:\\Lemon AI\\lemon-agent',
+    uninstallArgs: ['-m', 'hermes_cli.uninstall', '--mode', 'gui'],
+    appPath: null,
+    hermesHome: 'C:\\Lemon AI',
+    runtimeEnv: {
+      HERMES_DESKTOP_INTERNAL: '1',
+      HERMES_UPDATE_PRODUCT_NAME: 'Lemon AI',
+      PYTHONPATH: 'ignored',
+      'BAD-NAME': 'ignored'
+    }
+  })
+
+  assert.match(script, /set "HERMES_DESKTOP_INTERNAL=1"/)
+  assert.match(script, /set "HERMES_UPDATE_PRODUCT_NAME=Lemon AI"/)
+  assert.doesNotMatch(script, /PYTHONPATH=ignored/)
+  assert.doesNotMatch(script, /BAD-NAME/)
 })

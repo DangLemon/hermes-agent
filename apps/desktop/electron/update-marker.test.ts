@@ -38,6 +38,10 @@ function writeMarker(home, pid, startedAtSec) {
   fs.writeFileSync(markerPath(home), `${pid}\n${startedAtSec}`)
 }
 
+function writeNamedMarker(home, name, pid, startedAtSec) {
+  fs.writeFileSync(markerPath(home, { markerName: name }), `${pid}\n${startedAtSec}`)
+}
+
 const ALIVE: typeof process.kill = () => true // injected kill that "succeeds" => pid alive
 
 const DEAD: typeof process.kill = () => {
@@ -113,6 +117,27 @@ test('writeUpdateMarker writes a marker that readLiveUpdateMarker accepts', () =
   assert.ok(res, 'marker written by writeUpdateMarker should be detected as live')
   assert.equal(res.pid, 4242)
   assert.ok(fs.existsSync(markerPath(home)), 'marker file should exist after write')
+})
+
+test('Lemon AI marker names are primary while Hermes markers remain readable fallback', () => {
+  const home = tmpHome('lemon')
+  const now = 1_000_000_000_000
+  const markerName = '.lemon-ai-update-in-progress'
+  const legacyMarkerNames = ['.hermes-update-in-progress']
+
+  writeNamedMarker(home, '.hermes-update-in-progress', 3030, Math.floor(now / 1000) - 7)
+
+  const legacy = readLiveUpdateMarker(home, { kill: ALIVE, now: () => now, markerName, legacyMarkerNames })
+  assert.ok(legacy)
+  assert.equal(legacy.pid, 3030)
+
+  writeUpdateMarker(home, 4040, { kill: ALIVE, now: () => now, markerName, legacyMarkerNames })
+
+  assert.equal(fs.existsSync(markerPath(home, { markerName })), true, 'new writes use the Lemon marker filename')
+  assert.equal(
+    Number.parseInt(fs.readFileSync(markerPath(home, { markerName }), 'utf8').split('\n')[0], 10),
+    4040
+  )
 })
 
 test('writeUpdateMarker preserves a live holder age across pid hand-off', () => {

@@ -161,6 +161,11 @@ import { loadOrCreateInstallationId, sshOwnershipId } from './desktop-installati
 import { formatDesktopLogLine } from './desktop-log-line'
 import { resolveDesktopRemoteRoute } from './desktop-remote-route'
 import {
+  resolveDefaultDesktopHome,
+  resolveDesktopRuntimeIdentity,
+  resolveDesktopRuntimeRoot
+} from './desktop-runtime-identity'
+import {
   buildPosixCleanupScript,
   buildWindowsCleanupScript,
   modeRemovesAgent,
@@ -759,37 +764,61 @@ if (INSTALL_STAMP) {
   )
 }
 
-// HERMES_HOME — the user-facing root for everything Hermes-related. Mirrors
-// scripts/install.ps1's $HermesHome and scripts/install.sh's $HERMES_HOME.
+const INTERNAL_DESKTOP_HARNESS = initializeInternalDesktopHarness({
+  resourcesPath: process.resourcesPath,
+  appRoot: APP_ROOT,
+  userDataPath: app.getPath('userData'),
+  isWsl: IS_WSL,
+  allowBuildResource: !IS_PACKAGED && Boolean(process.env['HERMES_DESKTOP_HARNESS_CONFIG'])
+})
+
+const DESKTOP_RUNTIME_IDENTITY = resolveDesktopRuntimeIdentity({
+  internalHarnessRequested: INTERNAL_DESKTOP_HARNESS.active
+})
+
+// HERMES_HOME — the user-facing root for desktop runtime data. The env var
+// name stays HERMES_HOME because the Python backend and CLI use it as a public
+// contract, but internal Lemon AI builds choose Lemon-branded defaults.
 //
 // Defaults:
-//   Windows: %LOCALAPPDATA%\hermes (matches install.ps1)
-//   macOS / Linux: ~/.hermes (matches install.sh)
+//   Ordinary Windows: %LOCALAPPDATA%\hermes (matches install.ps1)
+//   Ordinary macOS / Linux: ~/.hermes (matches install.sh)
+//   Internal Lemon Windows: %LOCALAPPDATA%\Lemon AI
+//   Internal Lemon macOS / Linux: ~/.lemon-ai
 //
-// Special case for Windows: if the user has a legacy ~/.hermes directory
-// (e.g., from a prior pip install or a manual setup) AND no
-// %LOCALAPPDATA%\hermes yet, prefer the legacy path so we don't orphan their
-// existing config / sessions / .env. New installs go to %LOCALAPPDATA%.
+// Legacy locations remain available only through explicit compatibility
+// inputs such as HERMES_HOME or HERMES_INSTALL_RUNTIME_DIR_NAME. Filesystem
+// contents never redirect an internal Lemon AI build into an ordinary Hermes
+// installation.
 //
 // HERMES_DESKTOP_USER_DATA_DIR (used by test:desktop:fresh) puts the sandbox
 // HERMES_HOME beneath the throwaway userData dir so a fresh-install run never
-// touches the user's real ~/.hermes / %LOCALAPPDATA%\hermes.
+// touches the user's real home.
+function pathExists(filePath) {
+  try {
+    fs.statSync(filePath)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function resolveHermesHome() {
   if (process.env.HERMES_HOME) {
     return normalizeHermesHomeRoot(process.env.HERMES_HOME)
   }
 
   if (USER_DATA_OVERRIDE) {
-    return path.join(path.resolve(USER_DATA_OVERRIDE), 'hermes-home')
+    return path.join(path.resolve(USER_DATA_OVERRIDE), DESKTOP_RUNTIME_IDENTITY.userDataHomeDirName)
   }
 
   if (IS_WINDOWS) {
     // A GUI app launched from Explorer inherits the environment block captured
     // at login, so a HERMES_HOME set via `setx` AFTER login is invisible in
     // process.env even though the CLI (a fresh shell) sees it. Without this the
-    // backend silently falls back to %LOCALAPPDATA%\hermes and reports "No
-    // inference provider configured" despite a valid configured home (#45471).
-    // Consult the live User-scoped registry value before the default below.
+    // backend silently falls back to its default home and reports "No inference
+    // provider configured" despite a valid configured home (#45471). Consult
+    // the live User-scoped registry value before the default below.
     const fromRegistry = readWindowsUserEnvVar('HERMES_HOME')
 
     if (fromRegistry) {
@@ -797,31 +826,19 @@ function resolveHermesHome() {
     }
   }
 
-  if (IS_WINDOWS && process.env.LOCALAPPDATA) {
-    const localappdata = path.join(process.env.LOCALAPPDATA, 'hermes')
-    const legacy = path.join(app.getPath('home'), '.hermes')
-
-    // Migrate transparently to LOCALAPPDATA, but honour an existing legacy
-    // ~/.hermes setup (no LOCALAPPDATA install yet) so users don't lose state.
-    if (!directoryExists(localappdata) && directoryExists(legacy)) {
-      return legacy
-    }
-
-    return localappdata
+  if (IS_WINDOWS && process['env'].LOCALAPPDATA) {
+    return resolveDefaultDesktopHome({
+      homeDir: app.getPath('home'),
+      identity: DESKTOP_RUNTIME_IDENTITY,
+      isWindows: true,
+      localAppData: process['env'].LOCALAPPDATA
+    })
   }
 
-  return path.join(app.getPath('home'), '.hermes')
+  return resolveDefaultDesktopHome({ homeDir: app.getPath('home'), identity: DESKTOP_RUNTIME_IDENTITY })
 }
 
 const HERMES_HOME = resolveHermesHome()
-
-const INTERNAL_DESKTOP_HARNESS = initializeInternalDesktopHarness({
-  resourcesPath: process.resourcesPath,
-  appRoot: APP_ROOT,
-  userDataPath: app.getPath('userData'),
-  isWsl: IS_WSL,
-  allowBuildResource: !IS_PACKAGED && Boolean(process.env.HERMES_DESKTOP_HARNESS_CONFIG)
-})
 
 if (INTERNAL_DESKTOP_HARNESS.active) {
   console.log('[hermes] internal Desktop harness active; forcing local managed runtime')
@@ -839,6 +856,31 @@ function internalDesktopHarnessSuppressesRemoteBackends() {
 
 function internalDesktopHarnessRequested() {
   return INTERNAL_DESKTOP_HARNESS.requested
+}
+
+const UPDATE_MARKER_OPTIONS = Object.freeze({
+  markerName: DESKTOP_RUNTIME_IDENTITY.updateMarkerName,
+  legacyMarkerNames: DESKTOP_RUNTIME_IDENTITY.legacyUpdateMarkerNames
+})
+
+const HANDOFF_RESULT_OPTIONS = Object.freeze({
+  resultName: DESKTOP_RUNTIME_IDENTITY.handoffResultName,
+  legacyResultNames: DESKTOP_RUNTIME_IDENTITY.legacyHandoffResultNames
+})
+
+function desktopRuntimeEnv() {
+  return {
+    HERMES_BOOTSTRAP_MARKER_NAME: DESKTOP_RUNTIME_IDENTITY.bootstrapMarkerName,
+    HERMES_DESKTOP_HARNESS_CONFIG:
+      INTERNAL_DESKTOP_HARNESS.resourcePath || process.env['HERMES_DESKTOP_HARNESS_CONFIG'] || undefined,
+    HERMES_DESKTOP_INTERNAL: INTERNAL_DESKTOP_HARNESS.active ? '1' : undefined,
+    HERMES_INSTALL_RUNTIME_DIR_NAME: path.basename(ACTIVE_HERMES_ROOT),
+    HERMES_UPDATE_HANDOFF_LOG_NAME: DESKTOP_RUNTIME_IDENTITY.updateHandoffLogName,
+    HERMES_UPDATE_MARKER_NAME: DESKTOP_RUNTIME_IDENTITY.updateMarkerName,
+    HERMES_UPDATE_PRODUCT_NAME: DESKTOP_RUNTIME_IDENTITY.appName,
+    HERMES_UPDATE_TEMP_PREFIX: DESKTOP_RUNTIME_IDENTITY.updateTempPrefix,
+    HERMES_UPDATE_RESULT_NAME: DESKTOP_RUNTIME_IDENTITY.handoffResultName
+  }
 }
 
 async function seedInternalDesktopInitialProvider(backend, profile) {
@@ -868,7 +910,15 @@ function pathWithHermesManagedNode(...entries) {
 // ACTIVE_HERMES_ROOT — the canonical mutable Hermes install. Same path
 // install.ps1 / install.sh use, so a desktop-only user and a CLI-only user end
 // up with identical layouts and can share one install.
-const ACTIVE_HERMES_ROOT = path.join(HERMES_HOME, 'hermes-agent')
+function resolveActiveHermesRoot(hermesHome) {
+  return resolveDesktopRuntimeRoot(
+    hermesHome,
+    DESKTOP_RUNTIME_IDENTITY,
+    process['env'].HERMES_INSTALL_RUNTIME_DIR_NAME || ''
+  )
+}
+
+const ACTIVE_HERMES_ROOT = resolveActiveHermesRoot(HERMES_HOME)
 // VENV_ROOT — venv lives inside the repo, exactly like install.ps1 does it.
 const VENV_ROOT = path.join(ACTIVE_HERMES_ROOT, 'venv')
 // BOOTSTRAP_COMPLETE_MARKER — written by the first-launch bootstrap runner
@@ -882,7 +932,7 @@ const VENV_ROOT = path.join(ACTIVE_HERMES_ROOT, 'venv')
 // We deliberately put the marker INSIDE ACTIVE_HERMES_ROOT (not alongside)
 // so that deleting the checkout to start fresh also deletes the marker --
 // avoids the confusing "marker exists but checkout is gone" state.
-const BOOTSTRAP_COMPLETE_MARKER = path.join(ACTIVE_HERMES_ROOT, '.hermes-bootstrap-complete')
+const BOOTSTRAP_COMPLETE_MARKER = path.join(ACTIVE_HERMES_ROOT, DESKTOP_RUNTIME_IDENTITY.bootstrapMarkerName)
 const BOOTSTRAP_MARKER_SCHEMA_VERSION = 1
 
 const DESKTOP_CONNECTION_CONFIG_PATH = path.join(app.getPath('userData'), 'connection.json')
@@ -913,7 +963,7 @@ const DEFAULT_UPDATE_BRANCH = 'main'
 // desktop.log lives under HERMES_HOME/logs/ so it sits next to agent.log,
 // errors.log, gateway.log produced by hermes_logging.setup_logging — one log
 // directory per user, regardless of which UI surface produced the line.
-const DESKTOP_LOG_PATH = path.join(HERMES_HOME, 'logs', 'desktop.log')
+const DESKTOP_LOG_PATH = path.join(HERMES_HOME, 'logs', DESKTOP_RUNTIME_IDENTITY.desktopLogName)
 const DESKTOP_LOG_FLUSH_MS = 120
 const DESKTOP_LOG_BUFFER_MAX_CHARS = 64 * 1024
 // Bound desktop.log on disk. It is an append-only forensic log, so a boot loop
@@ -952,7 +1002,7 @@ const BOOT_FAKE_STEP_MS = (() => {
   return Math.max(120, raw)
 })()
 
-const APP_NAME = process.env.HERMES_DESKTOP_APP_NAME || (INTERNAL_DESKTOP_HARNESS.requested ? 'Lemon AI' : 'Hermes')
+const APP_NAME = process.env['HERMES_DESKTOP_APP_NAME'] || DESKTOP_RUNTIME_IDENTITY.appName
 
 const APP_COPYRIGHT = INTERNAL_DESKTOP_HARNESS.requested
   ? 'Copyright © 2026 Lemon Digital'
@@ -1371,7 +1421,7 @@ app.setName(APP_NAME)
 // need this, so gate it on Windows. (Fixes: desktop approval/turn notifications
 // never firing on Windows.)
 if (IS_WINDOWS) {
-  app.setAppUserModelId('com.nousresearch.hermes')
+  app.setAppUserModelId(DESKTOP_RUNTIME_IDENTITY.appId)
 }
 
 // Seed the native About panel with the live Hermes version. This is refreshed
@@ -2302,7 +2352,7 @@ const UPDATE_HANDOFF_DWELL_MS = 2500
 // reports as a blocker, aborting every update attempt.
 function updateGateDeps() {
   return {
-    hasLiveMarker: () => Boolean(readLiveUpdateMarker(HERMES_HOME)),
+    hasLiveMarker: () => Boolean(readLiveUpdateMarker(HERMES_HOME, UPDATE_MARKER_OPTIONS)),
     isUpdateInFlight: () => updateInFlight
   }
 }
@@ -2375,7 +2425,7 @@ async function waitForUpdateToFinish() {
 
       await advanceBootProgress(
         'backend.update-wait',
-        'An update is finishing — Hermes will start automatically when it completes…',
+        `An update is finishing — ${DESKTOP_RUNTIME_IDENTITY.appName} will start automatically when it completes…`,
         12
       )
     },
@@ -2390,7 +2440,7 @@ async function waitForUpdateToFinish() {
   // (previously a failed detached update was indistinguishable from
   // "nothing happened").
   try {
-    const result = readAndConsumeHandoffResult(HERMES_HOME)
+    const result = readAndConsumeHandoffResult(HERMES_HOME, HANDOFF_RESULT_OPTIONS)
 
     if (result && result.ok && result.manual) {
       // Update landed but the user must act (reopen/reinstall/sandbox). On
@@ -2399,7 +2449,7 @@ async function waitForUpdateToFinish() {
       rememberLog(`[updates] detached update finished with manual action (branch ${result.branch}): ${result.message}`)
       dialog.showMessageBox({
         type: 'warning',
-        title: 'Hermes update',
+        title: `${DESKTOP_RUNTIME_IDENTITY.appName} update`,
         message: 'The update finished, but needs one more step',
         detail: result.message
       })
@@ -2408,8 +2458,8 @@ async function waitForUpdateToFinish() {
     } else if (result) {
       rememberLog(`[updates] detached update FAILED (exit ${result.exitCode}): ${result.message}`)
       dialog.showErrorBox(
-        'Hermes update did not finish',
-        `${result.message}\n\nDetails: ${path.join(HERMES_HOME, 'logs', 'desktop-update-handoff.log')}`
+        `${DESKTOP_RUNTIME_IDENTITY.appName} update did not finish`,
+        `${result.message}\n\nDetails: ${path.join(HERMES_HOME, 'logs', DESKTOP_RUNTIME_IDENTITY.updateHandoffLogName)}`
       )
     }
   } catch (err) {
@@ -2423,7 +2473,7 @@ async function waitForUpdateToFinish() {
   if (outcome === 'timeout') {
     rememberLog('[updates] update still in progress after wait timeout; starting backend anyway')
   } else if (relaunchIntoSwappedBundle()) {
-    await advanceBootProgress('backend.update-restart', 'Restarting Hermes to load the updated app…', 14)
+    await advanceBootProgress('backend.update-restart', `Restarting ${DESKTOP_RUNTIME_IDENTITY.appName} to load the updated app…`, 14)
     // Park while the scheduled exit lands so this stale build never starts a
     // backend; the failsafe below only runs if the exit somehow does not.
     await new Promise(resolve => setTimeout(resolve, BUNDLE_SWAP_RELAUNCH_FAILSAFE_MS))
@@ -2809,7 +2859,12 @@ function findGitBash() {
     isWindows: IS_WINDOWS,
     env: process.env,
     fileExists,
-    findOnPath
+    findOnPath,
+    hermesHome: HERMES_HOME,
+    localAppDataProductDirs: [
+      DESKTOP_RUNTIME_IDENTITY.windowsLocalAppDataDirName,
+      ...DESKTOP_RUNTIME_IDENTITY.legacyWindowsLocalAppDataDirNames
+    ]
   })
 }
 
@@ -3369,7 +3424,7 @@ let quitConfirmedWithActiveWork = false
 // see resolveStagedUpdaterBinary for the policy and for #74836. Returns null
 // whenever no hand-off applies; callers degrade gracefully.
 function resolveUpdaterBinary() {
-  return resolveStagedUpdaterBinary(HERMES_HOME, { fileExists, isWindows: IS_WINDOWS })
+  return resolveStagedUpdaterBinary(HERMES_HOME, { fileExists, isWindows: IS_WINDOWS, stagedUpdaterNames: DESKTOP_RUNTIME_IDENTITY.stagedUpdaterNames })
 }
 
 function repairMacUpdaterHelper(updater) {
@@ -3994,7 +4049,7 @@ async function applyUpdates(opts: { stopSafeBlockers?: boolean } = {}) {
       rememberLog('[updates] no staged updater; using repo hand-off script for CLI install')
     }
 
-    const handoffConflict = updateHandoffConflict(HERMES_HOME)
+    const handoffConflict = updateHandoffConflict(HERMES_HOME, UPDATE_MARKER_OPTIONS)
 
     if (handoffConflict) {
       // A different updater already owns the marker — most often a previous
@@ -4010,7 +4065,7 @@ async function applyUpdates(opts: { stopSafeBlockers?: boolean } = {}) {
     emitUpdateProgress({
       stage: 'restart',
       message:
-        'Updating Hermes — this window will close and the updater will open. Don’t reopen Hermes yourself; it restarts automatically when the update finishes.',
+        `Updating ${DESKTOP_RUNTIME_IDENTITY.appName} — this window will close and the updater will open. Don’t reopen ${DESKTOP_RUNTIME_IDENTITY.appName} yourself; it restarts automatically when the update finishes.`,
       percent: 100
     })
     repairMacUpdaterHelper(updater)
@@ -4045,8 +4100,8 @@ async function applyUpdates(opts: { stopSafeBlockers?: boolean } = {}) {
       // user close the holder and retry. Restart our own backend so the app
       // keeps working after the failed attempt.
       const message =
-        'Update aborted: another process is holding the Hermes install open ' +
-        '(a second Hermes window or a terminal running hermes?). Close it and retry.'
+        `Update aborted: another process is holding the ${DESKTOP_RUNTIME_IDENTITY.appName} install open ` +
+        `(a second ${DESKTOP_RUNTIME_IDENTITY.appName} window or a terminal running hermes?). Close it and retry.`
 
       emitUpdateProgress({ stage: 'error', message, percent: null })
       startHermes().catch(() => {})
@@ -4165,6 +4220,7 @@ async function applyUpdates(opts: { stopSafeBlockers?: boolean } = {}) {
         cwd: HERMES_HOME,
         env: {
           ...process.env,
+          ...desktopRuntimeEnv(),
           HERMES_HOME,
           HERMES_UPDATE_STARTED_AT: String(updateStartedAt),
           PATH: pathWithHermesManagedNode(venvBin)
@@ -4181,7 +4237,7 @@ async function applyUpdates(opts: { stopSafeBlockers?: boolean } = {}) {
       // The `hermes update` child adopts the SCRIPT's claim via
       // update_lock.py's process-ancestry rule; no mtime heuristics needed.
       if (Number.isInteger(child.pid)) {
-        writeUpdateMarker(HERMES_HOME, child.pid, { startedAt: updateStartedAt })
+        writeUpdateMarker(HERMES_HOME, child.pid, { ...UPDATE_MARKER_OPTIONS, startedAt: updateStartedAt })
       }
 
       rememberLog(
@@ -4192,6 +4248,7 @@ async function applyUpdates(opts: { stopSafeBlockers?: boolean } = {}) {
         cwd: HERMES_HOME,
         env: {
           ...process.env,
+          ...desktopRuntimeEnv(),
           HERMES_HOME,
           PATH: pathWithHermesManagedNode(venvBin)
         },
@@ -4215,7 +4272,7 @@ async function applyUpdates(opts: { stopSafeBlockers?: boolean } = {}) {
       // strictly better than never updating again, and the updater still writes
       // its own marker moments later.
       if (Number.isInteger(child.pid) && stagedUpdaterSupportsPrewrittenMarker(updater)) {
-        writeUpdateMarker(HERMES_HOME, child.pid)
+        writeUpdateMarker(HERMES_HOME, child.pid, UPDATE_MARKER_OPTIONS)
       } else if (Number.isInteger(child.pid)) {
         rememberLog(
           `[updates] skipping marker pre-write: staged updater predates self-adopt (${updater}); it would refuse its own claim`
@@ -4243,7 +4300,7 @@ async function applyUpdates(opts: { stopSafeBlockers?: boolean } = {}) {
     const handoffOutcome = await observeUpdaterHandoff(child, UPDATE_HANDOFF_DWELL_MS)
 
     if (!handoffOutcome.ok) {
-      const message = `Update failed to start: ${handoffOutcome.message}. Hermes will keep running — try again, or run \`hermes update\` from a terminal.`
+      const message = `Update failed to start: ${handoffOutcome.message}. ${DESKTOP_RUNTIME_IDENTITY.appName} will keep running — try again, or run \`hermes update\` from a terminal.`
 
       rememberLog(`[updates] hand-off not viable, aborting quit: ${handoffOutcome.message}`)
       emitUpdateProgress({ stage: 'error', message, percent: null })
@@ -4282,7 +4339,7 @@ async function handOffWindowsBootstrapRecovery(reason) {
     return false
   }
 
-  const handoffConflict = updateHandoffConflict(HERMES_HOME)
+  const handoffConflict = updateHandoffConflict(HERMES_HOME, UPDATE_MARKER_OPTIONS)
 
   if (handoffConflict) {
     // Same hazard as applyUpdates (#75778): a live foreign updater already
@@ -4319,7 +4376,8 @@ async function handOffWindowsBootstrapRecovery(reason) {
   // gentle update path. Partial or missing runtimes go through full repair.
   const updaterArgs = chooseUpdaterArgs(
     {
-      hasBootstrapMarker: fileExists(path.join(updateRoot, '.hermes-bootstrap-complete')),
+      hasBootstrapMarker: fileExists(path.join(updateRoot, DESKTOP_RUNTIME_IDENTITY.bootstrapMarkerName)) ||
+        DESKTOP_RUNTIME_IDENTITY.legacyBootstrapMarkerNames.some(name => fileExists(path.join(updateRoot, name))),
       hasVenvHermes: fileExists(venvHermes),
       hasVenvPython: fileExists(venvPython)
     },
@@ -4332,6 +4390,7 @@ async function handOffWindowsBootstrapRecovery(reason) {
     cwd: HERMES_HOME,
     env: {
       ...process.env,
+      ...desktopRuntimeEnv(),
       HERMES_HOME,
       PATH: pathWithHermesManagedNode(venvBin)
     },
@@ -4345,7 +4404,7 @@ async function handOffWindowsBootstrapRecovery(reason) {
   // exclusion: a pre-#74782 binary would refuse its own pre-written claim and
   // strand the very recovery meant to heal the install.
   if (Number.isInteger(child.pid) && stagedUpdaterSupportsPrewrittenMarker(updater)) {
-    writeUpdateMarker(HERMES_HOME, child.pid)
+    writeUpdateMarker(HERMES_HOME, child.pid, UPDATE_MARKER_OPTIONS)
   } else if (Number.isInteger(child.pid)) {
     rememberLog(
       `[bootstrap] skipping marker pre-write: staged updater predates self-adopt (${updater}); it would refuse its own claim`
@@ -4499,7 +4558,7 @@ async function applyUpdatesPosixHandoff(opts: any) {
     return { ok: true, manual: true, command: 'hermes update', hermesRoot: updateRoot }
   }
 
-  const handoffConflict = updateHandoffConflict(HERMES_HOME)
+  const handoffConflict = updateHandoffConflict(HERMES_HOME, UPDATE_MARKER_OPTIONS)
 
   if (handoffConflict) {
     // Same hazard as the Windows path (#75778): a live foreign updater
@@ -4561,6 +4620,7 @@ async function applyUpdatesPosixHandoff(opts: any) {
     cwd: HERMES_HOME,
     env: {
       ...process.env,
+      ...desktopRuntimeEnv(),
       HERMES_HOME,
       HERMES_UPDATE_STARTED_AT: String(updateStartedAt),
       PATH: pathWithHermesManagedNode(path.join(updateRoot, 'venv', 'bin'))
@@ -4573,14 +4633,14 @@ async function applyUpdatesPosixHandoff(opts: any) {
   // until the script claims the marker with its own pid as step 0. If the
   // script never starts, the dead pid reads as stale and self-deletes.
   if (Number.isInteger(child.pid)) {
-    writeUpdateMarker(HERMES_HOME, child.pid, { startedAt: updateStartedAt })
+    writeUpdateMarker(HERMES_HOME, child.pid, { ...UPDATE_MARKER_OPTIONS, startedAt: updateStartedAt })
   }
 
   rememberLog(`[updates] launched posix hand-off: ${handoff.scriptPath} (branch ${branch}); quitting to hand off`)
   emitUpdateProgress({
     stage: 'restart',
     message:
-      'Updating Hermes — this window will close. Don’t reopen Hermes yourself; it restarts automatically when the update finishes.',
+      `Updating ${DESKTOP_RUNTIME_IDENTITY.appName} — this window will close. Don’t reopen ${DESKTOP_RUNTIME_IDENTITY.appName} yourself; it restarts automatically when the update finishes.`,
     percent: 100
   })
 
@@ -4593,7 +4653,7 @@ async function applyUpdatesPosixHandoff(opts: any) {
   const handoffOutcome = await observeUpdaterHandoff(child, UPDATE_HANDOFF_DWELL_MS)
 
   if (!handoffOutcome.ok) {
-    const message = `Update failed to start: ${handoffOutcome.message}. Hermes will keep running — try again, or run \`hermes update\` from a terminal.`
+    const message = `Update failed to start: ${handoffOutcome.message}. ${DESKTOP_RUNTIME_IDENTITY.appName} will keep running — try again, or run \`hermes update\` from a terminal.`
 
     rememberLog(`[updates] posix hand-off not viable, aborting quit: ${handoffOutcome.message}`)
     emitUpdateProgress({ stage: 'error', message, percent: null })
@@ -4634,8 +4694,25 @@ function readJson(filePath) {
 //     completedAt:  "<ISO 8601>",
 //     desktopVersion: "<app.getVersion()>"  // for forensics
 //   }
+function bootstrapMarkerCandidatePaths() {
+  return Array.from(
+    new Set([
+      BOOTSTRAP_COMPLETE_MARKER,
+      ...DESKTOP_RUNTIME_IDENTITY.legacyBootstrapMarkerNames.map(name => path.join(ACTIVE_HERMES_ROOT, name))
+    ])
+  )
+}
+
 function readBootstrapMarker() {
-  return readJson(BOOTSTRAP_COMPLETE_MARKER)
+  for (const markerPath of bootstrapMarkerCandidatePaths()) {
+    const marker = readJson(markerPath)
+
+    if (marker) {
+      return marker
+    }
+  }
+
+  return null
 }
 
 // Marker-independent: is the canonical install at ACTIVE_HERMES_ROOT actually
@@ -5148,11 +5225,11 @@ async function ensureRuntime(backend) {
   // will rewire startup to spawn the window first and route bootstrap events
   // to a renderer-side install overlay.
   if (backend.kind === 'bootstrap-needed') {
-    rememberLog('[bootstrap] no Hermes install found; starting first-launch bootstrap')
+    rememberLog(`[bootstrap] no ${DESKTOP_RUNTIME_IDENTITY.appName} install found; starting first-launch bootstrap`)
 
     if (await handOffWindowsBootstrapRecovery('bootstrap-needed')) {
       const handoffError: Error & { isBootstrapFailure?: boolean; bootstrapHandedOff?: boolean } = new Error(
-        'Hermes recovery was handed off to Hermes Setup. The desktop will restart when recovery completes.'
+        `${DESKTOP_RUNTIME_IDENTITY.appName} recovery was handed off to ${DESKTOP_RUNTIME_IDENTITY.appName} Setup. The desktop will restart when recovery completes.`
       )
 
       handoffError.isBootstrapFailure = true
@@ -5208,13 +5285,17 @@ async function ensureRuntime(backend) {
           void 0
         }
       },
-      writeMarker: writeBootstrapMarker
+      writeMarker: writeBootstrapMarker,
+      desktopHarnessConfigPath: INTERNAL_DESKTOP_HARNESS.resourcePath,
+      bootstrapMarkerName: DESKTOP_RUNTIME_IDENTITY.bootstrapMarkerName,
+      legacyBootstrapMarkerNames: DESKTOP_RUNTIME_IDENTITY.legacyBootstrapMarkerNames,
+      runtimeRootDirNames: [path.basename(ACTIVE_HERMES_ROOT)]
     })
 
     bootstrapAbortController = null
 
     if (bootstrapResult.cancelled) {
-      const cancelledError = new Error('Hermes install was cancelled.') as any
+      const cancelledError = new Error(`${DESKTOP_RUNTIME_IDENTITY.appName} install was cancelled.`) as any
       cancelledError.isBootstrapFailure = true
       cancelledError.bootstrapCancelled = true
       bootstrapFailure = cancelledError
@@ -5223,9 +5304,9 @@ async function ensureRuntime(backend) {
 
     if (!bootstrapResult.ok) {
       const bootstrapError = new Error(
-        `Hermes bootstrap failed${bootstrapResult.failedStage ? ` at stage '${bootstrapResult.failedStage}'` : ''}: ` +
+        `${DESKTOP_RUNTIME_IDENTITY.appName} bootstrap failed${bootstrapResult.failedStage ? ` at stage '${bootstrapResult.failedStage}'` : ''}: ` +
           `${bootstrapResult.error || 'unknown error'}. ` +
-          `Check ${path.join(HERMES_HOME, 'logs', 'desktop.log')} for the full transcript.`
+          `Check ${DESKTOP_LOG_PATH} for the full transcript.`
       ) as any
 
       bootstrapError.isBootstrapFailure = true
@@ -5252,7 +5333,7 @@ async function ensureRuntime(backend) {
   // attests they ran successfully).
   if (!isHermesSourceRoot(ACTIVE_HERMES_ROOT)) {
     throw new Error(
-      `Hermes install at ${ACTIVE_HERMES_ROOT} is missing or incomplete. ` +
+      `${DESKTOP_RUNTIME_IDENTITY.appName} install at ${ACTIVE_HERMES_ROOT} is missing or incomplete. ` +
         'Reinstall via the desktop installer or scripts/install.ps1.'
     )
   }
@@ -10665,6 +10746,7 @@ async function bootstrapSshConnectionInner(profile, sshConfig, reuseToken, sourc
       waitForHermes: (baseUrl, token) => waitForHermes(baseUrl, token, lease.signal, 'token'),
       probeReuseProof: sshProbeReuseProof,
       adoptServedToken: adoptServedDashboardToken,
+      hostAppName: DESKTOP_RUNTIME_IDENTITY.appName,
       rememberLog: sshRememberLog,
       signal: lease.signal
     })
@@ -12584,6 +12666,7 @@ async function spawnPoolBackend(profile, entry, opts: { forceLocal?: boolean; po
       cwd: hermesCwd,
       env: buildHermesBackendSpawnEnv({
         processEnv: process.env,
+        runtimeEnv: desktopRuntimeEnv(),
         hermesHome: HERMES_HOME,
         backendEnv: backend.env,
         terminalCwd: hermesCwd,
@@ -12811,7 +12894,7 @@ async function startHermes() {
   // otherwise SIGTERMs the running instance's live backend (#87295).
   if (!isPrimaryInstance) {
     rememberLog('[boot] non-primary instance: skipping backend machinery')
-    throw new Error('Hermes Desktop is already running in another window.')
+    throw new Error(`${DESKTOP_RUNTIME_IDENTITY.appName} Desktop is already running in another window.`)
   }
 
   await reapOrphanedBackendsOnce()
@@ -12997,6 +13080,7 @@ async function startHermes() {
         cwd: hermesCwd,
         env: buildHermesBackendSpawnEnv({
           processEnv: process.env,
+          runtimeEnv: desktopRuntimeEnv(),
           hermesHome: HERMES_HOME,
           backendEnv: backend.env,
           terminalCwd: hermesCwd,
@@ -13375,7 +13459,7 @@ function spawnSecondaryWindow({
     height: SESSION_WINDOW_MIN_HEIGHT,
     minWidth: SESSION_WINDOW_MIN_WIDTH,
     minHeight: SESSION_WINDOW_MIN_HEIGHT,
-    title: 'Hermes',
+    title: APP_NAME,
     titleBarStyle: 'hidden',
     titleBarOverlay: getTitleBarOverlayOptions(),
     trafficLightPosition: IS_MAC ? WINDOW_BUTTON_POSITION : undefined,
@@ -13469,7 +13553,7 @@ function spawnBrowserWindow(tabId) {
     height: BROWSER_WINDOW_HEIGHT,
     minWidth: BROWSER_WINDOW_MIN_WIDTH,
     minHeight: BROWSER_WINDOW_MIN_HEIGHT,
-    title: 'Hermes',
+    title: APP_NAME,
     titleBarStyle: 'hidden',
     titleBarOverlay: getTitleBarOverlayOptions(),
     trafficLightPosition: IS_MAC ? WINDOW_BUTTON_POSITION : undefined,
@@ -13561,7 +13645,7 @@ function createInstanceWindow() {
     ...nextInstanceBounds(),
     minWidth: WINDOW_MIN_WIDTH,
     minHeight: WINDOW_MIN_HEIGHT,
-    title: 'Hermes',
+    title: APP_NAME,
     titleBarStyle: 'hidden',
     titleBarOverlay: getTitleBarOverlayOptions(),
     trafficLightPosition: IS_MAC ? WINDOW_BUTTON_POSITION : undefined,
@@ -14511,7 +14595,7 @@ function createWindow() {
     ...computeWindowOptions(savedWindowState, screen.getAllDisplays()),
     minWidth: WINDOW_MIN_WIDTH,
     minHeight: WINDOW_MIN_HEIGHT,
-    title: 'Hermes',
+    title: APP_NAME,
     // Frameless title bar on every platform so the renderer can paint the
     // "hide sidebar" button (and other left-side titlebar tools) flush with
     // the top edge — matching the macOS layout where the traffic lights sit
@@ -15000,7 +15084,7 @@ ipcMain.handle('hermes:window:openInTerminal', async (_event, sessionId, opts) =
         args: backend.args,
         command: backend.command,
         cwd,
-        env: terminalScriptEnv(backend.env, HERMES_HOME)
+        env: terminalScriptEnv(backend.env, HERMES_HOME, desktopRuntimeEnv())
       }),
       { mode: 0o700 }
     )
@@ -16685,7 +16769,7 @@ ipcMain.handle('hermes:notify', (_event, payload) => {
   const icon = typeof payload?.icon === 'string' && payload.icon.trim() ? payload.icon.trim() : undefined
 
   const notification = new Notification({
-    title: payload?.title || 'Hermes',
+    title: payload?.title || APP_NAME,
     body: payload?.body || '',
     silent: Boolean(payload?.silent),
     ...(icon ? { icon } : {}),
@@ -17472,6 +17556,7 @@ registerMcpOauthCallbackIpc()
 // Embedded terminal PTY host (hermes:terminal:*) — see terminal-ipc.ts.
 const terminalIpc = registerTerminalIpc({
   isWindows: IS_WINDOWS,
+  hostAppName: DESKTOP_RUNTIME_IDENTITY.appName,
   findOnPath,
   rememberLog,
   activeSshTerminalTarget,
@@ -17653,7 +17738,7 @@ async function getUninstallSummary() {
         ['-m', 'hermes_cli.main', 'uninstall', '--gui-summary'],
         hiddenWindowsChildOptions({
           cwd: agentRoot,
-          env: { ...process.env, HERMES_HOME, NO_COLOR: '1' },
+          env: { ...process.env, ...desktopRuntimeEnv(), HERMES_HOME, NO_COLOR: '1' },
           stdio: ['ignore', 'pipe', 'ignore']
         })
       )
@@ -17753,7 +17838,8 @@ async function runDesktopUninstall(mode) {
     agentRoot: ACTIVE_HERMES_ROOT,
     uninstallArgs,
     appPath: removeBundle,
-    hermesHome: HERMES_HOME
+    hermesHome: HERMES_HOME,
+    runtimeEnv: desktopRuntimeEnv()
   }
 
   let scriptPath

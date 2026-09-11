@@ -292,6 +292,13 @@ test('Windows integrated terminal uses encoded PowerShell and preserves cwd as l
   assert.match(script, /powershell\.exe -NoLogo/)
 })
 
+test('Windows integrated terminal uses the Lemon host label when requested', () => {
+  const command = buildWindowsInteractiveCommand('', 'Lemon AI')
+  const script = Buffer.from(command.split(' ').pop()!, 'base64').toString('utf16le')
+  assert.match(script, /WindowTitle='Lemon AI SSH'/)
+  assert.doesNotMatch(script, /Hermes SSH/)
+})
+
 test('managed update drain preserves a Windows owner when creation time does not match', async () => {
   const lock = {
     schemaVersion: 2,

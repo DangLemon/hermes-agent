@@ -7,13 +7,7 @@ import { BrandMark } from '../components/brand-mark'
 import { Button } from '../components/button'
 import { Loader } from '../components/loader'
 import { formatDuration, formatElapsed } from '../lib/format'
-import {
-  $mode,
-  $progress,
-  type BootstrapStateModel,
-  cancelInstall,
-  type StageState
-} from '../store'
+import { $mode, $productName, $progress, type BootstrapStateModel, cancelInstall, type StageState } from '../store'
 
 interface ProgressProps {
   bootstrap: BootstrapStateModel
@@ -27,6 +21,7 @@ interface ProgressProps {
 export default function ProgressScreen({ bootstrap }: ProgressProps) {
   const progress = useStore($progress)
   const mode = useStore($mode)
+  const productName = useStore($productName)
   const [showLogs, setShowLogs] = useState(false)
   const [now, setNow] = useState(() => Date.now())
   const logEndRef = useRef<HTMLDivElement>(null)
@@ -51,11 +46,12 @@ export default function ProgressScreen({ bootstrap }: ProgressProps) {
   }, [bootstrap.status])
 
   const isUpdate = mode === 'update'
-  const title = bootstrap.status === 'completed' ? 'Done' : isUpdate ? 'Updating Hermes' : 'Setting up Hermes Agent'
+  const title =
+    bootstrap.status === 'completed' ? 'Done' : isUpdate ? `Updating ${productName}` : `Setting up ${productName}`
 
   const description = isUpdate
-    ? 'Hermes is updating to the latest version — this only takes a moment.'
-    : 'This is a one-time setup. The Hermes installer is downloading dependencies and configuring your machine. Subsequent launches will skip this step.'
+    ? `${productName} is updating to the latest version — this only takes a moment.`
+    : `This is a one-time setup. The ${productName} installer is downloading dependencies and configuring your machine. Subsequent launches will skip this step.`
 
   const pct = Math.round(progress.fraction * 100)
 
@@ -94,10 +90,12 @@ export default function ProgressScreen({ bootstrap }: ProgressProps) {
               muted. Running loader overhangs left so labels stay aligned; the
               terminal check/cross sits right of the label. */}
           <ol className="space-y-0.5">
-            {bootstrap.stageOrder.map((name) => {
+            {bootstrap.stageOrder.map(name => {
               const rec = bootstrap.stages[name]
 
-              if (!rec) {return null}
+              if (!rec) {
+                return null
+              }
 
               const meta =
                 rec.state === 'running' && rec.startedAt != null
@@ -110,9 +108,7 @@ export default function ProgressScreen({ bootstrap }: ProgressProps) {
                 <li
                   className={clsx(
                     'flex items-center gap-2.5 px-3 py-1.5 text-sm',
-                    rec.state === 'running'
-                      ? 'font-medium text-foreground'
-                      : 'text-muted-foreground'
+                    rec.state === 'running' ? 'font-medium text-foreground' : 'text-muted-foreground'
                   )}
                   key={name}
                 >
@@ -153,7 +149,7 @@ export default function ProgressScreen({ bootstrap }: ProgressProps) {
       <div className="flex shrink-0 items-center justify-between border-t border-(--stroke-nous) px-6 py-3">
         <button
           className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-          onClick={() => setShowLogs((v) => !v)}
+          onClick={() => setShowLogs(v => !v)}
           type="button"
         >
           <FileText size={14} />
@@ -189,4 +185,3 @@ function StateIcon({ state }: { state: StageState | null }) {
 
   return null
 }
-

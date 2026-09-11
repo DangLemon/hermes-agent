@@ -29,8 +29,24 @@ import path from 'path'
 // recycled the pid onto an unrelated process), so the gate self-heals.
 export const UPDATE_MARKER_MAX_AGE_MS = 20 * 60 * 1000
 
-export function markerPath(hermesHome) {
-  return path.join(hermesHome, '.hermes-update-in-progress')
+export const HERMES_UPDATE_MARKER_NAME = '.hermes-update-in-progress'
+
+function uniqueNames(names: Array<string | null | undefined>) {
+  return Array.from(new Set(names.filter((name): name is string => typeof name === 'string' && name.length > 0)))
+}
+
+export function markerPath(hermesHome, { markerName = HERMES_UPDATE_MARKER_NAME }: { markerName?: string } = {}) {
+  return path.join(hermesHome, markerName)
+}
+
+function markerCandidatePaths(
+  hermesHome,
+  {
+    markerName = HERMES_UPDATE_MARKER_NAME,
+    legacyMarkerNames = []
+  }: { markerName?: string; legacyMarkerNames?: string[] } = {}
+) {
+  return uniqueNames([markerName, ...legacyMarkerNames]).map(name => markerPath(hermesHome, { markerName: name }))
 }
 
 // True only if a host process with this pid is currently alive. Signal 0 does
@@ -68,39 +84,46 @@ export function readLiveUpdateMarker(
   {
     kill,
     now = Date.now,
-    maxAgeMs = UPDATE_MARKER_MAX_AGE_MS
+    maxAgeMs = UPDATE_MARKER_MAX_AGE_MS,
+    markerName = HERMES_UPDATE_MARKER_NAME,
+    legacyMarkerNames = []
   }: {
     now?: () => number
     maxAgeMs?: number
     kill?: typeof process.kill
+    markerName?: string
+    legacyMarkerNames?: string[]
   } = {}
 ) {
-  const file = markerPath(hermesHome)
-  let raw
+  for (const file of markerCandidatePaths(hermesHome, { markerName, legacyMarkerNames })) {
+    let raw
 
-  try {
-    raw = fs.readFileSync(file, 'utf8')
-  } catch {
-    return null // absent or unreadable => no live update
-  }
-
-  const [pidLine, startedLine] = String(raw).split('\n')
-  const pid = Number.parseInt((pidLine || '').trim(), 10)
-  const startedAt = Number.parseInt((startedLine || '').trim(), 10)
-  const ageMs = Number.isFinite(startedAt) ? now() - startedAt * 1000 : Infinity
-  const alive = Number.isInteger(pid) && isPidAlive(pid, kill)
-
-  if (!alive || ageMs > maxAgeMs) {
     try {
-      fs.unlinkSync(file)
+      raw = fs.readFileSync(file, 'utf8')
     } catch {
-      void 0
+      continue // absent or unreadable => try the next compatibility rung
     }
 
-    return null
+    const [pidLine, startedLine] = String(raw).split('\n')
+    const pid = Number.parseInt((pidLine || '').trim(), 10)
+    const startedAt = Number.parseInt((startedLine || '').trim(), 10)
+    const ageMs = Number.isFinite(startedAt) ? now() - startedAt * 1000 : Infinity
+    const alive = Number.isInteger(pid) && isPidAlive(pid, kill)
+
+    if (!alive || ageMs > maxAgeMs) {
+      try {
+        fs.unlinkSync(file)
+      } catch {
+        void 0
+      }
+
+      continue
+    }
+
+    return { pid, ageMs }
   }
 
-  return { pid, ageMs }
+  return null
 }
 
 /**
@@ -133,17 +156,21 @@ export function writeUpdateMarker(
     kill,
     now = Date.now,
     maxAgeMs = UPDATE_MARKER_MAX_AGE_MS,
-    startedAt
+    startedAt,
+    markerName = HERMES_UPDATE_MARKER_NAME,
+    legacyMarkerNames = []
   }: {
     now?: () => number
     maxAgeMs?: number
     kill?: typeof process.kill
     startedAt?: number
+    markerName?: string
+    legacyMarkerNames?: string[]
   } = {}
 ) {
-  const file = markerPath(hermesHome)
+  const file = markerPath(hermesHome, { markerName })
   const nowMs = now()
-  const owner = readLiveUpdateMarker(hermesHome, { kill, maxAgeMs, now: () => nowMs })
+  const owner = readLiveUpdateMarker(hermesHome, { kill, maxAgeMs, now: () => nowMs, markerName, legacyMarkerNames })
 
   const acquiredAt =
     typeof startedAt === 'number' && Number.isInteger(startedAt)
@@ -185,6 +212,8 @@ export function updateHandoffConflict(
     now?: () => number
     maxAgeMs?: number
     kill?: typeof process.kill
+    markerName?: string
+    legacyMarkerNames?: string[]
   } = {}
 ) {
   const owner = readLiveUpdateMarker(hermesHome, opts)

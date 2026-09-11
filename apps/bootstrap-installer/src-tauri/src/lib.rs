@@ -11,8 +11,8 @@
 mod bootstrap;
 mod events;
 mod install_script;
-mod powershell;
 mod paths;
+mod powershell;
 mod update;
 
 use std::sync::Arc;
@@ -103,7 +103,12 @@ pub fn run() {
     // Hermes is already installed, so users can re-run setup to repair a broken
     // install instead of the launcher fast path silently relaunching the app.
     let force_setup = force_setup_from_args(std::env::args().skip(1));
-    tracing::info!(?mode, force_setup, "Hermes installer starting");
+    tracing::info!(
+        ?mode,
+        force_setup,
+        product = paths::product_name(),
+        "installer starting"
+    );
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -130,7 +135,7 @@ pub fn run() {
             // `--reinstall`/`--repair` opts out so a broken install can be
             // repaired by re-running setup instead of launching the bad app.
             if cfg!(target_os = "macos") && mode == AppMode::Install && !force_setup {
-                let install_root = paths::hermes_home().join("hermes-agent");
+                let install_root = paths::install_root();
                 if bootstrap::hermes_is_installed(&install_root) {
                     match bootstrap::spawn_installed_desktop(&install_root) {
                         Ok(()) => {
@@ -155,12 +160,19 @@ pub fn run() {
             // First run / repair install, or Update mode: reveal the UI.
             match app.get_webview_window("main") {
                 Some(win) => {
+                    if paths::internal_desktop_build() {
+                        if let Err(err) = win.set_title("Lemon AI Setup") {
+                            tracing::warn!(?err, "failed to set internal installer window title");
+                        }
+                    }
                     if let Err(err) = win.show() {
                         tracing::error!(?err, "failed to show main installer window");
                     }
                 }
                 None => {
-                    tracing::error!("main installer window not found; installer UI will not appear");
+                    tracing::error!(
+                        "main installer window not found; installer UI will not appear"
+                    );
                 }
             }
             Ok(())
@@ -179,10 +191,11 @@ pub fn run() {
             // Diagnostics
             paths::get_log_path,
             paths::get_hermes_home,
+            paths::get_product_name,
             paths::open_log_dir,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Hermes Setup");
+        .unwrap_or_else(|err| panic!("error while running {} Setup: {err}", paths::product_name()));
 }
 
 #[cfg(test)]

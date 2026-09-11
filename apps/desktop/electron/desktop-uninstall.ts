@@ -138,7 +138,16 @@ function shouldRemoveAppBundle(isPackaged, appPath) {
  * resolves from the agent source. `q()` single-quote-escapes for the shell
  * (closes-escapes-reopens any embedded apostrophe), defending against spaces.
  */
-function buildPosixCleanupScript({ desktopPid, pythonExe, pythonPath, agentRoot, uninstallArgs, appPath, hermesHome }) {
+function buildPosixCleanupScript({
+  desktopPid,
+  pythonExe,
+  pythonPath,
+  agentRoot,
+  uninstallArgs,
+  appPath,
+  hermesHome,
+  runtimeEnv = {}
+}) {
   const q = s => `'${String(s).replace(/'/g, `'\\''`)}'`
 
   const lines = [
@@ -155,6 +164,10 @@ function buildPosixCleanupScript({ desktopPid, pythonExe, pythonPath, agentRoot,
     'fi',
     `export HERMES_HOME=${q(hermesHome)}`
   ]
+
+  for (const [key, value] of safeRuntimeEnvEntries(runtimeEnv)) {
+    lines.push(`export ${key}=${q(value)}`)
+  }
 
   if (pythonPath) {
     lines.push(`export PYTHONPATH=${q(pythonPath)}\${PYTHONPATH:+:$PYTHONPATH}`)
@@ -198,7 +211,8 @@ function buildWindowsCleanupScript({
   agentRoot,
   uninstallArgs,
   appPath,
-  hermesHome
+  hermesHome,
+  runtimeEnv = {}
 }) {
   const pid = Number(desktopPid) || 0
   // cmd.exe has no string escaping inside quotes; strip embedded quotes (paths
@@ -212,6 +226,10 @@ function buildWindowsCleanupScript({
     `set "HERMES_HOME=${String(hermesHome).replace(/"/g, '')}"`,
     `set "PID=${pid}"`
   ]
+
+  for (const [key, value] of safeRuntimeEnvEntries(runtimeEnv)) {
+    lines.push(`set "${key}=${String(value).replace(/["\r\n]/g, '')}"`)
+  }
 
   if (pythonPath) {
     lines.push(`set "PYTHONPATH=${String(pythonPath).replace(/"/g, '')};%PYTHONPATH%"`)
@@ -256,12 +274,42 @@ function buildWindowsCleanupScript({
   return lines.join('\r\n')
 }
 
+function safeRuntimeEnvEntries(runtimeEnv) {
+  const allowedKeys = new Set([
+    'HERMES_BOOTSTRAP_MARKER_NAME',
+    'HERMES_DESKTOP_HARNESS_CONFIG',
+    'HERMES_DESKTOP_INTERNAL',
+    'HERMES_INSTALL_RUNTIME_DIR_NAME',
+    'HERMES_STAGED_UPDATER_NAME',
+    'HERMES_UPDATE_HANDOFF_LOG_NAME',
+    'HERMES_UPDATE_MARKER_NAME',
+    'HERMES_UPDATE_PRODUCT_NAME',
+    'HERMES_UPDATE_RESULT_NAME',
+    'HERMES_UPDATE_TEMP_PREFIX'
+  ])
+
+  if (!runtimeEnv || typeof runtimeEnv !== 'object') {
+    return []
+  }
+
+  return Object.entries(runtimeEnv).filter(
+    ([key, value]) =>
+      allowedKeys.has(key) &&
+      /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) &&
+      key !== 'HERMES_HOME' &&
+      key !== 'PYTHONPATH' &&
+      value !== undefined &&
+      value !== null
+  )
+}
+
 export {
   buildPosixCleanupScript,
   buildWindowsCleanupScript,
   modeRemovesAgent,
   modeRemovesUserData,
   resolveRemovableAppPath,
+  safeRuntimeEnvEntries,
   shouldRemoveAppBundle,
   UNINSTALL_MODES,
   uninstallArgsForMode

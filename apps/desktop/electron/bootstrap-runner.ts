@@ -44,7 +44,9 @@ const IS_WINDOWS = process.platform === 'win32'
 
 const HARNESS_RESOURCE_FILENAME = 'internal-desktop-harness.json'
 const DEFAULT_SOURCE_REPOSITORY = 'NousResearch/hermes-agent'
-const SOURCE_REPOSITORY_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/
+const INTERNAL_SOURCE_REPOSITORY = 'DangLemon/hermes-agent'
+const SOURCE_REPOSITORY_RE =
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/
 const STAMP_COMMIT_RE = /^[0-9a-f]{7,40}$/i
 const FALLBACK_COMMIT_RE = /^0{7,40}$/
 const FALLBACK_BRANCH = 'main'
@@ -98,11 +100,15 @@ function readHarnessSourceRepository(candidate) {
 
     const parsed = JSON.parse(fs.readFileSync(candidate, 'utf8'))
 
-    if (parsed && parsed.profile === 'internal' && 'sourceRepository' in parsed) {
-      return validateSourceRepository(parsed.sourceRepository)
+    if (parsed && parsed.profile === 'internal') {
+      return 'sourceRepository' in parsed
+        ? validateSourceRepository(parsed.sourceRepository)
+        : INTERNAL_SOURCE_REPOSITORY
     }
   } catch (error) {
-    throw new Error(`invalid ${HARNESS_RESOURCE_FILENAME} sourceRepository at ${candidate}: ${(error as Error).message}`)
+    throw new Error(
+      `invalid ${HARNESS_RESOURCE_FILENAME} sourceRepository at ${candidate}: ${(error as Error).message}`
+    )
   }
 
   return null
@@ -112,14 +118,21 @@ function resolveBootstrapSourceRepository({
   resourcesPath = (process as any).resourcesPath,
   env,
   environ = env || process['env']
-}: { resourcesPath?: string | null; env?: Record<string, string | undefined>; environ?: Record<string, string | undefined> } = {}) {
-  const packaged = readHarnessSourceRepository(resourcesPath ? path.join(resourcesPath, HARNESS_RESOURCE_FILENAME) : null)
+}: {
+  resourcesPath?: string | null
+  env?: Record<string, string | undefined>
+  environ?: Record<string, string | undefined>
+} = {}) {
+  const packaged = readHarnessSourceRepository(
+    resourcesPath ? path.join(resourcesPath, HARNESS_RESOURCE_FILENAME) : null
+  )
 
   if (packaged) {
     return packaged
   }
 
-  const selected = typeof environ.HERMES_DESKTOP_HARNESS_CONFIG === 'string' ? environ.HERMES_DESKTOP_HARNESS_CONFIG.trim() : ''
+  const selected =
+    typeof environ.HERMES_DESKTOP_HARNESS_CONFIG === 'string' ? environ.HERMES_DESKTOP_HARNESS_CONFIG.trim() : ''
 
   return (selected ? readHarnessSourceRepository(path.resolve(selected)) : null) || DEFAULT_SOURCE_REPOSITORY
 }
@@ -158,19 +171,28 @@ function resolveCheckoutHead(activeRoot: string | null | undefined, opts: { exec
 }
 
 /** Prefer a real pin already written by install.ps1's bootstrap-marker stage. */
-function readExistingPinnedCommit(activeRoot: string | null | undefined): string | null {
+function readExistingPinnedCommit(
+  activeRoot: string | null | undefined,
+  { markerNames = ['.hermes-bootstrap-complete'] }: { markerNames?: string[] } = {}
+): string | null {
   if (!activeRoot) {
     return null
   }
 
-  try {
-    const raw = fs.readFileSync(path.join(activeRoot, '.hermes-bootstrap-complete'), 'utf8')
-    const parsed = JSON.parse(raw)
+  for (const markerName of Array.from(new Set(markerNames))) {
+    try {
+      const raw = fs.readFileSync(path.join(activeRoot, markerName), 'utf8')
+      const parsed = JSON.parse(raw)
 
-    return parsed && isPinnedCommit(parsed.pinnedCommit) ? parsed.pinnedCommit : null
-  } catch {
-    return null
+      if (parsed && isPinnedCommit(parsed.pinnedCommit)) {
+        return parsed.pinnedCommit
+      }
+    } catch {
+      void 0
+    }
   }
+
+  return null
 }
 
 /**
@@ -181,7 +203,7 @@ function readExistingPinnedCommit(activeRoot: string | null | undefined): string
 function resolveMarkerPinnedCommit(
   installStamp: { commit?: string; branch?: string | null } | null | undefined,
   activeRoot: string | null | undefined,
-  opts: { resolveHead?: ResolveHeadFn } = {}
+  opts: { markerNames?: string[]; resolveHead?: ResolveHeadFn } = {}
 ): string | null {
   const resolveHead = opts.resolveHead || resolveCheckoutHead
 
@@ -195,7 +217,7 @@ function resolveMarkerPinnedCommit(
     return head
   }
 
-  return readExistingPinnedCommit(activeRoot)
+  return readExistingPinnedCommit(activeRoot, { markerNames: opts.markerNames })
 }
 
 /**
@@ -269,20 +291,25 @@ function bootstrapCacheDir(hermesHome) {
 // checkout under ~/.hermes/hermes-agent. Used as a last-resort fallback when
 // the pinned commit can't be fetched from GitHub (e.g. a locally-built desktop
 // app stamped to an unpushed HEAD).
-function installedAgentInstallScript(hermesHome) {
-  if (!hermesHome) {
-    return null
+function installedAgentInstallScript(hermesHome, { activeRoot = null, runtimeRootDirNames = ['hermes-agent'] } = {}) {
+  const roots = [
+    activeRoot,
+    ...(hermesHome ? runtimeRootDirNames.map(name => path.join(hermesHome, name)) : [])
+  ].filter(Boolean)
+
+  for (const root of Array.from(new Set(roots))) {
+    const candidate = path.join(root, 'scripts', installScriptName())
+
+    try {
+      fs.accessSync(candidate, fs.constants.R_OK)
+
+      return candidate
+    } catch {
+      void 0
+    }
   }
 
-  const candidate = path.join(hermesHome, 'hermes-agent', 'scripts', installScriptName())
-
-  try {
-    fs.accessSync(candidate, fs.constants.R_OK)
-
-    return candidate
-  } catch {
-    return null
-  }
+  return null
 }
 
 function hasExistingGitCheckout(activeRoot) {
@@ -395,6 +422,8 @@ async function resolveInstallScript({
   installStamp,
   sourceRepoRoot,
   hermesHome,
+  activeRoot = null,
+  runtimeRootDirNames = ['hermes-agent'],
   sourceRepository = resolveBootstrapSourceRepository(),
   emit,
   _download = downloadInstallScript
@@ -458,7 +487,7 @@ async function resolveInstallScript({
     // write-build-stamp.mjs fromLocalGit). Fall back to the installer that
     // ships inside the already-installed agent checkout so dev/self-builds can
     // still bootstrap instead of dying with a fatal 404.
-    const installed = installedAgentInstallScript(hermesHome)
+    const installed = installedAgentInstallScript(hermesHome, { activeRoot, runtimeRootDirNames })
 
     if (installed) {
       emit({
@@ -537,7 +566,20 @@ function resolveWindowsPowerShell() {
   return 'powershell.exe'
 }
 
-function spawnPowerShell(scriptPath, args, { emit, stageName, abortSignal, hermesHome }: any = {}) {
+function installerRuntimeEnv({ hermesHome, desktopHarnessConfigPath, bootstrapMarkerName }: any = {}) {
+  return {
+    HERMES_BOOTSTRAP_MARKER_NAME: bootstrapMarkerName || process.env['HERMES_BOOTSTRAP_MARKER_NAME'] || undefined,
+    HERMES_DESKTOP_HARNESS_CONFIG:
+      desktopHarnessConfigPath || process.env['HERMES_DESKTOP_HARNESS_CONFIG'] || undefined,
+    HERMES_HOME: hermesHome || process.env.HERMES_HOME || ''
+  }
+}
+
+function spawnPowerShell(
+  scriptPath,
+  args,
+  { emit, stageName, abortSignal, hermesHome, desktopHarnessConfigPath, bootstrapMarkerName }: any = {}
+) {
   return new Promise<any>((resolve, reject) => {
     const ps = process.platform === 'win32' ? resolveWindowsPowerShell() : 'pwsh'
     const fullArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, ...args]
@@ -550,8 +592,9 @@ function spawnPowerShell(scriptPath, args, { emit, stageName, abortSignal, herme
         env: {
           ...process.env,
           // Pass HERMES_HOME through so install.ps1 respects the caller's
-          // choice rather than re-computing the default.
-          HERMES_HOME: hermesHome || process.env.HERMES_HOME || ''
+          // choice rather than re-computing the default. Internal builds also
+          // pass the harness resource so installer-driven rebuilds keep Lemon identity.
+          ...installerRuntimeEnv({ hermesHome, desktopHarnessConfigPath, bootstrapMarkerName })
         }
       })
     )
@@ -641,13 +684,17 @@ function spawnPowerShell(scriptPath, args, { emit, stageName, abortSignal, herme
   })
 }
 
-function spawnBash(scriptPath, args, { emit, stageName, abortSignal, hermesHome }: any = {}) {
+function spawnBash(
+  scriptPath,
+  args,
+  { emit, stageName, abortSignal, hermesHome, desktopHarnessConfigPath, bootstrapMarkerName }: any = {}
+) {
   return new Promise<any>((resolve, reject) => {
     const child = spawn('bash', [scriptPath, ...args], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
-        HERMES_HOME: hermesHome || process.env.HERMES_HOME || ''
+        ...installerRuntimeEnv({ hermesHome, desktopHarnessConfigPath, bootstrapMarkerName })
       }
     })
 
@@ -795,18 +842,29 @@ async function fetchManifest({
   activeRoot,
   installStamp,
   pinCommit,
-  sourceRepository
+  sourceRepository,
+  desktopHarnessConfigPath,
+  bootstrapMarkerName
 }) {
   const isPosix = installerKind === 'posix'
 
   const args = isPosix
     ? ['--manifest', ...buildPosixPinArgs({ installStamp, activeRoot, hermesHome, pinCommit, sourceRepository })]
-    : ['-Manifest', ...buildPinArgs(installStamp, { pinCommit, sourceRepository })]
+    : [
+        '-Manifest',
+        '-InstallDir',
+        activeRoot,
+        '-HermesHome',
+        hermesHome,
+        ...buildPinArgs(installStamp, { pinCommit, sourceRepository })
+      ]
 
   const result = await (isPosix ? spawnBash : spawnPowerShell)(scriptPath, args, {
     emit,
     stageName: '__manifest__',
-    hermesHome
+    hermesHome,
+    desktopHarnessConfigPath,
+    bootstrapMarkerName
   })
 
   if (result.code !== 0) {
@@ -868,7 +926,9 @@ async function runStage({
   abortSignal,
   installStamp,
   pinCommit,
-  sourceRepository
+  sourceRepository,
+  desktopHarnessConfigPath,
+  bootstrapMarkerName
 }) {
   const startedAt = Date.now()
   emit({ type: 'stage', name: stage.name, state: 'running' })
@@ -883,13 +943,25 @@ async function runStage({
         '--json',
         ...buildPosixPinArgs({ installStamp, activeRoot, hermesHome, pinCommit, sourceRepository })
       ]
-    : ['-Stage', stage.name, '-NonInteractive', '-Json', ...buildPinArgs(installStamp, { pinCommit, sourceRepository })]
+    : [
+        '-Stage',
+        stage.name,
+        '-NonInteractive',
+        '-Json',
+        '-InstallDir',
+        activeRoot,
+        '-HermesHome',
+        hermesHome,
+        ...buildPinArgs(installStamp, { pinCommit, sourceRepository })
+      ]
 
   const result = await (isPosix ? spawnBash : spawnPowerShell)(scriptPath, args, {
     emit,
     stageName: stage.name,
     abortSignal,
-    hermesHome
+    hermesHome,
+    desktopHarnessConfigPath,
+    bootstrapMarkerName
   })
 
   const durationMs = Date.now() - startedAt
@@ -973,7 +1045,11 @@ async function runBootstrap(opts) {
     logRoot,
     onEvent,
     abortSignal,
-    writeMarker // callback to write the bootstrap-complete marker; main.ts provides
+    writeMarker, // callback to write the bootstrap-complete marker; main.ts provides
+    desktopHarnessConfigPath,
+    bootstrapMarkerName,
+    legacyBootstrapMarkerNames = [],
+    runtimeRootDirNames = ['hermes-agent']
   } = opts
 
   const installSourceRepository = validateSourceRepository(sourceRepository)
@@ -1042,6 +1118,8 @@ async function runBootstrap(opts) {
       installStamp,
       sourceRepoRoot,
       hermesHome,
+      activeRoot,
+      runtimeRootDirNames,
       sourceRepository: installSourceRepository,
       emit
     })
@@ -1057,7 +1135,9 @@ async function runBootstrap(opts) {
       activeRoot,
       installStamp,
       pinCommit,
-      sourceRepository: installSourceRepository
+      sourceRepository: installSourceRepository,
+      desktopHarnessConfigPath,
+      bootstrapMarkerName
     })
 
     emit({
@@ -1087,7 +1167,9 @@ async function runBootstrap(opts) {
         abortSignal,
         installStamp,
         pinCommit,
-        sourceRepository: installSourceRepository
+        sourceRepository: installSourceRepository,
+        desktopHarnessConfigPath,
+        bootstrapMarkerName
       })
 
       if (ev.state === 'failed') {
@@ -1101,7 +1183,9 @@ async function runBootstrap(opts) {
     // not real pins -- resolve HEAD from the checkout we just installed so
     // isBootstrapComplete() (pinnedCommit.length >= 7) accepts the marker
     // instead of re-running bootstrap on every launch (#50823 review).
-    const pinnedCommit = resolveMarkerPinnedCommit(installStamp, activeRoot)
+    const pinnedCommit = resolveMarkerPinnedCommit(installStamp, activeRoot, {
+      markerNames: [bootstrapMarkerName, ...legacyBootstrapMarkerNames].filter(Boolean)
+    })
 
     if (!pinnedCommit) {
       emit({

@@ -33,6 +33,9 @@ fn main() {
 
     let commit = resolve_commit_pin();
     let branch = resolve_branch_pin();
+    let installer_brand =
+        normalized_installer_brand(std::env::var("HERMES_INSTALLER_BRAND").ok().as_deref());
+    println!("cargo:rustc-env=HERMES_INSTALLER_BRAND={installer_brand}");
 
     if let Some(c) = &commit {
         println!("cargo:rustc-env=BUILD_PIN_COMMIT={c}");
@@ -81,6 +84,7 @@ fn main() {
     }
     println!("cargo:rerun-if-env-changed=HERMES_BUILD_PIN_COMMIT");
     println!("cargo:rerun-if-env-changed=HERMES_BUILD_PIN_BRANCH");
+    println!("cargo:rerun-if-env-changed=HERMES_INSTALLER_BRAND");
 
     // -----------------------------------------------------------------
     // Tauri windows manifest. See hermes-setup.manifest for rationale —
@@ -89,7 +93,7 @@ fn main() {
     // -----------------------------------------------------------------
     #[cfg(target_os = "windows")]
     let attrs = {
-        let manifest = include_str!("hermes-setup.manifest");
+        let manifest = windows_manifest_for_brand(Some(installer_brand));
         let win = tauri_build::WindowsAttributes::new().app_manifest(manifest);
         tauri_build::Attributes::new().windows_attributes(win)
     };
@@ -98,6 +102,23 @@ fn main() {
     let attrs = tauri_build::Attributes::new();
 
     tauri_build::try_build(attrs).expect("failed to run tauri-build");
+}
+
+fn normalized_installer_brand(brand: Option<&str>) -> &'static str {
+    if matches!(brand, Some(value) if value.trim().eq_ignore_ascii_case("lemon")) {
+        "lemon"
+    } else {
+        "hermes"
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_manifest_for_brand(brand: Option<&str>) -> &'static str {
+    if normalized_installer_brand(brand) == "lemon" {
+        include_str!("lemon-ai-setup.manifest")
+    } else {
+        include_str!("hermes-setup.manifest")
+    }
 }
 
 fn resolve_commit_pin() -> Option<String> {

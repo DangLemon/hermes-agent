@@ -144,6 +144,30 @@ test('resolveStagedUpdaterBinary hands Windows the staged installer it finds', (
   assert.deepEqual(probed, [staged])
 })
 
+test('resolveStagedUpdaterBinary prefers Lemon AI setup and falls back to Hermes setup on Windows', () => {
+  const home = 'C:\\Users\\hermes\\AppData\\Local\\Lemon AI'
+  const lemon = path.join(home, 'lemon-ai-setup.exe')
+  const hermes = path.join(home, 'hermes-setup.exe')
+
+  assert.equal(
+    resolveStagedUpdaterBinary(home, {
+      fileExists: candidate => candidate === lemon,
+      isWindows: true,
+      stagedUpdaterNames: ['lemon-ai-setup.exe', 'hermes-setup.exe']
+    }),
+    lemon
+  )
+
+  assert.equal(
+    resolveStagedUpdaterBinary(home, {
+      fileExists: candidate => candidate === hermes,
+      isWindows: true,
+      stagedUpdaterNames: ['lemon-ai-setup.exe', 'hermes-setup.exe']
+    }),
+    hermes
+  )
+})
+
 test('resolveStagedUpdaterBinary returns null off Windows even when hermes-setup is staged (#74836)', () => {
   const home = '/Users/hermes/.hermes'
   let probes = 0

@@ -15,6 +15,10 @@ function write(home: string, body: any) {
   fs.writeFileSync(handoffResultPath(home), typeof body === 'string' ? body : JSON.stringify(body))
 }
 
+function writeNamed(home: string, name: string, body: any) {
+  fs.writeFileSync(handoffResultPath(home, { resultName: name }), typeof body === 'string' ? body : JSON.stringify(body))
+}
+
 test('consumes and returns a fresh failure result', () => {
   const home = tempHome()
   write(home, {
@@ -40,6 +44,38 @@ test('reports each result at most once', () => {
 
   assert.ok(readAndConsumeHandoffResult(home))
   assert.equal(readAndConsumeHandoffResult(home), null)
+})
+
+test('Lemon AI result filename is primary while legacy Hermes result is consumed as fallback', () => {
+  const home = tempHome()
+  const resultName = '.lemon-ai-update-result.json'
+  const legacyResultNames = ['.hermes-update-result.json']
+
+  writeNamed(home, '.hermes-update-result.json', {
+    ok: false,
+    exit_code: 9,
+    message: 'legacy handoff failed',
+    branch: 'main',
+    finished_at: Math.floor(Date.now() / 1000)
+  })
+
+  const legacy = readAndConsumeHandoffResult(home, { resultName, legacyResultNames })
+  assert.ok(legacy)
+  assert.equal(legacy.exitCode, 9)
+  assert.equal(fs.existsSync(handoffResultPath(home)), false, 'legacy result was consumed')
+
+  writeNamed(home, resultName, {
+    ok: true,
+    exit_code: 0,
+    message: 'done',
+    branch: 'main',
+    finished_at: Math.floor(Date.now() / 1000)
+  })
+
+  const primary = readAndConsumeHandoffResult(home, { resultName, legacyResultNames })
+  assert.ok(primary)
+  assert.equal(primary.ok, true)
+  assert.equal(fs.existsSync(handoffResultPath(home, { resultName })), false, 'primary Lemon result was consumed')
 })
 
 test('discards stale results but still consumes the file', () => {

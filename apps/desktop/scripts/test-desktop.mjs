@@ -7,6 +7,7 @@ import { listPackage } from '@electron/asar'
 
 import PACKAGE_JSON from '../package.json' with { type: 'json' }
 import { newestValidMacAppPath } from './mac-app-bundle.mjs'
+import { loadHarnessConfigInput } from './internal-desktop-harness.mjs'
 
 const MODE = process.argv[2] || 'help'
 const ARCH = process.arch === 'arm64' ? 'arm64' : 'x64'
@@ -14,46 +15,113 @@ const DESKTOP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 const RELEASE_ROOT = path.join(DESKTOP_ROOT, 'release')
 const PLATFORM = process.platform
 
+const INTERNAL_DESKTOP_BUILD = (() => {
+  if (String(process.env.HERMES_DESKTOP_INTERNAL || '').trim() === '1') return true
+  try {
+    return Boolean(loadHarnessConfigInput(process.env))
+  } catch {
+    return false
+  }
+})()
+const PRIMARY_IDENTITY = INTERNAL_DESKTOP_BUILD
+  ? {
+      productName: 'Lemon AI',
+      executableName: 'Lemon AI',
+      posixHomeDirName: '.lemon-ai',
+      windowsHomeDirName: 'Lemon AI',
+      runtimeRootDirName: 'lemon-agent',
+      artifactPrefix: `Lemon-AI-${PACKAGE_JSON.version}`
+    }
+  : {
+      productName: 'Hermes',
+      executableName: 'Hermes',
+      posixHomeDirName: '.hermes',
+      windowsHomeDirName: 'hermes',
+      runtimeRootDirName: 'hermes-agent',
+      artifactPrefix: `Hermes-${PACKAGE_JSON.version}`
+    }
+const LEGACY_IDENTITY = {
+  productName: 'Hermes',
+  executableName: 'Hermes',
+  posixHomeDirName: '.hermes',
+  windowsHomeDirName: 'hermes',
+  runtimeRootDirName: 'hermes-agent',
+  artifactPrefix: `Hermes-${PACKAGE_JSON.version}`
+}
+const APP_IDENTITIES = INTERNAL_DESKTOP_BUILD ? [PRIMARY_IDENTITY, LEGACY_IDENTITY] : [PRIMARY_IDENTITY]
+
 // Platform-specific packaged-app layout. The thin installer ships an Electron
 // app shell plus extraResources (install-stamp.json + native-deps/) -- it
 // no longer bundles the Hermes Agent Python payload (that's fetched at first
 // launch via install.ps1 / install.sh, per the Phase 1 thin-installer flow).
 const APP = (() => {
   if (PLATFORM === 'darwin') {
-    const appCandidates = [
+    const appCandidates = APP_IDENTITIES.flatMap(identity => [
       {
-        appPath: path.join(RELEASE_ROOT, `mac-${ARCH}`, 'Lemon AI.app'),
-        requiredFile: path.join(RELEASE_ROOT, `mac-${ARCH}`, 'Lemon AI.app', 'Contents', 'MacOS', 'Hermes')
+        appPath: path.join(RELEASE_ROOT, `mac-${ARCH}`, `${identity.productName}.app`),
+        requiredFile: path.join(
+          RELEASE_ROOT,
+          `mac-${ARCH}`,
+          `${identity.productName}.app`,
+          'Contents',
+          'MacOS',
+          identity.executableName
+        )
       },
       {
-        appPath: path.join(RELEASE_ROOT, `mac-${ARCH}`, 'Hermes.app'),
-        requiredFile: path.join(RELEASE_ROOT, `mac-${ARCH}`, 'Hermes.app', 'Contents', 'MacOS', 'Hermes')
+        appPath: path.join(RELEASE_ROOT, 'mac', `${identity.productName}.app`),
+        requiredFile: path.join(
+          RELEASE_ROOT,
+          'mac',
+          `${identity.productName}.app`,
+          'Contents',
+          'MacOS',
+          identity.executableName
+        )
       }
-    ]
+    ])
     const appPath = newestValidMacAppPath(appCandidates, appCandidates[0].appPath)
+    const identity =
+      APP_IDENTITIES.find(candidate => appPath.endsWith(`${candidate.productName}.app`)) || PRIMARY_IDENTITY
     return {
       appPath,
-      binary: path.join(appPath, 'Contents', 'MacOS', 'Hermes'),
+      binary: path.join(appPath, 'Contents', 'MacOS', identity.executableName),
       resourcesPath: path.join(appPath, 'Contents', 'Resources'),
       asarPath: path.join(appPath, 'Contents', 'Resources', 'app.asar'),
       unpackedDistIndex: path.join(appPath, 'Contents', 'Resources', 'app.asar.unpacked', 'dist', 'index.html')
     }
   }
   if (PLATFORM === 'win32') {
+    const unpackedCandidates = ['win-unpacked', 'win-arm64-unpacked']
+    for (const identity of APP_IDENTITIES) {
+      for (const dirName of unpackedCandidates) {
+        const unpacked = path.join(RELEASE_ROOT, dirName)
+        const binary = path.join(unpacked, `${identity.executableName}.exe`)
+        if (exists(binary)) {
+          return {
+            appPath: unpacked,
+            binary,
+            resourcesPath: path.join(unpacked, 'resources'),
+            asarPath: path.join(unpacked, 'resources', 'app.asar'),
+            unpackedDistIndex: path.join(unpacked, 'resources', 'app.asar.unpacked', 'dist', 'index.html')
+          }
+        }
+      }
+    }
     const unpacked = path.join(RELEASE_ROOT, 'win-unpacked')
     return {
       appPath: unpacked,
-      binary: path.join(unpacked, 'Hermes.exe'),
+      binary: path.join(unpacked, `${PRIMARY_IDENTITY.executableName}.exe`),
       resourcesPath: path.join(unpacked, 'resources'),
       asarPath: path.join(unpacked, 'resources', 'app.asar'),
       unpackedDistIndex: path.join(unpacked, 'resources', 'app.asar.unpacked', 'dist', 'index.html')
     }
   }
-  // linux unpacked layout matches windows but with different binary name
+  // linux unpacked layout matches windows but with different binary name.
   const unpacked = path.join(RELEASE_ROOT, 'linux-unpacked')
   return {
     appPath: unpacked,
-    binary: path.join(unpacked, 'Hermes'),
+    binary: path.join(unpacked, PRIMARY_IDENTITY.executableName),
     resourcesPath: path.join(unpacked, 'resources'),
     asarPath: path.join(unpacked, 'resources', 'app.asar'),
     unpackedDistIndex: path.join(unpacked, 'resources', 'app.asar.unpacked', 'dist', 'index.html')
@@ -66,12 +134,15 @@ const APP = (() => {
 // HERMES_HOME and never touches this.
 const DEFAULT_HERMES_HOME = (() => {
   if (PLATFORM === 'win32' && process.env.LOCALAPPDATA) {
-    return path.join(process.env.LOCALAPPDATA, 'hermes')
+    return path.join(process.env.LOCALAPPDATA, PRIMARY_IDENTITY.windowsHomeDirName)
   }
-  return path.join(os.homedir(), '.hermes')
+  return path.join(os.homedir(), PRIMARY_IDENTITY.posixHomeDirName)
 })()
-const VENV_ROOT = path.join(DEFAULT_HERMES_HOME, 'hermes-agent', 'venv')
-const FRESH_SANDBOX_ROOT = path.join(os.tmpdir(), 'hermes-desktop-fresh-install')
+const VENV_ROOT = path.join(DEFAULT_HERMES_HOME, PRIMARY_IDENTITY.runtimeRootDirName, 'venv')
+const FRESH_SANDBOX_ROOT = path.join(
+  os.tmpdir(),
+  INTERNAL_DESKTOP_BUILD ? 'lemon-ai-desktop-fresh-install' : 'hermes-desktop-fresh-install'
+)
 
 function die(message) {
   console.error(`\n${message}`)
@@ -120,9 +191,7 @@ function ensurePlatformBuilds() {
   if (PLATFORM === 'darwin') return
   if (PLATFORM === 'win32') return
   if (PLATFORM === 'linux') return
-  die(
-    `Desktop bundle validation is only wired for darwin / win32 / linux; platform=${PLATFORM} is not supported.`
-  )
+  die(`Desktop bundle validation is only wired for darwin / win32 / linux; platform=${PLATFORM} is not supported.`)
 }
 
 function ensurePackagedApp() {
@@ -135,14 +204,14 @@ function ensurePackagedApp() {
 
 function resolveDmgPath() {
   if (!exists(RELEASE_ROOT)) {
-    return path.join(RELEASE_ROOT, `Hermes-${PACKAGE_JSON.version}-${ARCH}.dmg`)
+    return path.join(RELEASE_ROOT, `${PRIMARY_IDENTITY.artifactPrefix}-${ARCH}.dmg`)
   }
 
-  const prefix = `Hermes-${PACKAGE_JSON.version}`
+  const prefixes = APP_IDENTITIES.map(identity => identity.artifactPrefix)
   const candidates = fs
     .readdirSync(RELEASE_ROOT)
     .filter(name => name.endsWith('.dmg'))
-    .filter(name => name.startsWith(prefix))
+    .filter(name => prefixes.some(prefix => name.startsWith(prefix)))
     .filter(name => name.includes(ARCH))
     .sort((a, b) => {
       const aMtime = fs.statSync(path.join(RELEASE_ROOT, a)).mtimeMs
@@ -152,11 +221,11 @@ function resolveDmgPath() {
 
   return candidates.length > 0
     ? path.join(RELEASE_ROOT, candidates[0])
-    : path.join(RELEASE_ROOT, `Hermes-${PACKAGE_JSON.version}-${ARCH}.dmg`)
+    : path.join(RELEASE_ROOT, `${PRIMARY_IDENTITY.artifactPrefix}-${ARCH}.dmg`)
 }
 
 function resolveNsisPath() {
-  // electron-builder NSIS artifactName template is 'Hermes-${version}-${os}-${arch}.${ext}'
+  // electron-builder NSIS artifactName template follows the active product name.
   if (!exists(RELEASE_ROOT)) return null
   const candidates = fs
     .readdirSync(RELEASE_ROOT)
@@ -253,7 +322,7 @@ function launchFresh() {
 
   const sandbox = fs.mkdtempSync(`${FRESH_SANDBOX_ROOT}-`)
   const userDataDir = path.join(sandbox, 'electron-user-data')
-  const hermesHome = path.join(sandbox, 'hermes-home')
+  const hermesHome = path.join(sandbox, INTERNAL_DESKTOP_BUILD ? 'lemon-ai-home' : 'hermes-home')
   const cwd = path.join(sandbox, 'workspace')
 
   fs.mkdirSync(userDataDir, { recursive: true })
@@ -289,7 +358,7 @@ function launchFresh() {
   console.log(`  HERMES_HOME: ${hermesHome}`)
   console.log(`  cwd: ${cwd}`)
 
-  return { runtimeRoot: path.join(hermesHome, 'hermes-agent', 'venv') }
+  return { runtimeRoot: path.join(hermesHome, PRIMARY_IDENTITY.runtimeRootDirName, 'venv') }
 }
 
 // Validate the packaged bundle matches the thin-installer architecture:
@@ -311,9 +380,7 @@ function validateBundle() {
   // to fail loudly rather than re-introduce the 400MB delta we just removed.
   const staleFactoryMarker = path.join(APP.resourcesPath, 'hermes-agent', 'hermes_cli', 'main.py')
   if (exists(staleFactoryMarker)) {
-    die(
-      `Thin-installer regression: factory-payload file should NOT be in the package: ${staleFactoryMarker}`
-    )
+    die(`Thin-installer regression: factory-payload file should NOT be in the package: ${staleFactoryMarker}`)
   }
 
   // Positive assertion: install-stamp.json carries a sane commit + branch
@@ -352,18 +419,14 @@ function validateBundle() {
         `${native.prebuildsDir} nor ${native.buildReleaseDir} exists`
     )
   }
-  const nodeBinaries = nativeBinaryDirs.flatMap(dir =>
-    fs.readdirSync(dir).filter(name => name.endsWith('.node'))
-  )
+  const nodeBinaries = nativeBinaryDirs.flatMap(dir => fs.readdirSync(dir).filter(name => name.endsWith('.node')))
   if (nodeBinaries.length === 0) {
     die(`No .node native binaries found in: ${nativeBinaryDirs.join(', ')}`)
   }
   // Darwin requires a runtime-execed spawn-helper alongside pty.node; missing
   // it manifests as "ENOENT: spawn-helper" on first pty.spawn() call.
   if (PLATFORM === 'darwin') {
-    const spawnHelper = nativeBinaryDirs
-      .map(dir => path.join(dir, 'spawn-helper'))
-      .find(exists)
+    const spawnHelper = nativeBinaryDirs.map(dir => path.join(dir, 'spawn-helper')).find(exists)
     if (!spawnHelper) {
       die(`Missing node-pty spawn-helper (required on darwin) in: ${nativeBinaryDirs.join(', ')}`)
     }

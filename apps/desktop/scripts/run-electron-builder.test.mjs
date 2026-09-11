@@ -37,10 +37,13 @@ function withTempHarness(resource, fn) {
   }
 }
 
-function assertPhysicalIdentity(config, expectedProductName = 'Hermes') {
-  assert.equal(config.appId, 'com.nousresearch.hermes')
+function assertPhysicalIdentity(
+  config,
+  { expectedProductName = 'Hermes', expectedAppId = 'com.nousresearch.hermes', expectedExecutableName = 'Hermes' } = {}
+) {
+  assert.equal(config.appId, expectedAppId)
   assert.equal(config.productName, expectedProductName)
-  assert.equal(config.executableName, 'Hermes')
+  assert.equal(config.executableName, expectedExecutableName)
   assert.deepEqual(config.protocols, [
     {
       name: 'Hermes Protocol',
@@ -132,7 +135,7 @@ test('ordinary package config keeps Hermes installer metadata and assets without
   await validateConfiguration(structuredClone(config))
 })
 
-test('validated internal package config applies Lemon visible identity while preserving runtime identity', async () => {
+test('validated internal package config applies Lemon physical identity while preserving protocol compatibility', async () => {
   await withTempHarness(validHarnessResource, async configPath => {
     const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
     const config = createElectronBuilderConfig(pkg.build, {
@@ -142,10 +145,14 @@ test('validated internal package config applies Lemon visible identity while pre
       }
     })
 
-    assertPhysicalIdentity(config, 'Lemon AI')
+    assertPhysicalIdentity(config, {
+      expectedProductName: 'Lemon AI',
+      expectedAppId: 'com.lemondigital.lemonai',
+      expectedExecutableName: 'Lemon AI'
+    })
     assert.equal(config.mac.identity, '-')
     assert.equal(productFilenameFor(config, config.mac), 'Lemon AI')
-    assert.equal(productFilenameFor(config, config.win), 'Hermes')
+    assert.equal(productFilenameFor(config, config.win), 'Lemon AI')
     assert.equal(config.artifactName, 'Lemon-AI-${version}-${os}-${arch}.${ext}')
     assert.equal(config.icon, 'assets/lemon-icon')
     assert.equal(config.mac.extendInfo.CFBundleDisplayName, 'Lemon AI')

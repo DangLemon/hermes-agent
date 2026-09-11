@@ -43,11 +43,78 @@ NC='\033[0m' # No Color
 BOLD='\033[1m'
 
 # Configuration
-DEFAULT_REPOSITORY="NousResearch/hermes-agent"
-REPOSITORY="${HERMES_INSTALL_REPOSITORY:-$DEFAULT_REPOSITORY}"
+HERMES_DEFAULT_REPOSITORY="NousResearch/hermes-agent"
+LEMON_DEFAULT_REPOSITORY="DangLemon/hermes-agent"
+REPOSITORY="${HERMES_INSTALL_REPOSITORY:-}"
 REPO_URL_SSH=""
 REPO_URL_HTTPS=""
-HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+valid_runtime_root() {
+    [ -e "$1/.git" ] && [ -f "$1/hermes_cli/main.py" ]
+}
+
+is_safe_file_name() {
+    local value="$1"
+    [ -n "$value" ] && [ "$value" != "." ] && [ "$value" != ".." ] \
+        && [[ "$value" != *".."* ]] && [[ "$value" != */* ]] && [[ "$value" != *\\* ]]
+}
+
+valid_internal_harness_config() {
+    local selected="$1"
+    [ -n "$selected" ] && [ -f "$selected" ] || return 1
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$selected" <<'PY'
+import json, sys
+from pathlib import Path
+try:
+    resource = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(1)
+ui = resource.get("ui") if isinstance(resource, dict) else None
+keys = {"agents", "cron", "messaging", "terminal", "webhooks"}
+if not (
+    isinstance(resource, dict)
+    and resource.get("schemaVersion") == 1
+    and resource.get("profile") == "internal"
+    and isinstance(ui, dict)
+    and set(ui) == keys
+    and all(isinstance(ui[key], bool) for key in keys)
+):
+    raise SystemExit(1)
+PY
+        return $?
+    fi
+    grep -Eq '"schemaVersion"[[:space:]]*:[[:space:]]*1' "$selected" \
+        && grep -Eq '"profile"[[:space:]]*:[[:space:]]*"internal"' "$selected" \
+        && grep -Eq '"(agents|cron|messaging|terminal|webhooks)"[[:space:]]*:[[:space:]]*(true|false)' "$selected"
+}
+
+INTERNAL_DESKTOP_BUILD=false
+if [ "${HERMES_DESKTOP_INTERNAL:-}" = "1" ] || valid_internal_harness_config "${HERMES_DESKTOP_HARNESS_CONFIG:-}"; then
+    INTERNAL_DESKTOP_BUILD=true
+fi
+if [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
+    DEFAULT_REPOSITORY="$LEMON_DEFAULT_REPOSITORY"
+else
+    DEFAULT_REPOSITORY="$HERMES_DEFAULT_REPOSITORY"
+fi
+REPOSITORY="${REPOSITORY:-$DEFAULT_REPOSITORY}"
+RUNTIME_DIR_NAME="${HERMES_INSTALL_RUNTIME_DIR_NAME:-}"
+if [ -z "$RUNTIME_DIR_NAME" ]; then
+    if [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
+        RUNTIME_DIR_NAME="lemon-agent"
+    else
+        RUNTIME_DIR_NAME="hermes-agent"
+    fi
+fi
+if ! is_safe_file_name "$RUNTIME_DIR_NAME"; then
+    echo "Error: HERMES_INSTALL_RUNTIME_DIR_NAME must be a safe directory name" >&2
+    exit 1
+fi
+DEFAULT_HERMES_HOME="$HOME/.hermes"
+if [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
+    DEFAULT_HERMES_HOME="$HOME/.lemon-ai"
+fi
+HERMES_HOME="${HERMES_HOME:-$DEFAULT_HERMES_HOME}"
 # INSTALL_DIR is resolved AFTER arg parsing and OS detection so we can pick an
 # FHS-style layout for root installs.  Track whether the user gave us an
 # explicit directory — if so we never override it.
@@ -190,26 +257,26 @@ while [[ $# -gt 0 ]]; do
             echo "                   (ignored when it would roll an existing install back)"
             echo "  --tag NAME     Pin checkout to a specific tag after clone/update"
             echo "  --force-commit Apply --commit even if it rolls the install backwards"
-            echo "  --repo OWNER/REPO  GitHub source repository (default: NousResearch/hermes-agent)"
+            echo "  --repo OWNER/REPO  GitHub source repository (default: $DEFAULT_REPOSITORY)"
             echo "  --manifest     Print desktop bootstrap stage manifest as JSON"
             echo "  --stage NAME   Run one desktop bootstrap stage"
             echo "  --json         Print a JSON result frame for --stage"
             echo "  --non-interactive  Skip stages that require user input"
             echo "  --include-desktop  Also build the desktop app (apps/desktop -> Lemon AI.app or Hermes.app)"
             echo "  --dir PATH     Installation directory"
-            echo "                   default (non-root):  ~/.hermes/hermes-agent"
-            echo "                   default (root, Linux): /usr/local/lib/hermes-agent"
-            echo "  --hermes-home PATH  Data directory (default: ~/.hermes, or \$HERMES_HOME)"
+            echo "                   default (non-root):  $DEFAULT_HERMES_HOME/$RUNTIME_DIR_NAME"
+            echo "                   default (root, Linux): /usr/local/lib/$RUNTIME_DIR_NAME"
+            echo "  --hermes-home PATH  Data directory (default: $DEFAULT_HERMES_HOME, or \$HERMES_HOME)"
             echo "  -h, --help     Show this help"
             echo ""
             echo "Notes:"
             echo "  When running as root on Linux, Hermes installs the code under"
-            echo "  /usr/local/lib/hermes-agent and links the command into"
+            echo "  /usr/local/lib/$RUNTIME_DIR_NAME and links the command into"
             echo "  /usr/local/bin/hermes (FHS layout — matches Claude Code / Codex CLI)."
             echo "  Data, config, sessions, and logs still live in \$HERMES_HOME"
-            echo "  (default /root/.hermes).  This keeps Docker bind-mounted volumes"
+            echo "  (default $DEFAULT_HERMES_HOME).  This keeps Docker bind-mounted volumes"
             echo "  small and ensures the command is on PATH for all shells."
-            echo "  Existing installs at \$HERMES_HOME/hermes-agent are preserved in-place."
+            echo "  Existing installs at \$HERMES_HOME/$RUNTIME_DIR_NAME are preserved in-place."
             echo "  --ensure DEPS  Install only specified deps (comma-separated)"
             echo "                   Supported: node, browser, ripgrep, ffmpeg"
             echo "                   Does NOT clone repo or create venv"
@@ -614,7 +681,7 @@ resolve_install_layout() {
 
     # Termux: package manager manages /data/data/..., keep code in HERMES_HOME.
     if is_termux; then
-        INSTALL_DIR="$HERMES_HOME/hermes-agent"
+        INSTALL_DIR="$HERMES_HOME/$RUNTIME_DIR_NAME"
         return 0
     fi
 
@@ -622,13 +689,13 @@ resolve_install_layout() {
     # macOS root installs keep the legacy layout because /usr/local/ on macOS
     # is Homebrew territory and we don't want to fight that.
     if [ "$OS" = "linux" ] && [ "$(id -u)" -eq 0 ]; then
-        if [ -d "$HERMES_HOME/hermes-agent/.git" ]; then
-            INSTALL_DIR="$HERMES_HOME/hermes-agent"
-            log_info "Existing install detected at $INSTALL_DIR — keeping legacy layout"
-            log_info "  (new root installs use /usr/local/lib/hermes-agent)"
+        local preferred_install="$HERMES_HOME/$RUNTIME_DIR_NAME"
+        if valid_runtime_root "$preferred_install"; then
+            INSTALL_DIR="$preferred_install"
+            log_info "Existing install detected at $INSTALL_DIR — keeping layout"
             return 0
         fi
-        INSTALL_DIR="/usr/local/lib/hermes-agent"
+        INSTALL_DIR="/usr/local/lib/$RUNTIME_DIR_NAME"
         ROOT_FHS_LAYOUT=true
         # Place uv-managed Python under /usr/local/share so the venv interpreter
         # is world-readable.  Default uv paths land in /root/.local/share/uv,
@@ -646,7 +713,7 @@ resolve_install_layout() {
     fi
 
     # Default: non-root, non-Termux → legacy user-scoped layout.
-    INSTALL_DIR="$HERMES_HOME/hermes-agent"
+    INSTALL_DIR="$HERMES_HOME/$RUNTIME_DIR_NAME"
 }
 
 get_command_link_dir() {
@@ -1221,7 +1288,7 @@ check_node() {
     install_node
 }
 
-# Download and adopt one Node release line (e.g. 26) into ~/.hermes/node/.
+# Download and adopt one Node release line (e.g. 26) into $HERMES_HOME/node/.
 #
 # Split out of install_node() so the caller can walk a list of candidate lines.
 # A line is rejected — and the caller should try an older one — when nodejs.org
@@ -1266,7 +1333,7 @@ install_node_line() {
         return 1
     fi
 
-    log_info "Extracting to ~/.hermes/node/..."
+    log_info "Extracting to $HERMES_HOME/node/..."
     if [[ "$tarball_name" == *.tar.xz ]]; then
         tar xf "$tmp_dir/$tarball_name" -C "$tmp_dir"
     else
@@ -1295,7 +1362,7 @@ install_node_line() {
         return 1
     fi
 
-    # Place into ~/.hermes/node/ and symlink binaries into the same bin dir
+    # Place into $HERMES_HOME/node/ and symlink binaries into the same bin dir
     # the hermes command uses (get_command_link_dir): /usr/local/bin for root
     # FHS installs, $PREFIX/bin on Termux, ~/.local/bin otherwise.
     rm -rf "$HERMES_HOME/node"
@@ -1343,7 +1410,7 @@ install_node_line() {
         rm -f "$node_link_dir/node" "$node_link_dir/npm" "$node_link_dir/npx"
         return 1
     fi
-    log_success "Node.js $installed_ver installed to ~/.hermes/node/"
+    log_success "Node.js $installed_ver installed to $HERMES_HOME/node/"
     HAS_NODE=true
     return 0
 }
@@ -2281,6 +2348,12 @@ setup_path() {
     command_link_dir="$(get_command_link_dir)"
     command_link_display_dir="$(get_command_link_display_dir)"
 
+    launcher_home_export() {
+        if [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
+            printf 'export HERMES_HOME=%q\n' "$HERMES_HOME"
+        fi
+    }
+
     # Create a user-facing shim for the hermes command.
     # We intentionally clear PYTHONPATH/PYTHONHOME here so inherited env vars
     # can't make this launcher import modules from another checkout.
@@ -2298,6 +2371,7 @@ setup_path() {
 #!/usr/bin/env bash
 unset PYTHONPATH
 unset PYTHONHOME
+$(launcher_home_export)
 exec "$HERMES_BIN" "$HERMES_ENTRYPOINT" "\$@"
 EOF
     else
@@ -2305,6 +2379,7 @@ EOF
 #!/usr/bin/env bash
 unset PYTHONPATH
 unset PYTHONHOME
+$(launcher_home_export)
 exec "$HERMES_BIN" "\$@"
 EOF
     fi
@@ -2321,6 +2396,7 @@ EOF
 #!/usr/bin/env bash
 unset PYTHONPATH
 unset PYTHONHOME
+$(launcher_home_export)
 exec "$HERMES_BIN" "$INSTALL_DIR/run_agent.py" "\$@"
 EOF
     else
@@ -2328,6 +2404,7 @@ EOF
 #!/usr/bin/env bash
 unset PYTHONPATH
 unset PYTHONHOME
+$(launcher_home_export)
 exec "$HERMES_BIN" run_agent.py "\$@"
 EOF
     fi
@@ -2346,6 +2423,7 @@ EOF
 #!/usr/bin/env bash
 unset PYTHONPATH
 unset PYTHONHOME
+$(launcher_home_export)
 exec "$HERMES_BIN" "$HERMES_ENTRYPOINT" acp "\$@"
 EOF
     else
@@ -2353,6 +2431,7 @@ EOF
 #!/usr/bin/env bash
 unset PYTHONPATH
 unset PYTHONHOME
+$(launcher_home_export)
 exec "$HERMES_BIN" acp "\$@"
 EOF
     fi
@@ -2479,17 +2558,17 @@ copy_config_templates() {
     # Create ~/.hermes directory structure (config at top level, code in subdir)
     mkdir -p "$HERMES_HOME"/{cron,sessions,logs,pairing,hooks,image_cache,audio_cache,memories,skills}
 
-    # Create .env at ~/.hermes/.env (top level, easy to find)
+    # Create .env at $HERMES_HOME/.env (top level, easy to find)
     if [ ! -f "$HERMES_HOME/.env" ]; then
         if [ -f "$INSTALL_DIR/.env.example" ]; then
             cp "$INSTALL_DIR/.env.example" "$HERMES_HOME/.env"
-            log_success "Created ~/.hermes/.env from template"
+            log_success "Created $HERMES_HOME/.env from template"
         else
             touch "$HERMES_HOME/.env"
-            log_success "Created ~/.hermes/.env"
+            log_success "Created $HERMES_HOME/.env"
         fi
     else
-        log_info "~/.hermes/.env already exists, keeping it"
+        log_info "$HERMES_HOME/.env already exists, keeping it"
     fi
     # Restrict .env permissions — this file holds API keys and tokens.
     # 0600 ensures only the file owner can read/write, matching standard
@@ -2497,14 +2576,14 @@ copy_config_templates() {
     chmod 600 "$HERMES_HOME/.env"
     configure_browser_env_from_system_browser
 
-    # Create config.yaml at ~/.hermes/config.yaml (top level, easy to find)
+    # Create config.yaml at $HERMES_HOME/config.yaml (top level, easy to find)
     if [ ! -f "$HERMES_HOME/config.yaml" ]; then
         if [ -f "$INSTALL_DIR/cli-config.yaml.example" ]; then
             cp "$INSTALL_DIR/cli-config.yaml.example" "$HERMES_HOME/config.yaml"
-            log_success "Created ~/.hermes/config.yaml from template"
+            log_success "Created $HERMES_HOME/config.yaml from template"
         fi
     else
-        log_info "~/.hermes/config.yaml already exists, keeping it"
+        log_info "$HERMES_HOME/config.yaml already exists, keeping it"
     fi
 
     # Create SOUL.md if it doesn't exist (global persona file).
@@ -2516,12 +2595,12 @@ copy_config_templates() {
         cat > "$HERMES_HOME/SOUL.md" << 'SOUL_EOF'
 You are Hermes Agent, built by Nous Research. Be direct: match the length of your reply to the weight of the ask — a one-line question gets a one-line answer, and finished work gets a short report of what changed, what's verified, and what's left, never a replay of the process. No filler ("Great question," "I'd be happy to"), no restating the request back, no re-summarizing what you already said, no narrating tool calls the user can see. Plain claims over adjectives; when unsure, say so plainly. Agree because it's right, not because the user said it. Depth is earned — give it when the user asks for detail, teaches, or the stakes demand it, not by default.
 SOUL_EOF
-        log_success "Created ~/.hermes/SOUL.md (edit to customize personality)"
+        log_success "Created $HERMES_HOME/SOUL.md (edit to customize personality)"
     fi
 
-    log_success "Configuration directory ready: ~/.hermes/"
+    log_success "Configuration directory ready: $HERMES_HOME/"
 
-    # Seed bundled skills into ~/.hermes/skills/ (manifest-based, one-time per skill)
+    # Seed bundled skills into $HERMES_HOME/skills/ (manifest-based, one-time per skill)
     if [ "$NO_SKILLS" = true ]; then
         # Blank-slate install: write the opt-out marker and skip seeding.
         # skills_sync.py and `hermes update` both honor this marker, so the
@@ -2533,14 +2612,14 @@ SOUL_EOF
         log_info "Skipping bundled skills (--no-skills). Wrote $HERMES_HOME/.no-bundled-skills"
         log_info "  Future 'hermes update' runs will not inject bundled skills. Delete the marker to opt back in."
     else
-        log_info "Syncing bundled skills to ~/.hermes/skills/ ..."
+        log_info "Syncing bundled skills to $HERMES_HOME/skills/ ..."
         if "$INSTALL_DIR/venv/bin/python" "$INSTALL_DIR/tools/skills_sync.py" 2>/dev/null; then
-            log_success "Skills synced to ~/.hermes/skills/"
+            log_success "Skills synced to $HERMES_HOME/skills/"
         else
             # Fallback: simple directory copy if Python sync fails
             if [ -d "$INSTALL_DIR/skills" ] && [ ! "$(ls -A "$HERMES_HOME/skills/" 2>/dev/null | grep -v '.bundled_manifest')" ]; then
                 cp -r "$INSTALL_DIR/skills/"* "$HERMES_HOME/skills/" 2>/dev/null || true
-                log_success "Skills copied to ~/.hermes/skills/"
+                log_success "Skills copied to $HERMES_HOME/skills/"
             fi
         fi
     fi
@@ -3256,7 +3335,7 @@ maybe_start_gateway() {
             fi
             nohup $HERMES_CMD gateway > "$HERMES_HOME/logs/gateway.log" 2>&1 &
             GATEWAY_PID=$!
-            log_success "Gateway started (PID $GATEWAY_PID). Logs: ~/.hermes/logs/gateway.log"
+            log_success "Gateway started (PID $GATEWAY_PID). Logs: $HERMES_HOME/logs/gateway.log"
             log_info "To stop: kill $GATEWAY_PID"
             log_info "To restart later: hermes gateway"
             if [ "$DISTRO" = "termux" ]; then
@@ -3298,7 +3377,17 @@ write_bootstrap_marker() {
         return 0
     fi
 
-    local marker_path="$INSTALL_DIR/.hermes-bootstrap-complete"
+    local default_marker_name=".hermes-bootstrap-complete"
+    if [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
+        default_marker_name=".lemon-ai-bootstrap-complete"
+    fi
+    local marker_name="${HERMES_BOOTSTRAP_MARKER_NAME:-$default_marker_name}"
+    if ! is_safe_file_name "$marker_name"; then
+        log_error "HERMES_BOOTSTRAP_MARKER_NAME must be a safe file name"
+        return 1
+    fi
+    case "$marker_name" in ""|*/*) marker_name=".hermes-bootstrap-complete" ;; esac
+    local marker_path="$INSTALL_DIR/$marker_name"
     local tmp_path="$marker_path.tmp"
 
     # Atomic publish: the macOS launcher predicate only checks existence, so a
@@ -3674,15 +3763,18 @@ select_newest_macos_app() {
     local candidate candidate_exe candidate_mtime candidate_priority
 
     for candidate in "$@"; do
-        candidate_exe="$candidate/Contents/MacOS/Hermes"
+        candidate_exe="$candidate/Contents/MacOS/Lemon AI"
+        if [ ! -x "$candidate_exe" ]; then
+            candidate_exe="$candidate/Contents/MacOS/Hermes"
+        fi
         if [ -d "$candidate" ] && [ -x "$candidate_exe" ]; then
             candidate_mtime="$(stat -f %m "$candidate" 2>/dev/null || stat -c %Y "$candidate" 2>/dev/null || echo 0)"
             case "$candidate" in
                 *"/Lemon AI.app") candidate_priority=1 ;;
                 *) candidate_priority=0 ;;
             esac
-            if [ -z "$selected" ] || [ "$candidate_mtime" -gt "$selected_mtime" ] \
-                || { [ "$candidate_mtime" -eq "$selected_mtime" ] && [ "$candidate_priority" -gt "$selected_priority" ]; }; then
+            if [ -z "$selected" ] || [ "$candidate_priority" -gt "$selected_priority" ] \
+                || { [ "$candidate_priority" -eq "$selected_priority" ] && [ "$candidate_mtime" -gt "$selected_mtime" ]; }; then
                 selected="$candidate"
                 selected_mtime="$candidate_mtime"
                 selected_priority="$candidate_priority"
@@ -3820,16 +3912,27 @@ install_desktop() {
 
     local app=""
     if [ "$OS" = "linux" ]; then
-        if [ -x "$desktop_dir/release/linux-unpacked/Hermes" ]; then
+        if [ "$INTERNAL_DESKTOP_BUILD" = true ] && [ -x "$desktop_dir/release/linux-unpacked/Lemon AI" ]; then
+            app="$desktop_dir/release/linux-unpacked/Lemon AI"
+        elif [ "$INTERNAL_DESKTOP_BUILD" = true ] && [ -x "$desktop_dir/release/linux-unpacked/lemon-ai" ]; then
+            app="$desktop_dir/release/linux-unpacked/lemon-ai"
+        elif [ -x "$desktop_dir/release/linux-unpacked/Hermes" ]; then
             app="$desktop_dir/release/linux-unpacked/Hermes"
         elif [ -x "$desktop_dir/release/linux-unpacked/hermes" ]; then
             app="$desktop_dir/release/linux-unpacked/hermes"
         fi
-    else
+    elif [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
         app="$(select_newest_macos_app \
             "$desktop_dir/release/mac-arm64/Lemon AI.app" \
+            "$desktop_dir/release/mac/Lemon AI.app")"
+        if [ -z "$app" ]; then
+            app="$(select_newest_macos_app \
+                "$desktop_dir/release/mac-arm64/Hermes.app" \
+                "$desktop_dir/release/mac/Hermes.app")"
+        fi
+    else
+        app="$(select_newest_macos_app \
             "$desktop_dir/release/mac-arm64/Hermes.app" \
-            "$desktop_dir/release/mac/Lemon AI.app" \
             "$desktop_dir/release/mac/Hermes.app")"
     fi
     if [ -z "$app" ]; then

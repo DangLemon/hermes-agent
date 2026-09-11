@@ -27,7 +27,7 @@ const EXPECTED_WINDOWS_VERSION = {
 const EXPECTED_MAC_PLIST = {
   CFBundleDisplayName: 'Lemon AI',
   CFBundleName: 'Lemon AI',
-  CFBundleExecutable: 'Hermes'
+  CFBundleExecutable: 'Lemon AI'
 }
 const MACHO_CPU_TYPES = {
   arm64: 0x0100000c,
@@ -133,8 +133,8 @@ export function resolveLayout({
       : path.join(resolvedAppPath, 'resources')
   const binaryPath =
     platform === 'darwin'
-      ? path.join(resolvedAppPath, 'Contents', 'MacOS', 'Hermes')
-      : path.join(resolvedAppPath, 'Hermes.exe')
+      ? path.join(resolvedAppPath, 'Contents', 'MacOS', 'Lemon AI')
+      : path.join(resolvedAppPath, 'Lemon AI.exe')
 
   return {
     appPath: resolvedAppPath,
@@ -198,9 +198,9 @@ export function validateGeneratedConfig(config) {
   assertEqual(config.icon, 'assets/lemon-icon', 'electron-builder icon')
   assertEqual(config.dmg?.title, 'Install Lemon AI', 'electron-builder dmg.title')
   assertEqual(config.productName, 'Lemon AI', 'electron-builder productName')
-  assertEqual(config.executableName, 'Hermes', 'electron-builder executableName')
+  assertEqual(config.executableName, 'Lemon AI', 'electron-builder executableName')
   assertEqual(config.mac?.executableName, 'Lemon AI', 'electron-builder mac.executableName')
-  assertEqual(config.appId, 'com.nousresearch.hermes', 'electron-builder appId')
+  assertEqual(config.appId, 'com.lemondigital.lemonai', 'electron-builder appId')
 }
 
 export function readMachOArchitectures(filePath) {
@@ -464,7 +464,7 @@ export function readWindowsVersionInfo(exePath, { spawn = spawnSync } = {}) {
 
     for (const key of Object.keys(EXPECTED_WINDOWS_VERSION)) {
       if (typeof parsed[key] !== 'string' || parsed[key].length === 0) {
-        fail(`Hermes.exe VersionInfo ${key}: missing native VersionInfo value`)
+        fail(`Windows executable VersionInfo ${key}: missing native VersionInfo value`)
       }
     }
     return parsed
@@ -477,7 +477,7 @@ export function validateWindowsIdentity(exePath, options) {
   const readVersionInfo = options?.readWindowsVersionInfo ?? readWindowsVersionInfo
   const versionInfo = readVersionInfo(exePath)
   for (const [key, expected] of Object.entries(EXPECTED_WINDOWS_VERSION)) {
-    assertEqual(versionInfo[key], expected, `Hermes.exe VersionInfo ${key}`)
+    assertEqual(versionInfo[key], expected, `Windows executable VersionInfo ${key}`)
   }
 }
 

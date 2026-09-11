@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
 
 import { test } from 'vitest'
 
@@ -42,6 +44,32 @@ test('terminalScriptEnv drops PATH in any casing and keeps the rest', () => {
 
 test('terminalScriptEnv skips empty values and an absent home', () => {
   assert.deepEqual(terminalScriptEnv({ PYTHONPATH: '' }), {})
+})
+
+test('terminalScriptEnv carries Lemon desktop runtime identity into the launcher', () => {
+  assert.deepEqual(
+    terminalScriptEnv(
+      { PATH: '/desktop/path', HERMES_UPDATE_PRODUCT_NAME: 'stale' },
+      '/home/b/.lemon-ai',
+      {
+        HERMES_DESKTOP_INTERNAL: '1',
+        HERMES_INSTALL_RUNTIME_DIR_NAME: 'lemon-agent',
+        HERMES_UPDATE_PRODUCT_NAME: 'Lemon AI'
+      }
+    ),
+    {
+      HERMES_DESKTOP_INTERNAL: '1',
+      HERMES_HOME: '/home/b/.lemon-ai',
+      HERMES_INSTALL_RUNTIME_DIR_NAME: 'lemon-agent',
+      HERMES_UPDATE_PRODUCT_NAME: 'Lemon AI'
+    }
+  )
+})
+
+test('main passes desktop runtime identity to external terminal launchers', () => {
+  const source = fs.readFileSync(path.join(import.meta.dirname, 'main.ts'), 'utf8')
+
+  assert.match(source, /terminalScriptEnv\(\s*backend\.env,\s*HERMES_HOME,\s*desktopRuntimeEnv\(\)\s*\)/)
 })
 
 test('buildTerminalScript execs the resolved runtime with its env', () => {

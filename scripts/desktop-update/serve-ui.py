@@ -19,8 +19,10 @@ import time
 
 html_path, status_path = sys.argv[1], sys.argv[2]
 started_at = float(sys.argv[3]) if len(sys.argv) > 3 else time.time()
-with open(html_path, "rb") as f:
-    HTML = f.read()
+product_name = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4].strip() else "Hermes"
+product_name = product_name.replace("\r", "").replace("\n", "") or "Hermes"
+with open(html_path, "r", encoding="utf-8") as f:
+    HTML = f.read().replace("__HERMES_UPDATE_PRODUCT_NAME__", product_name).encode("utf-8")
 
 
 def progress_body():

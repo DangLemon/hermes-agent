@@ -20,6 +20,8 @@ import path from 'path'
 
 import tailwindcss from '@tailwindcss/vite'
 
+import { desktopHtmlTitlePlugin } from './scripts/desktop-html-title.mjs'
+
 // `hgui` symlinks a worktree's node_modules to the main checkout. Vite realpaths
 // those before enforcing server.fs.allow, so codicon/font assets resolve outside
 // the worktree root and 404. Whitelist the real node_modules locations.
@@ -181,7 +183,13 @@ const emojibaseAssets = () => ({
 export default defineConfig(({ command }) => ({
   base: './',
   define: harnessViteDefines(process.env as Record<string, string | undefined>),
-  plugins: [react(), babel({ presets: [compilerPreset()] }), tailwindcss(), emojibaseAssets()],
+  plugins: [
+    desktopHtmlTitlePlugin(process.env),
+    react(),
+    babel({ presets: [compilerPreset()] }),
+    tailwindcss(),
+    emojibaseAssets()
+  ],
   css: {
     // Pin an explicit (empty) PostCSS config. Tailwind is handled entirely by
     // `@tailwindcss/vite`, so the renderer needs no PostCSS plugins — and

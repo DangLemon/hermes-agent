@@ -16,7 +16,7 @@ param(
     [switch]$NoVenv,
     [switch]$SkipSetup,
     [switch]$SkipComputerUse,
-    [string]$Repository = $(if ($env:HERMES_INSTALL_REPOSITORY) { $env:HERMES_INSTALL_REPOSITORY } else { "NousResearch/hermes-agent" }),
+    [string]$Repository = "",
     [string]$Branch = "main",
     # -Commit and -Tag are higher-precedence variants of -Branch for users
     # who need reproducible installs (desktop installer pinning, CI, release
@@ -31,8 +31,8 @@ param(
     # existing tree pass -ForceCommit.
     [switch]$ForceCommit,
     [string]$Tag = "",
-    [string]$HermesHome = $(if ($env:HERMES_HOME) { $env:HERMES_HOME } else { "$env:LOCALAPPDATA\hermes" }),
-    [string]$InstallDir = $(if ($env:HERMES_HOME) { "$env:HERMES_HOME\hermes-agent" } else { "$env:LOCALAPPDATA\hermes\hermes-agent" }),
+    [string]$HermesHome = "",
+    [string]$InstallDir = "",
 
     # --- Stage protocol (additive; default invocation behaves as before) ----
     # See the "Stage protocol" section near the bottom of the file for the
@@ -60,15 +60,15 @@ param(
 
     # --- Desktop GUI build (opt-in) ---
     # When set, install.ps1 includes Stage-Desktop in the manifest and
-    # builds apps/desktop into a launchable Hermes.exe.
+    # builds apps/desktop into a launchable desktop executable.
     #
     # Why opt-in:
     #   * Hermes-Setup.exe (the signed Tauri bootstrap installer) passes
     #     -IncludeDesktop so a user who installed via the GUI ends up
     #     with a launchable desktop binary.
     #   * The Electron desktop's own bootstrap-runner.ts runs install.ps1
-    #     from inside an already-launched Hermes.exe; if THAT recursively
-    #     built apps/desktop it would try to overwrite the live Hermes.exe
+    #     from inside an already-launched desktop app; if THAT recursively
+    #     built apps/desktop it would try to overwrite the live executable
     #     on disk and fail. The recursive path omits the flag.
     #   * The canonical CLI one-liner (irm | iex) omits the flag too;
     #     terminal users don't need a desktop binary built for them, and
@@ -163,6 +163,40 @@ function Write-PathDiag {
     param([string]$Message)
     if ($ShowResolvedPaths) { return }
     [Console]::Error.WriteLine("[hermes] $Message")
+}
+
+function Test-InternalHarnessConfig {
+    # A selector path alone is not an identity signal.  Electron passes the
+    # explicit HERMES_DESKTOP_INTERNAL child signal after validating the
+    # packaged resource; direct script invocations can use the same frozen
+    # schema as a fallback.  Invalid or unrelated files stay ordinary Hermes.
+    if ($env:HERMES_DESKTOP_INTERNAL -eq "1") { return $true }
+    $selected = [string]$env:HERMES_DESKTOP_HARNESS_CONFIG
+    if ([string]::IsNullOrWhiteSpace($selected) -or -not (Test-Path -LiteralPath $selected -PathType Leaf)) {
+        return $false
+    }
+    try {
+        $resource = Get-Content -LiteralPath $selected -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ($null -eq $resource -or $resource.schemaVersion -ne 1 -or $resource.profile -ne "internal") { return $false }
+        if ($null -eq $resource.ui) { return $false }
+        $keys = @($resource.ui.PSObject.Properties.Name)
+        $required = @("agents", "cron", "messaging", "terminal", "webhooks")
+        if ($keys.Count -ne $required.Count) { return $false }
+        foreach ($key in $required) {
+            if (-not ($keys -contains $key) -or $resource.ui.$key -isnot [bool]) { return $false }
+        }
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Test-SafeFileName {
+    param([string]$Value)
+    if (-not $Value) { return $false }
+    $trimmed = $Value.Trim()
+    return $trimmed -and $trimmed -ne "." -and $trimmed -ne ".." -and
+        -not $trimmed.Contains("..") -and -not $trimmed.Contains("/") -and -not $trimmed.Contains("\")
 }
 
 function Get-LongProfileRoot {
@@ -342,19 +376,37 @@ $script:NormalizedProfilePaths = Set-LongProfileEnvVars
 # long. An explicitly passed -HermesHome / -InstallDir is normalized in place
 # rather than replaced, so a caller's choice is never overwritten by a default.
 # $PSBoundParameters is only meaningful at script scope, so this stays inline.
+$InternalDesktopBuild = Test-InternalHarnessConfig
+$Repository = if ($Repository) {
+    $Repository
+} elseif ($env:HERMES_INSTALL_REPOSITORY) {
+    $env:HERMES_INSTALL_REPOSITORY
+} elseif ($InternalDesktopBuild) {
+    "DangLemon/hermes-agent"
+} else {
+    "NousResearch/hermes-agent"
+}
+$RuntimeDirName = if ($env:HERMES_INSTALL_RUNTIME_DIR_NAME) { $env:HERMES_INSTALL_RUNTIME_DIR_NAME } elseif ($InternalDesktopBuild) { "lemon-agent" } else { "hermes-agent" }
+if (-not (Test-SafeFileName $RuntimeDirName)) {
+    throw "HERMES_INSTALL_RUNTIME_DIR_NAME must be a safe directory name"
+}
 if ($PSBoundParameters.ContainsKey('HermesHome')) {
     $HermesHome = ConvertTo-LongPath $HermesHome
 } else {
     $HermesHome = ConvertTo-LongPath $(
-        if ($env:HERMES_HOME) { $env:HERMES_HOME } else { "$env:LOCALAPPDATA\hermes" }
+        if ($env:HERMES_HOME) {
+            $env:HERMES_HOME
+        } elseif ($InternalDesktopBuild) {
+            "$env:LOCALAPPDATA\Lemon AI"
+        } else {
+            "$env:LOCALAPPDATA\hermes"
+        }
     )
 }
 if ($PSBoundParameters.ContainsKey('InstallDir')) {
     $InstallDir = ConvertTo-LongPath $InstallDir
 } else {
-    $InstallDir = ConvertTo-LongPath $(
-        if ($env:HERMES_HOME) { "$env:HERMES_HOME\hermes-agent" } else { "$env:LOCALAPPDATA\hermes\hermes-agent" }
-    )
+    $InstallDir = ConvertTo-LongPath (Join-Path $HermesHome $RuntimeDirName)
 }
 if ($script:NormalizedProfilePaths) {
     # Which paths the install actually settled on. Absent from every report of
@@ -3388,7 +3440,13 @@ function Write-BootstrapMarker {
         $pinnedBranch = "main"  # install.ps1's own default for -Branch
     }
 
-    $markerPath = Join-Path $InstallDir ".hermes-bootstrap-complete"
+    $defaultMarkerName = if ($InternalDesktopBuild) { ".lemon-ai-bootstrap-complete" } else { ".hermes-bootstrap-complete" }
+    $markerName = if ($env:HERMES_BOOTSTRAP_MARKER_NAME) { $env:HERMES_BOOTSTRAP_MARKER_NAME } else { $defaultMarkerName }
+    if (-not (Test-SafeFileName $markerName)) {
+        throw "HERMES_BOOTSTRAP_MARKER_NAME must be a safe file name"
+    }
+    if ([string]::IsNullOrWhiteSpace($markerName) -or $markerName.IndexOfAny([char[]]@('/', '\')) -ge 0) { $markerName = ".hermes-bootstrap-complete" }
+    $markerPath = Join-Path $InstallDir $markerName
     $marker = [ordered]@{
         schemaVersion = 1
         pinnedCommit  = $pinnedCommit
@@ -4100,7 +4158,7 @@ function Install-DesktopVoiceDeps {
 }
 
 function Install-Desktop {
-    # Build apps/desktop into a launchable Hermes.exe. Only called from
+    # Build apps/desktop into a launchable desktop executable. Only called from
     # Stage-Desktop, which is itself only included in the manifest when
     # -IncludeDesktop was passed to install.ps1.
     #
@@ -4113,7 +4171,7 @@ function Install-Desktop {
     # produces the unpacked binary at apps/desktop/release/<os>-unpacked/.
     #
     # The Tauri bootstrap installer's launch_hermes_desktop command
-    # resolves apps/desktop/release/win-unpacked/Hermes.exe directly,
+    # resolves a mode-aware executable under apps/desktop/release/*-unpacked,
     # so an "unpacked" build (electron-builder --dir) is enough -- we
     # don't need to produce an NSIS/MSI artifact here.
 
@@ -4218,8 +4276,8 @@ function Install-Desktop {
     # 2. Build apps/desktop. `npm run pack` runs:
     #      assert-root-install + write-build-stamp + stage-native-deps +
     #      tsc -b + vite build + electron-builder --dir
-    # The --dir mode produces an unpacked Hermes.exe in
-    # apps/desktop/release/win-unpacked/ without bundling NSIS/MSI;
+    # The --dir mode produces an unpacked desktop executable in
+    # apps/desktop/release/<arch>-unpacked/ without bundling NSIS/MSI;
     # we don't need a distributable installer artifact, just a
     # launchable binary the Tauri installer can spawn.
     #
@@ -4229,7 +4287,7 @@ function Install-Desktop {
     # invokes signtool and therefore never fetches/extracts winCodeSign
     # (whose macOS symlinks crash 7-Zip on non-admin Windows -- a dead end we
     # are NOT trying to work around). The Hermes icon + product name are
-    # stamped onto Hermes.exe by our own rcedit step (Set-DesktopExeIdentity)
+    # stamped onto the desktop executable by our own rcedit step (Set-DesktopExeIdentity)
     # AFTER this build, completely decoupled from electron-builder signing.
     #
     # WIN_CSC_LINK and WIN_CSC_KEY_PASSWORD explicitly cleared as
@@ -4347,11 +4405,23 @@ function Install-Desktop {
     Pop-Location
 
     # 3. Sanity-check the produced binary. Probe both arches so this works
-    # on x64 and arm64 build machines.
-    $exeCandidates = @(
-        "$desktopDir\release\win-unpacked\Hermes.exe",
-        "$desktopDir\release\win-arm64-unpacked\Hermes.exe"
-    )
+    # on x64 and arm64 build machines. Ordinary builds keep Hermes-only
+    # discovery; internal builds prefer Lemon AI and retain Hermes fallback.
+    if ($InternalDesktopBuild) {
+        $exeCandidates = @(
+            "$desktopDir\release\win-unpacked\Lemon AI.exe",
+            "$desktopDir\release\win-arm64-unpacked\Lemon AI.exe",
+            "$desktopDir\release\win-unpacked\Hermes.exe",
+            "$desktopDir\release\win-arm64-unpacked\Hermes.exe"
+        )
+        $missingDesktopMessage = "Desktop build completed but no Lemon AI.exe or Hermes.exe was found under $desktopDir\release\*-unpacked\"
+    } else {
+        $exeCandidates = @(
+            "$desktopDir\release\win-unpacked\Hermes.exe",
+            "$desktopDir\release\win-arm64-unpacked\Hermes.exe"
+        )
+        $missingDesktopMessage = "Desktop build completed but no Hermes.exe was found under $desktopDir\release\*-unpacked\"
+    }
     $found = $false
     $desktopExe = $null
     foreach ($cand in $exeCandidates) {
@@ -4363,10 +4433,10 @@ function Install-Desktop {
         }
     }
     if (-not $found) {
-        throw "Desktop build completed but no Hermes.exe was found under $desktopDir\release\*-unpacked\"
+        throw $missingDesktopMessage
     }
 
-    # 3b. The Hermes icon + identity are stamped onto Hermes.exe by the
+    # 3b. The desktop icon + identity are stamped onto the executable by the
     #     electron-builder `afterPack` hook (apps/desktop/scripts/after-pack.mjs)
     #     during `npm run pack` above -- for every build, so the installer's
     #     --update rebuild stays branded too. No separate stamp step needed here.
@@ -4392,7 +4462,7 @@ function Install-Desktop {
     }
 
     # 4. Create Start Menu + Desktop shortcuts pointing DIRECTLY at the packed
-    #    Hermes.exe. We deliberately do NOT point them at `hermes desktop`: that
+    #    desktop executable. We deliberately do NOT point them at `hermes desktop`: that
     #    command rebuilds (npm install + electron-builder) on every launch,
     #    which would cost minutes each time. The packed exe is the consumer --
     #    launching it directly is instant, and updates flow through the
@@ -4695,7 +4765,7 @@ function Write-Completion {
     Write-Host "   Data:      " -NoNewline -ForegroundColor Yellow
     Write-Host "$HermesHome\cron\, sessions\, logs\"
     Write-Host "   Code:      " -NoNewline -ForegroundColor Yellow
-    Write-Host "$HermesHome\hermes-agent\"
+    Write-Host "$InstallDir\"
     Write-Host ""
     
     Write-Host "---------------------------------------------------------" -ForegroundColor Cyan

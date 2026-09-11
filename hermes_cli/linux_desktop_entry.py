@@ -21,6 +21,25 @@ from typing import Optional
 
 DESKTOP_ENTRY_NAME = "hermes.desktop"
 
+
+def _internal_desktop_build() -> bool:
+    from hermes_cli.desktop_identity import internal_desktop_build
+
+    return internal_desktop_build()
+
+
+def _desktop_entry_name() -> str:
+    return "lemon-ai.desktop" if _internal_desktop_build() else DESKTOP_ENTRY_NAME
+
+
+def _icon_theme_name() -> str:
+    return "lemon-ai" if _internal_desktop_build() else "hermes"
+
+
+def _display_name() -> str:
+    return "Lemon AI" if _internal_desktop_build() else "Hermes"
+
+
 _SHELL_NAMES = ("bash", "sh", "dash", "zsh", "ksh")
 
 
@@ -31,15 +50,20 @@ def is_supported() -> bool:
 
 def _xdg_data_home() -> Path:
     raw = os.environ.get("XDG_DATA_HOME")
-    return Path(raw).expanduser() if raw and raw.strip() else Path.home() / ".local" / "share"
+    return (
+        Path(raw).expanduser()
+        if raw and raw.strip()
+        else Path.home() / ".local" / "share"
+    )
 
 
 def desktop_entry_path() -> Path:
-    return _xdg_data_home() / "applications" / DESKTOP_ENTRY_NAME
+    return _xdg_data_home() / "applications" / _desktop_entry_name()
 
 
 def icon_path(project_root: Path) -> Path:
-    return project_root / "apps" / "desktop" / "assets" / "icon.png"
+    filename = "lemon-icon.png" if _internal_desktop_build() else "icon.png"
+    return project_root / "apps" / "desktop" / "assets" / filename
 
 
 def _running_interpreter() -> str:
@@ -56,7 +80,9 @@ def _running_interpreter() -> str:
     """
     lexical = os.path.abspath(sys.executable)
     path = Path(lexical)
-    if any((base / "pyvenv.cfg").is_file() for base in (path.parent, *path.parent.parents)):
+    if any(
+        (base / "pyvenv.cfg").is_file() for base in (path.parent, *path.parent.parents)
+    ):
         return lexical
     return str(path.resolve())
 
@@ -79,7 +105,9 @@ def _can_import_hermes_cli(interpreter: Path) -> bool:
         return _probe_cache[key]
     ok = _run_quiet(
         [key, "-I", "-c", "import hermes_cli.main"],
-        cwd=os.path.abspath(os.sep), timeout=15, on_error=None,
+        cwd=os.path.abspath(os.sep),
+        timeout=15,
+        on_error=None,
     )
     if ok is None:
         return True
@@ -99,7 +127,9 @@ def resolve_exec_command(project_root: Optional[Path] = None) -> str:
     """
     from hermes_cli.relaunch import resolve_hermes_bin
 
-    bin_path = _resolve_hermes_bin_for_desktop_entry(resolve_hermes_bin, checkout_root=project_root)
+    bin_path = _resolve_hermes_bin_for_desktop_entry(
+        resolve_hermes_bin, checkout_root=project_root
+    )
     interpreter = _running_interpreter()
     if not _can_import_hermes_cli(Path(interpreter)):
         # Persisting an interpreter that can't import the CLI writes a dead entry (the DE spawns
@@ -131,9 +161,9 @@ def _is_interpreter(candidate: Path) -> bool:
     Regex approach proposed independently in 94051; kept here with the parent-dir guard so a script named
     ``python`` outside a bin/Scripts tree is not misclassified. See #94051.
     """
-    return bool(re.fullmatch(r"python[23]?(\d+)?(\.\d+)?", candidate.name.lower())) and (
-        candidate.parent.name in {"bin", "scripts"}
-    )
+    return bool(
+        re.fullmatch(r"python[23]?(\d+)?(\.\d+)?", candidate.name.lower())
+    ) and (candidate.parent.name in {"bin", "scripts"})
 
 
 def _inside_checkout(candidate: str, checkout_root: Path, original_argv0: str) -> bool:
@@ -389,18 +419,19 @@ def _quote_exec_arg(arg: str) -> str:
 
 
 def render_desktop_entry(exec_command: str, icon: str) -> str:
+    name = _display_name()
     return (
         "[Desktop Entry]\n"
         "Type=Application\n"
-        "Name=Hermes\n"
-        "GenericName=Hermes Desktop\n"
-        "Comment=Launch Hermes Desktop\n"
+        f"Name={name}\n"
+        f"GenericName={name} Desktop\n"
+        f"Comment=Launch {name} Desktop\n"
         f"Exec={exec_command}\n"
         f"Icon={icon}\n"
         "Terminal=false\n"
         "Categories=Utility;\n"
         "StartupNotify=true\n"
-        "StartupWMClass=Hermes\n"
+        f"StartupWMClass={name}\n"
     )
 
 
@@ -423,7 +454,9 @@ def refresh_desktop_databases(applications_dir: Path) -> "list[str]":
     return ran
 
 
-def _run_quiet(cmd: "list[str]", *, timeout: int = 60, on_error: Optional[bool] = False, **kwargs) -> Optional[bool]:
+def _run_quiet(
+    cmd: "list[str]", *, timeout: int = 60, on_error: Optional[bool] = False, **kwargs
+) -> Optional[bool]:
     """Exit-status success of a silenced subprocess; ``on_error`` when it could not be run at all."""
     try:
         result = subprocess.run(
@@ -468,7 +501,14 @@ def _hicolor_subdir(dimensions: Optional[tuple[int, int]]) -> str:
 
 
 def _hicolor_icon_dest(subdir: str) -> Path:
-    return _xdg_data_home() / "icons" / "hicolor" / subdir / "apps" / "hermes.png"
+    return (
+        _xdg_data_home()
+        / "icons"
+        / "hicolor"
+        / subdir
+        / "apps"
+        / f"{_icon_theme_name()}.png"
+    )
 
 
 def _remove_stale_scalable_icon() -> bool:
@@ -507,7 +547,9 @@ def _resized_hicolor_pngs(raw: bytes) -> Optional[dict[str, bytes]]:
             out: dict[str, bytes] = {}
             for size in _HICOLOR_INSTALL_SIZES:
                 buf = io.BytesIO()
-                rgba.resize((size, size), Image.Resampling.LANCZOS).save(buf, format="PNG")
+                rgba.resize((size, size), Image.Resampling.LANCZOS).save(
+                    buf, format="PNG"
+                )
                 out[f"{size}x{size}"] = buf.getvalue()
             return out
     except (OSError, ValueError):
@@ -562,9 +604,10 @@ def install_desktop_entry(project_root: Path) -> Optional[Path]:
     # Prefer the themed name: the icon is COPIED into the hicolor tree, so the entry outlives the
     # checkout (an absolute Icon= path breaks when the checkout moves). Absolute path only when
     # the copy is impossible (read-only tree); themed name when the checkout has no icon at all.
-    icon_value = str(icon) if icon.is_file() else "hermes"
+    themed_icon = _icon_theme_name()
+    icon_value = str(icon) if icon.is_file() else themed_icon
     if icon.is_file() and _install_icon_to_hicolor(icon):
-        icon_value = "hermes"
+        icon_value = themed_icon
     contents = render_desktop_entry(resolve_exec_command(project_root), icon_value)
 
     try:

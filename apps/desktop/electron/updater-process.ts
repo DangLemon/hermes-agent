@@ -192,6 +192,7 @@ export interface ResolveStagedUpdaterBinaryDeps {
   isWindows?: boolean
   fileExists?: (candidate: string) => boolean
   stagedMtimeMs?: (candidate: string) => number | null
+  stagedUpdaterNames?: string[]
 }
 
 /**
@@ -255,9 +256,20 @@ export function resolveStagedUpdaterBinary(
   }
 
   const fileExists = deps.fileExists ?? stagedFileExists
-  const candidate = path.join(hermesHome, 'hermes-setup.exe')
+  const stagedUpdaterNames =
+    Array.isArray(deps.stagedUpdaterNames) && deps.stagedUpdaterNames.length > 0
+      ? deps.stagedUpdaterNames
+      : ['hermes-setup.exe']
 
-  return fileExists(candidate) ? candidate : null
+  for (const name of stagedUpdaterNames) {
+    const candidate = path.join(hermesHome, name)
+
+    if (fileExists(candidate)) {
+      return candidate
+    }
+  }
+
+  return null
 }
 
 /**

@@ -19,6 +19,9 @@ use tokio::io::AsyncWriteExt;
 
 use crate::paths;
 
+const HERMES_SOURCE_REPOSITORY: &str = "NousResearch/hermes-agent";
+const LEMON_SOURCE_REPOSITORY: &str = "DangLemon/hermes-agent";
+
 /// Identity of the install.ps1 we'll execute. Used by both the manifest
 /// fetch and the per-stage runs.
 #[derive(Debug, Clone)]
@@ -104,7 +107,9 @@ pub async fn resolve(
 ) -> Result<ResolvedScript> {
     // 1. Dev shortcut.
     if let Ok(repo_root) = std::env::var("HERMES_SETUP_DEV_REPO_ROOT") {
-        let candidate = PathBuf::from(repo_root).join("scripts").join(kind.filename());
+        let candidate = PathBuf::from(repo_root)
+            .join("scripts")
+            .join(kind.filename());
         if candidate.exists() {
             emit_log(&format!(
                 "[bootstrap] dev mode — using local {} at {}",
@@ -142,7 +147,8 @@ pub async fn resolve(
         }
     };
 
-    let cached = cached_path(kind, &commit_or_ref);
+    let repository = source_repository(paths::internal_desktop_build());
+    let cached = cached_path(kind, &commit_or_ref, repository);
     match cache_plan(immutable, cached.exists()) {
         CachePlan::Reuse => {
             emit_log(&format!(
@@ -165,15 +171,11 @@ pub async fn resolve(
             emit_log(&format!(
                 "[bootstrap] downloading {} for {} {} from GitHub",
                 kind.filename(),
-                if immutable {
-                    "commit"
-                } else {
-                    "mutable ref"
-                },
+                if immutable { "commit" } else { "mutable ref" },
                 truncate_ref(&commit_or_ref)
             ));
 
-            match download(kind, &commit_or_ref, &cached).await {
+            match download(kind, &commit_or_ref, &cached, repository).await {
                 Ok(()) => {
                     emit_log(&format!("[bootstrap] cached to {}", cached.display()));
                     Ok(ResolvedScript {
@@ -211,11 +213,16 @@ pub struct Pin {
     pub branch: Option<String>,
 }
 
-fn cached_path(kind: ScriptKind, commit_or_ref: &str) -> PathBuf {
+fn cached_path(kind: ScriptKind, commit_or_ref: &str, repository: &str) -> PathBuf {
     let safe = sanitize_ref(commit_or_ref);
+    let prefix = if repository == HERMES_SOURCE_REPOSITORY {
+        String::new()
+    } else {
+        format!("{}-", repository.replace('/', "__"))
+    };
     let filename = match kind {
-        ScriptKind::Ps1 => format!("install-{safe}.ps1"),
-        ScriptKind::Sh => format!("install-{safe}.sh"),
+        ScriptKind::Ps1 => format!("{prefix}install-{safe}.ps1"),
+        ScriptKind::Sh => format!("{prefix}install-{safe}.sh"),
     };
     paths::bootstrap_cache_dir().join(filename)
 }
@@ -322,17 +329,17 @@ fn upgrade_cached_script(kind: ScriptKind, cached: &Path, emit_log: &impl Fn(&st
 /// black-holed connection (captive portal, hung proxy, silently dropped
 /// packets) never errors — the whole bootstrap would hang here instead of
 /// falling back to the cached script.
-async fn download(kind: ScriptKind, commit_or_ref: &str, dest_path: &Path) -> Result<()> {
-    let url = format!(
-        "https://raw.githubusercontent.com/NousResearch/hermes-agent/{}/scripts/{}",
-        commit_or_ref,
-        kind.filename()
-    );
+async fn download(
+    kind: ScriptKind,
+    commit_or_ref: &str,
+    dest_path: &Path,
+    repository: &str,
+) -> Result<()> {
+    let url = install_script_url(kind, commit_or_ref, repository);
 
     if let Some(parent) = dest_path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| {
-            format!("creating bootstrap-cache parent dir {}", parent.display())
-        })?;
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating bootstrap-cache parent dir {}", parent.display()))?;
     }
 
     let tmp_path = dest_path.with_extension({
@@ -380,15 +387,24 @@ async fn download(kind: ScriptKind, commit_or_ref: &str, dest_path: &Path) -> Re
 
     tokio::fs::rename(&tmp_path, dest_path)
         .await
-        .with_context(|| {
-            format!(
-                "renaming {} → {}",
-                tmp_path.display(),
-                dest_path.display()
-            )
-        })?;
+        .with_context(|| format!("renaming {} → {}", tmp_path.display(), dest_path.display()))?;
 
     Ok(())
+}
+
+fn source_repository(internal: bool) -> &'static str {
+    if internal {
+        LEMON_SOURCE_REPOSITORY
+    } else {
+        HERMES_SOURCE_REPOSITORY
+    }
+}
+
+fn install_script_url(kind: ScriptKind, commit_or_ref: &str, repository: &str) -> String {
+    format!(
+        "https://raw.githubusercontent.com/{repository}/{commit_or_ref}/scripts/{}",
+        kind.filename()
+    )
 }
 
 #[cfg(test)]
@@ -412,9 +428,33 @@ mod tests {
     }
 
     #[test]
+    fn install_script_urls_follow_the_installer_identity() {
+        assert_eq!(source_repository(false), HERMES_SOURCE_REPOSITORY);
+        assert_eq!(source_repository(true), LEMON_SOURCE_REPOSITORY);
+        assert_eq!(
+            install_script_url(ScriptKind::Ps1, "main", source_repository(false)),
+            "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.ps1"
+        );
+        assert_eq!(
+            install_script_url(ScriptKind::Sh, "abc1234", source_repository(true)),
+            "https://raw.githubusercontent.com/DangLemon/hermes-agent/abc1234/scripts/install.sh"
+        );
+        assert!(
+            cached_path(ScriptKind::Sh, "abc1234", source_repository(true))
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("DangLemon__hermes-agent-")
+        );
+    }
+
+    #[test]
     fn prepare_cached_ps1_prefixes_utf8_bom() {
         let out = prepare_cached_script_bytes(ScriptKind::Ps1, b"Write-Host hi\n");
-        assert!(out.starts_with(UTF8_BOM), "cached .ps1 must start with UTF-8 BOM");
+        assert!(
+            out.starts_with(UTF8_BOM),
+            "cached .ps1 must start with UTF-8 BOM"
+        );
         assert_eq!(&out[UTF8_BOM.len()..], b"Write-Host hi\n");
     }
 

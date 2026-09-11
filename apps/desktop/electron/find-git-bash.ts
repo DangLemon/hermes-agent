@@ -5,16 +5,19 @@ export interface GitBashOptions {
   env: Record<string, string | undefined>
   fileExists: (filePath: string) => boolean
   findOnPath?: (command: string) => string | null
+  hermesHome?: string
+  localAppDataProductDirs?: string[]
 }
 
 /**
  * Locate bash.exe on Windows.
  * Resolution order (first match wins):
  *   1. HERMES_GIT_BASH_PATH env var override
- *   2. PortableGit under %LOCALAPPDATA%\hermes\git\ (install.ps1)
- *   3. Standard Git for Windows install locations
- *   4. %LOCALAPPDATA%\Programs\Git\ (user-scoped)
- *   5. bash on PATH
+ *   2. PortableGit under the selected HERMES_HOME
+ *   3. PortableGit under branded %LOCALAPPDATA% product dirs
+ *   4. Standard Git for Windows install locations
+ *   5. %LOCALAPPDATA%\Programs\Git\ (user-scoped)
+ *   6. bash on PATH
  */
 export function findGitBash(opts: GitBashOptions): string | null {
   const { isWindows, env, fileExists, findOnPath } = opts
@@ -37,9 +40,18 @@ export function findGitBash(opts: GitBashOptions): string | null {
   // on POSIX CI hosts too), so join with win32 semantics explicitly.
   const joinWin = path.win32.join
 
-  if (localAppData) {
-    candidates.push(joinWin(localAppData, 'hermes', 'git', 'bin', 'bash.exe'))
-    candidates.push(joinWin(localAppData, 'hermes', 'git', 'usr', 'bin', 'bash.exe'))
+  const productHomes = [
+    opts.hermesHome,
+    ...(localAppData
+      ? (opts.localAppDataProductDirs?.length ? opts.localAppDataProductDirs : ['hermes']).map(name =>
+          joinWin(localAppData, name)
+        )
+      : [])
+  ].filter((value): value is string => Boolean(value))
+
+  for (const home of Array.from(new Set(productHomes))) {
+    candidates.push(joinWin(home, 'git', 'bin', 'bash.exe'))
+    candidates.push(joinWin(home, 'git', 'usr', 'bin', 'bash.exe'))
   }
 
   candidates.push(joinWin(env['ProgramFiles'] || 'C:\\Program Files', 'Git', 'bin', 'bash.exe'))
