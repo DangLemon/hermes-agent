@@ -36,6 +36,15 @@ describe('desktop i18n runtime translator', () => {
     expect(translateNow('cron.promptPlaceholder')).toBe('代理每次執行時應做什麼？')
   })
 
+  it('translates Lemon internal install copy in Vietnamese without falling back to Hermes strings', () => {
+    setRuntimeI18nLocale('vi')
+
+    expect(translateNow('install.oneTimeTitle')).toBe('Lemon AI cần cài đặt lần đầu')
+    expect(translateNow('install.setupChoiceTitle')).toBe('Thiết lập Lemon AI')
+    expect(translateNow('install.transcriptSaved')).toBe('Transcript đầy đủ đã lưu tại')
+    expect(translateNow('onboarding.headerTitle')).toBe('Thiết lập Lemon AI')
+  })
+
   it('translates settings copy for newly supported locales', () => {
     setRuntimeI18nLocale('ja')
     expect(translateNow('settings.appearance.title')).toBe('外観')

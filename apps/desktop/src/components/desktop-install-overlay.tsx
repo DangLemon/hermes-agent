@@ -163,6 +163,7 @@ function errorMessage(err: unknown): string {
 
 const EMPTY_STATE: DesktopBootstrapState = {
   active: false,
+  logRoot: null,
   manifest: null,
   stages: {},
   error: null,
@@ -470,7 +471,7 @@ export function DesktopInstallOverlay({ enabled = true }: DesktopInstallOverlayP
   }
 
   // Unsupported-platform branch: macOS/Linux packaged builds hit this when
-  // there's no Hermes Agent installed yet and we can't drive install.sh
+  // there is no local runtime installed yet and we cannot drive install.sh
   // (no stage protocol equivalent yet). Show a copy-paste install command
   // and the docs URL; user runs it from Terminal and relaunches the app.
   if (state.unsupportedPlatform) {
@@ -670,7 +671,7 @@ export function DesktopInstallOverlay({ enabled = true }: DesktopInstallOverlayP
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs text-muted-foreground">
                 {copy.transcriptSaved}{' '}
-                <code className="font-mono text-(--ui-text-secondary)">%LOCALAPPDATA%\hermes\logs\</code>
+                <code className="font-mono text-(--ui-text-secondary)">{state.logRoot || copy.logsFolderFallback}</code>
               </span>
               <div className="flex gap-2">
                 <Button

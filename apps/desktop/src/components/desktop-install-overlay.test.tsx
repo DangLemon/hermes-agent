@@ -17,6 +17,7 @@ function bootstrapState(overrides: Partial<DesktopBootstrapState> = {}): Desktop
     completedAt: null,
     setupChoice: null,
     unsupportedPlatform: null,
+    logRoot: null,
     ...overrides
   }
 }
@@ -81,6 +82,7 @@ function whenPresent(text: string): Promise<HTMLElement> {
 
 beforeEach(() => {
   vi.restoreAllMocks()
+  Element.prototype.scrollIntoView = vi.fn()
 })
 
 afterEach(() => {
@@ -514,6 +516,22 @@ describe('DesktopInstallOverlay first-run setup', () => {
         remoteUrl: 'https://gateway.example.com/hermes'
       })
     })
+  })
+
+  it('shows the Lemon runtime log folder from the bootstrap snapshot on failure', async () => {
+    installDesktopMock(
+      bootstrapState({
+        error: 'install failed',
+        logRoot: String.raw`C:\Users\me\AppData\Local\Lemon AI\logs`,
+        log: [{ ts: Date.now(), stage: 'runtime', line: 'boom', stream: 'stderr' }]
+      })
+    )
+
+    render(<DesktopInstallOverlay />)
+
+    expect(await screen.findByText('Installation failed')).toBeTruthy()
+    expect(screen.getByText(String.raw`C:\Users\me\AppData\Local\Lemon AI\logs`)).toBeTruthy()
+    expect(screen.queryByText(/%LOCALAPPDATA%.*hermes.*logs/i)).toBeNull()
   })
 
   it('offers remote connection from the unsupported packaged install screen', async () => {

@@ -20,23 +20,23 @@ interface ModeOption {
 const OPTIONS: ModeOption[] = [
   {
     mode: 'gui',
-    title: 'Uninstall Chat GUI only',
-    description: 'Remove this desktop app. The Hermes agent, your config, and chats all stay.',
-    consequence: 'the desktop Chat GUI (this app and its data)',
+    title: 'Chỉ gỡ app chat',
+    description: 'Gỡ app Lemon AI trên máy này. Runtime, cấu hình và cuộc trò chuyện vẫn được giữ lại.',
+    consequence: 'app chat trên máy này (app và dữ liệu riêng của app)',
     needsAgent: false
   },
   {
     mode: 'lite',
-    title: 'Uninstall GUI + agent, keep my data',
-    description: 'Remove the app and the Hermes agent, but keep config, chats, and secrets for a future reinstall.',
-    consequence: 'the Chat GUI and the Hermes agent (config, chats, and secrets are kept)',
+    title: 'Gỡ app + runtime, giữ dữ liệu',
+    description: 'Gỡ app và runtime Lemon AI, nhưng giữ cấu hình, cuộc trò chuyện và secret cho lần cài lại sau.',
+    consequence: 'app chat và runtime Lemon AI (cấu hình, cuộc trò chuyện và secret được giữ lại)',
     needsAgent: true
   },
   {
     mode: 'full',
-    title: 'Uninstall everything',
-    description: 'Remove the app, the agent, and all user data — config, chats, scheduled jobs, secrets, logs.',
-    consequence: 'EVERYTHING — the Chat GUI, the Hermes agent, and all of your config, chats, secrets, and logs',
+    title: 'Gỡ toàn bộ',
+    description: 'Gỡ app, runtime và toàn bộ dữ liệu người dùng - cấu hình, cuộc trò chuyện, lịch, secret, log.',
+    consequence: 'TOÀN BỘ — app chat, runtime Lemon AI, cấu hình, cuộc trò chuyện, secret và log',
     // full removes the agent (and user data), so it's an agent-removing option:
     // hide it on a lite client with no local agent, same as lite. A lite client
     // connecting to a remote backend has no local agent OR local user data the
@@ -106,7 +106,7 @@ export function UninstallSection() {
       const result = await bridge.run(pending)
 
       if (!result.ok) {
-        setError(result.message || result.error || 'Uninstall could not start.')
+        setError(result.message || result.error || 'Không thể bắt đầu gỡ cài đặt.')
         setRunning(false)
         setPending(null)
       }
@@ -122,19 +122,19 @@ export function UninstallSection() {
 
   return (
     <div className="mx-auto mt-8 w-full max-w-2xl">
-      <SectionHeading icon={AlertTriangle} title="Danger zone" />
+      <SectionHeading icon={AlertTriangle} title="Vùng nguy hiểm" />
 
       <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3">
         {loading ? (
           <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
             <Loader2 className="size-3.5 animate-spin" />
-            Checking what&apos;s installed…
+            Đang kiểm tra thành phần đã cài…
           </div>
         ) : pendingOption ? (
           <div>
-            <p className="text-sm font-medium text-destructive">Confirm uninstall</p>
+            <p className="text-sm font-medium text-destructive">Xác nhận gỡ cài đặt</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              This removes {pendingOption.consequence}. This can&apos;t be undone.
+              Thao tác này sẽ gỡ {pendingOption.consequence}. Không thể hoàn tác.
             </p>
             {summary?.running_app_path && (
               <p className="mt-1 font-mono text-[0.68rem] text-muted-foreground/60">App: {summary.running_app_path}</p>
@@ -143,18 +143,18 @@ export function UninstallSection() {
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <Button disabled={running} onClick={() => void handleConfirm()} size="sm" variant="destructive">
                 {running && <Loader2 className="size-3 animate-spin" />}
-                {running ? 'Uninstalling…' : 'Yes, uninstall'}
+                {running ? 'Đang gỡ…' : 'Gỡ cài đặt'}
               </Button>
               <Button disabled={running} onClick={() => setPending(null)} size="sm" variant="text">
-                Cancel
+                Hủy
               </Button>
             </div>
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium">Uninstall Hermes</p>
+            <p className="text-sm font-medium">Gỡ Lemon AI</p>
             <p className="text-xs text-muted-foreground">
-              Choose how much to remove. The app closes to finish the job; reopen the installer any time to come back.
+              Chọn phạm vi cần gỡ. App sẽ đóng để hoàn tất; có thể mở lại bộ cài bất cứ lúc nào.
             </p>
             <div className="mt-1 flex flex-col gap-2">
               {visibleOptions.map(opt => (

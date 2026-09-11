@@ -2107,6 +2107,7 @@ const BOOTSTRAP_LOG_RING_MAX = 500
 
 let bootstrapState = {
   active: false,
+  logRoot: path.join(HERMES_HOME, 'logs'),
   manifest: null,
   stages: {},
   error: null,
@@ -2197,6 +2198,7 @@ function getBootstrapState() {
 function resetBootstrapSnapshot() {
   bootstrapState = {
     active: false,
+    logRoot: path.join(HERMES_HOME, 'logs'),
     manifest: null,
     stages: {},
     error: null,
