@@ -304,91 +304,374 @@ function cachedScriptPath(hermesHome, commit, sourceRepository = DEFAULT_SOURCE_
   )
 }
 
-function downloadInstallScript(ref, destPath, sourceRepository = DEFAULT_SOURCE_REPOSITORY) {
+const DOWNLOAD_MAX_ATTEMPTS = 4
+const DOWNLOAD_REQUEST_TIMEOUT_MS = 15_000
+const DOWNLOAD_TOTAL_TIMEOUT_MS = 60_000
+const DOWNLOAD_BASE_BACKOFF_MS = 750
+const DOWNLOAD_MAX_BACKOFF_MS = 5_000
+const DOWNLOAD_MAX_REDIRECTS = 3
+const RETRYABLE_DOWNLOAD_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504])
+
+const TERMINAL_TLS_ERROR_CODES = new Set([
+  'CERT_CHAIN_TOO_LONG',
+  'CERT_HAS_EXPIRED',
+  'CERT_NOT_YET_VALID',
+  'CERT_REVOKED',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'ERR_TLS_CERT_ALTNAME_INVALID',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'UNABLE_TO_GET_ISSUER_CERT',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE'
+])
+
+type DownloadRequestOptions = {
+  clearTimeout?: (handle: any) => void
+  emit?: (event: { type: 'log'; line: string }) => void
+  maxAttempts?: number
+  now?: () => number
+  random?: () => number
+  request?: (url: string, onResponse: (response: any) => void) => any
+  requestTimeoutMs?: number
+  setTimeout?: (handler: () => void, ms: number) => any
+  sleep?: (ms: number) => Promise<void>
+  totalTimeoutMs?: number
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+class DownloadAttemptError extends Error {
+  retryable: boolean
+  retryAfterMs: number | null
+  statusCode: number | null
+
+  constructor(message, { retryable = false, statusCode = null, retryAfterMs = null } = {}) {
+    super(message)
+    this.name = 'DownloadAttemptError'
+    this.retryable = retryable
+    this.statusCode = statusCode
+    this.retryAfterMs = retryAfterMs
+  }
+}
+
+function unlinkIfExists(filePath) {
+  try {
+    fs.unlinkSync(filePath)
+  } catch {
+    void 0
+  }
+}
+
+function parseRetryAfterMs(value, nowMs) {
+  const selected = Array.isArray(value) ? value[0] : value
+
+  if (typeof selected !== 'string' || selected.trim() === '') {
+    return null
+  }
+
+  const trimmed = selected.trim()
+  const seconds = Number(trimmed)
+
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.ceil(seconds * 1000)
+  }
+
+  const dateMs = Date.parse(trimmed)
+
+  if (Number.isFinite(dateMs)) {
+    return Math.max(0, dateMs - nowMs)
+  }
+
+  return null
+}
+
+function isRedirectStatus(statusCode) {
+  return statusCode === 301 || statusCode === 302 || statusCode === 303 || statusCode === 307 || statusCode === 308
+}
+
+function isTerminalTlsError(error) {
+  return Boolean(error && typeof error.code === 'string' && TERMINAL_TLS_ERROR_CODES.has(error.code))
+}
+
+function retryDelayForAttempt(attemptIndex, random) {
+  const exponential = Math.min(DOWNLOAD_MAX_BACKOFF_MS, DOWNLOAD_BASE_BACKOFF_MS * 2 ** attemptIndex)
+  const jitter = Math.floor(exponential * 0.2 * random())
+
+  return exponential + jitter
+}
+
+function describeDownloadRetryReason(error) {
+  if (error && error.statusCode) {
+    return `HTTP ${error.statusCode}`
+  }
+
+  return error && error.message ? error.message.replace(/\s+/g, ' ').slice(0, 120) : 'network error'
+}
+
+function wrapDownloadTransportError(scriptName, error) {
+  if (error instanceof DownloadAttemptError) {
+    return error
+  }
+
+  return new DownloadAttemptError(`Failed to download ${scriptName}: ${error.message || String(error)}`, {
+    retryable: !isTerminalTlsError(error)
+  })
+}
+
+function defaultDownloadRequest(url: string, onResponse: (response: any) => void): any {
+  return https.get(url, onResponse)
+}
+
+function downloadInstallScript(
+  ref,
+  destPath,
+  sourceRepository = DEFAULT_SOURCE_REPOSITORY,
+  options: DownloadRequestOptions = {}
+) {
   // Fetch from GitHub raw at the install ref. Normal production builds pass a
   // pinned SHA (immutable). Non-git fallback builds pass an unpinned branch
   // ref so local builds can still bootstrap without pretending the all-zero
   // placeholder is a real GitHub commit.
   const scriptName = installScriptName()
   const url = githubRawInstallScriptUrl(sourceRepository, ref, scriptName)
+  const request = options.request || defaultDownloadRequest
+  const delay = options.sleep || sleep
+  const random = options.random || Math.random
+  const now = options.now || Date.now
+  const requestTimeoutMs = options.requestTimeoutMs || DOWNLOAD_REQUEST_TIMEOUT_MS
+  const totalTimeoutMs = options.totalTimeoutMs || DOWNLOAD_TOTAL_TIMEOUT_MS
+  const maxAttempts = options.maxAttempts || DOWNLOAD_MAX_ATTEMPTS
+  const emit = typeof options.emit === 'function' ? options.emit : null
+  const setTimer = options.setTimeout || setTimeout
+  const clearTimer = options.clearTimeout || clearTimeout
+  const tmpPath = destPath + '.tmp'
+  const startedAt = now()
 
-  return new Promise((resolve, reject) => {
-    fs.mkdirSync(path.dirname(destPath), { recursive: true })
-    const tmpPath = destPath + '.tmp'
-    const out = fs.createWriteStream(tmpPath)
-    https
-      .get(url, res => {
-        if (res.statusCode === 301 || res.statusCode === 302) {
-          // GitHub raw shouldn't redirect for a SHA URL, but follow once
-          // defensively.
-          out.close()
-          fs.unlinkSync(tmpPath)
-          https
-            .get(res.headers.location, res2 => {
-              if (res2.statusCode !== 200) {
-                reject(
-                  new Error(
-                    `Failed to download ${scriptName}: HTTP ${res2.statusCode} from redirect ${res.headers.location}`
-                  )
-                )
+  const runAttempt = (attemptUrl, remainingMs, redirectsRemaining): Promise<string> =>
+    new Promise<string>((resolve, reject) => {
+      let settled = false
+      let out: fs.WriteStream | null = null
+      const requests = new Set<any>()
+      const responses = new Set<any>()
+      const timeoutMs = Math.max(1, Math.min(requestTimeoutMs, remainingMs))
+      let timeout = null
 
+      const finish = (error, result: string | null = null) => {
+        if (settled) {
+          return
+        }
+
+        settled = true
+        clearTimer(timeout)
+
+        if (error) {
+          if (out) {
+            out.destroy()
+          }
+
+          for (const req of requests) {
+            try {
+              req.destroy()
+            } catch {
+              void 0
+            }
+          }
+
+          for (const res of responses) {
+            try {
+              res.destroy()
+            } catch {
+              void 0
+            }
+          }
+
+          unlinkIfExists(tmpPath)
+          reject(error)
+
+          return
+        }
+
+        resolve(result)
+      }
+
+      const start = (currentUrl, currentRedirectsRemaining) => {
+        if (settled) {
+          return
+        }
+
+        const req = request(currentUrl, res => {
+          if (settled) {
+            res.resume()
+
+            try {
+              res.destroy()
+            } catch {
+              void 0
+            }
+
+            return
+          }
+
+          responses.add(res)
+
+          if (typeof res.once === 'function') {
+            res.once('close', () => responses.delete(res))
+            res.once('end', () => responses.delete(res))
+          }
+
+          res.on('error', error => finish(wrapDownloadTransportError(scriptName, error), null))
+          res.on('aborted', () =>
+            finish(
+              new DownloadAttemptError(`Failed to download ${scriptName}: response aborted`, { retryable: true }),
+              null
+            )
+          )
+
+          const statusCode = res.statusCode || 0
+
+          if (isRedirectStatus(statusCode)) {
+            res.resume()
+
+            if (currentRedirectsRemaining <= 0 || typeof res.headers.location !== 'string') {
+              finish(
+                new DownloadAttemptError(
+                  `Failed to download ${scriptName}: HTTP ${statusCode} redirect could not be followed from ${currentUrl}`,
+                  { retryable: false, statusCode }
+                ),
+                null
+              )
+
+              return
+            }
+
+            try {
+              const nextUrl = new URL(res.headers.location, currentUrl).toString()
+              start(nextUrl, currentRedirectsRemaining - 1)
+            } catch {
+              finish(
+                new DownloadAttemptError(`Failed to download ${scriptName}: invalid redirect from ${currentUrl}`, {
+                  retryable: false,
+                  statusCode
+                }),
+                null
+              )
+            }
+
+            return
+          }
+
+          if (statusCode !== 200) {
+            res.resume()
+            finish(
+              new DownloadAttemptError(`Failed to download ${scriptName}: HTTP ${statusCode} from ${currentUrl}`, {
+                retryable: RETRYABLE_DOWNLOAD_STATUS_CODES.has(statusCode),
+                retryAfterMs: parseRetryAfterMs(res.headers['retry-after'], now()),
+                statusCode
+              }),
+              null
+            )
+
+            return
+          }
+
+          fs.mkdirSync(path.dirname(destPath), { recursive: true })
+          unlinkIfExists(tmpPath)
+          out = fs.createWriteStream(tmpPath)
+          res.pipe(out)
+          out.on('finish', () => {
+            out.close(() => {
+              if (settled) {
                 return
               }
 
-              const out2 = fs.createWriteStream(tmpPath)
-              res2.pipe(out2)
-              out2.on('finish', () => {
-                out2.close()
+              try {
                 fs.renameSync(tmpPath, destPath)
-                resolve(destPath)
-              })
-              out2.on('error', reject)
+                finish(null, destPath)
+              } catch (error) {
+                finish(error, null)
+              }
             })
-            .on('error', reject)
+          })
+          out.on('error', error => finish(error, null))
+        })
 
-          return
+        requests.add(req)
+
+        if (typeof req.once === 'function') {
+          req.once('close', () => requests.delete(req))
         }
 
-        if (res.statusCode !== 200) {
-          out.close()
+        req.on('error', error => {
+          finish(wrapDownloadTransportError(scriptName, error), null)
+        })
+      }
 
-          try {
-            fs.unlinkSync(tmpPath)
-          } catch {
-            void 0
+      timeout = setTimer(() => {
+        finish(
+          new DownloadAttemptError(`Failed to download ${scriptName}: request timed out after ${timeoutMs}ms`, {
+            retryable: true
+          }),
+          null
+        )
+      }, timeoutMs)
+      start(attemptUrl, redirectsRemaining)
+    })
+
+  return (async () => {
+    let lastError = null
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const remainingMs = totalTimeoutMs - (now() - startedAt)
+
+      if (remainingMs <= 0) {
+        throw new Error(
+          `Failed to download ${scriptName}: exceeded ${totalTimeoutMs}ms bootstrap download budget after ${attempt} attempts`
+        )
+      }
+
+      try {
+        return await runAttempt(url, remainingMs, DOWNLOAD_MAX_REDIRECTS)
+      } catch (error) {
+        lastError = error
+
+        if (!error.retryable || attempt === maxAttempts - 1) {
+          if (error.retryable && attempt === maxAttempts - 1) {
+            throw new Error(`${error.message} after ${attempt + 1} attempts`)
           }
 
-          reject(new Error(`Failed to download ${scriptName}: HTTP ${res.statusCode} from ${url}`))
-
-          return
+          throw error
         }
 
-        res.pipe(out)
-        out.on('finish', () => {
-          out.close()
-          fs.renameSync(tmpPath, destPath)
-          resolve(destPath)
-        })
-        out.on('error', err => {
-          try {
-            fs.unlinkSync(tmpPath)
-          } catch {
-            void 0
-          }
+        const remainingAfterAttemptMs = totalTimeoutMs - (now() - startedAt)
 
-          reject(err)
-        })
-      })
-      .on('error', err => {
-        try {
-          fs.unlinkSync(tmpPath)
-        } catch {
-          void 0
+        const waitMs =
+          typeof error.retryAfterMs === 'number' ? error.retryAfterMs : retryDelayForAttempt(attempt, random)
+
+        if (waitMs > remainingAfterAttemptMs) {
+          throw new Error(
+            `Failed to download ${scriptName}: ${
+              typeof error.retryAfterMs === 'number' ? 'Retry-After' : 'retry delay'
+            } ${waitMs}ms exceeds remaining bootstrap download budget ${remainingAfterAttemptMs}ms after ${attempt + 1} attempts`
+          )
         }
 
-        reject(err)
-      })
-  })
+        if (emit) {
+          emit({
+            type: 'log',
+            line:
+              `[bootstrap] ${scriptName} download attempt ${attempt + 1}/${maxAttempts} failed ` +
+              `(${describeDownloadRetryReason(error)}); retrying in ${waitMs}ms`
+          })
+        }
+
+        await delay(waitMs)
+      }
+    }
+
+    throw lastError || new Error(`Failed to download ${scriptName}: exhausted retry attempts`)
+  })()
 }
 
 async function resolveInstallScript({
@@ -448,7 +731,7 @@ async function resolveInstallScript({
   })
 
   try {
-    await _download(installRef.ref, cached, installSourceRepository)
+    await _download(installRef.ref, cached, installSourceRepository, { emit })
     emit({ type: 'log', line: `[bootstrap] saved to ${cached}` })
 
     return { path: cached, source: 'download', commit: resolvedCommit, kind: installScriptKind() }
@@ -1143,6 +1426,7 @@ export {
   buildPinArgs,
   buildPosixPinArgs,
   cachedScriptPath,
+  downloadInstallScript,
   hasExistingGitCheckout,
   installedAgentInstallScript,
   installRefForStamp,

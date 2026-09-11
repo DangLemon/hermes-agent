@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { PassThrough } from 'node:stream'
 
 import { test } from 'vitest'
 
@@ -9,6 +10,7 @@ import {
   buildPinArgs,
   buildPosixPinArgs,
   cachedScriptPath,
+  downloadInstallScript,
   hasExistingGitCheckout,
   installedAgentInstallScript,
   installRefForStamp,
@@ -24,6 +26,60 @@ const ZERO_COMMIT = '0000000000000000000000000000000000000000'
 
 function mkTmpHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-bootstrap-test-'))
+}
+
+function createFakeDownloadRequest(sequence) {
+  const calls = []
+
+  return {
+    calls,
+    request: (url, onResponse) => {
+      calls.push(String(url))
+      const next = sequence.shift()
+      const listeners = new Map()
+
+      const request = {
+        on: (event, handler) => {
+          listeners.set(event, handler)
+
+          return request
+        },
+        setTimeout: (_ms, handler) => {
+          if (next.timeout) {
+            queueMicrotask(handler)
+          }
+
+          return request
+        },
+        destroy: error => {
+          if (error && listeners.has('error')) {
+            listeners.get('error')(error)
+          }
+        }
+      }
+
+      queueMicrotask(() => {
+        if (next.timeout) {
+          return
+        }
+
+        if (next.error) {
+          listeners.get('error')?.(next.error)
+
+          return
+        }
+
+        const body = new PassThrough() as any
+
+        body.statusCode = next.statusCode
+        body.headers = next.headers || {}
+        onResponse(body)
+        body.end(next.body || '')
+      })
+
+      return request
+    }
+  }
 }
 
 test('runBootstrap bails immediately when the signal is already aborted', async () => {
@@ -360,6 +416,362 @@ test('resolveInstallScript rethrows when the 404 fallback is unavailable', async
       }),
       /HTTP 404|Failed to download/
     )
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('downloadInstallScript retries a transient 429 and writes the completed script atomically', async () => {
+  const home = mkTmpHome()
+
+  try {
+    const destPath = path.join(home, SCRIPT_NAME)
+    const sleeps = []
+    const fake = createFakeDownloadRequest([{ statusCode: 429 }, { statusCode: 200, body: '#!/bin/sh\necho ok\n' }])
+
+    const result = await downloadInstallScript('a'.repeat(40), destPath, 'DangLemon/hermes-agent', {
+      request: fake.request,
+      sleep: ms => {
+        sleeps.push(ms)
+
+        return Promise.resolve()
+      },
+      random: () => 0,
+      now: () => 0
+    })
+
+    assert.equal(result, destPath)
+    assert.equal(fs.readFileSync(destPath, 'utf8'), '#!/bin/sh\necho ok\n')
+    assert.equal(fs.existsSync(destPath + '.tmp'), false, 'no partial temp file remains after success')
+    assert.equal(fake.calls.length, 2)
+    assert.deepEqual(sleeps, [750])
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('downloadInstallScript exhausts retryable 429 responses after four attempts', async () => {
+  const home = mkTmpHome()
+
+  try {
+    const destPath = path.join(home, SCRIPT_NAME)
+    const sleeps = []
+
+    const fake = createFakeDownloadRequest([
+      { statusCode: 429 },
+      { statusCode: 429 },
+      { statusCode: 429 },
+      { statusCode: 429 }
+    ])
+
+    await assert.rejects(
+      downloadInstallScript('a'.repeat(40), destPath, undefined, {
+        request: fake.request,
+        sleep: ms => {
+          sleeps.push(ms)
+
+          return Promise.resolve()
+        },
+        random: () => 0,
+        now: () => 0
+      }),
+      /HTTP 429/
+    )
+
+    assert.equal(fake.calls.length, 4)
+    assert.deepEqual(sleeps, [750, 1500, 3000])
+    assert.equal(fs.existsSync(destPath), false)
+    assert.equal(fs.existsSync(destPath + '.tmp'), false)
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('downloadInstallScript does not retry permanent 404 responses', async () => {
+  const home = mkTmpHome()
+
+  try {
+    const destPath = path.join(home, SCRIPT_NAME)
+    const fake = createFakeDownloadRequest([{ statusCode: 404 }])
+
+    await assert.rejects(
+      downloadInstallScript('a'.repeat(40), destPath, undefined, {
+        request: fake.request,
+        sleep: () => {
+          throw new Error('404 should not sleep before retry')
+        }
+      }),
+      /HTTP 404/
+    )
+
+    assert.equal(fake.calls.length, 1)
+    assert.equal(fs.existsSync(destPath), false)
+    assert.equal(fs.existsSync(destPath + '.tmp'), false)
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('downloadInstallScript retries transient network errors and removes partial temp files', async () => {
+  const home = mkTmpHome()
+
+  try {
+    const destPath = path.join(home, SCRIPT_NAME)
+    fs.mkdirSync(path.dirname(destPath), { recursive: true })
+    fs.writeFileSync(destPath + '.tmp', 'partial')
+
+    const fake = createFakeDownloadRequest([
+      { error: Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }) },
+      { statusCode: 200, body: 'Write-Output ok\n' }
+    ])
+
+    await downloadInstallScript('a'.repeat(40), destPath, undefined, {
+      request: fake.request,
+      sleep: () => Promise.resolve(),
+      random: () => 0,
+      now: () => 0
+    })
+
+    assert.equal(fake.calls.length, 2)
+    assert.equal(fs.readFileSync(destPath, 'utf8'), 'Write-Output ok\n')
+    assert.equal(fs.existsSync(destPath + '.tmp'), false)
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('downloadInstallScript retries request timeouts without waiting for real time', async () => {
+  const home = mkTmpHome()
+
+  try {
+    const destPath = path.join(home, SCRIPT_NAME)
+    let timerCalls = 0
+    const fake = createFakeDownloadRequest([{ timeout: true }, { statusCode: 200, body: '# timeout recovered\n' }])
+
+    await downloadInstallScript('a'.repeat(40), destPath, undefined, {
+      request: fake.request,
+      requestTimeoutMs: 250,
+      setTimeout: handler => {
+        timerCalls += 1
+
+        if (timerCalls === 1) {
+          queueMicrotask(handler)
+        }
+
+        return timerCalls
+      },
+      clearTimeout: () => {},
+      sleep: () => Promise.resolve(),
+      random: () => 0,
+      now: () => 0
+    })
+
+    assert.equal(fake.calls.length, 2)
+    assert.equal(fs.readFileSync(destPath, 'utf8'), '# timeout recovered\n')
+    assert.equal(fs.existsSync(destPath + '.tmp'), false)
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('downloadInstallScript does not publish a cache file after a slow response times out', async () => {
+  const home = mkTmpHome()
+
+  try {
+    const destPath = path.join(home, SCRIPT_NAME)
+    let timeoutHandler = null
+    let response = null
+
+    const request = (_url, onResponse) => {
+      const listeners = new Map()
+
+      const req = {
+        on: (event, handler) => {
+          listeners.set(event, handler)
+
+          return req
+        },
+        destroy: error => {
+          if (error) {
+            listeners.get('error')?.(error)
+          }
+        }
+      }
+
+      queueMicrotask(() => {
+        response = new PassThrough() as any
+        response.statusCode = 200
+        response.headers = {}
+        onResponse(response)
+        response.write('partial')
+      })
+
+      return req
+    }
+
+    const download = downloadInstallScript('a'.repeat(40), destPath, undefined, {
+      request,
+      maxAttempts: 1,
+      requestTimeoutMs: 250,
+      setTimeout: handler => {
+        timeoutHandler = handler
+
+        return 1
+      },
+      clearTimeout: () => {},
+      sleep: () => Promise.resolve(),
+      random: () => 0,
+      now: () => 0
+    })
+
+    await new Promise<void>(resolve => queueMicrotask(() => resolve()))
+    timeoutHandler()
+    response.end('late completion')
+
+    await assert.rejects(download, /request timed out after 250ms/)
+    assert.equal(fs.existsSync(destPath), false)
+    assert.equal(fs.existsSync(destPath + '.tmp'), false)
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('downloadInstallScript does not retry TLS validation failures', async () => {
+  const home = mkTmpHome()
+
+  try {
+    const destPath = path.join(home, SCRIPT_NAME)
+
+    const fake = createFakeDownloadRequest([
+      { error: Object.assign(new Error('self-signed certificate'), { code: 'DEPTH_ZERO_SELF_SIGNED_CERT' }) }
+    ])
+
+    await assert.rejects(
+      downloadInstallScript('a'.repeat(40), destPath, undefined, {
+        request: fake.request,
+        sleep: () => {
+          throw new Error('TLS validation failures should not retry')
+        }
+      }),
+      /self-signed certificate/
+    )
+
+    assert.equal(fake.calls.length, 1)
+    assert.equal(fs.existsSync(destPath), false)
+    assert.equal(fs.existsSync(destPath + '.tmp'), false)
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('downloadInstallScript rejects redirect chains beyond the bounded redirect policy', async () => {
+  const home = mkTmpHome()
+
+  try {
+    const destPath = path.join(home, SCRIPT_NAME)
+
+    const fake = createFakeDownloadRequest([
+      { statusCode: 302, headers: { location: 'https://example.com/1' } },
+      { statusCode: 302, headers: { location: 'https://example.com/2' } },
+      { statusCode: 302, headers: { location: 'https://example.com/3' } },
+      { statusCode: 302, headers: { location: 'https://example.com/4' } },
+      { statusCode: 200, body: '# should not reach\n' }
+    ])
+
+    await assert.rejects(
+      downloadInstallScript('main', destPath, 'DangLemon/hermes-agent', {
+        request: fake.request,
+        sleep: () => Promise.resolve()
+      }),
+      /redirect could not be followed/
+    )
+
+    assert.equal(fake.calls.length, 4)
+    assert.equal(fs.existsSync(destPath), false)
+    assert.equal(fs.existsSync(destPath + '.tmp'), false)
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('downloadInstallScript treats Retry-After beyond the total budget as terminal', async () => {
+  const home = mkTmpHome()
+
+  try {
+    const destPath = path.join(home, SCRIPT_NAME)
+    const fake = createFakeDownloadRequest([{ statusCode: 429, headers: { 'retry-after': '120' } }])
+
+    await assert.rejects(
+      downloadInstallScript('a'.repeat(40), destPath, undefined, {
+        request: fake.request,
+        sleep: () => {
+          throw new Error('over-budget Retry-After should not sleep')
+        },
+        now: () => 0
+      }),
+      /Retry-After 120000ms exceeds remaining bootstrap download budget/
+    )
+
+    assert.equal(fake.calls.length, 1)
+    assert.equal(fs.existsSync(destPath), false)
+    assert.equal(fs.existsSync(destPath + '.tmp'), false)
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('downloadInstallScript honors Retry-After HTTP dates within the download budget', async () => {
+  const home = mkTmpHome()
+
+  try {
+    const destPath = path.join(home, SCRIPT_NAME)
+    const sleeps = []
+    const nowMs = Date.parse('2026-09-11T04:00:00Z')
+
+    const fake = createFakeDownloadRequest([
+      { statusCode: 429, headers: { 'retry-after': new Date(nowMs + 5000).toUTCString() } },
+      { statusCode: 200, body: '# date retry\n' }
+    ])
+
+    await downloadInstallScript('a'.repeat(40), destPath, undefined, {
+      request: fake.request,
+      sleep: ms => {
+        sleeps.push(ms)
+
+        return Promise.resolve()
+      },
+      now: () => nowMs
+    })
+
+    assert.deepEqual(sleeps, [5000])
+    assert.equal(fake.calls.length, 2)
+    assert.equal(fs.readFileSync(destPath, 'utf8'), '# date retry\n')
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('downloadInstallScript follows bounded redirects within the current attempt', async () => {
+  const home = mkTmpHome()
+
+  try {
+    const destPath = path.join(home, SCRIPT_NAME)
+
+    const fake = createFakeDownloadRequest([
+      {
+        statusCode: 302,
+        headers: { location: 'https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.sh' }
+      },
+      { statusCode: 200, body: '# redirected\n' }
+    ])
+
+    await downloadInstallScript('main', destPath, 'DangLemon/hermes-agent', {
+      request: fake.request,
+      sleep: () => Promise.resolve()
+    })
+
+    assert.equal(fake.calls.length, 2)
+    assert.equal(fs.readFileSync(destPath, 'utf8'), '# redirected\n')
   } finally {
     fs.rmSync(home, { recursive: true, force: true })
   }
