@@ -200,6 +200,11 @@ export function validateGeneratedConfig(config) {
   assertEqual(config.productName, 'Lemon AI', 'electron-builder productName')
   assertEqual(config.executableName, 'Lemon AI', 'electron-builder executableName')
   assertEqual(config.mac?.executableName, 'Lemon AI', 'electron-builder mac.executableName')
+  assertEqual(
+    config.mac?.extendInfo?.CFBundleExecutable,
+    'Lemon AI',
+    'electron-builder mac.extendInfo.CFBundleExecutable'
+  )
   assertEqual(config.appId, 'com.lemondigital.lemonai', 'electron-builder appId')
 }
 

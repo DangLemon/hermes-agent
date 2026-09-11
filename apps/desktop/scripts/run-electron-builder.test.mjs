@@ -156,6 +156,7 @@ test('validated internal package config applies Lemon physical identity while pr
     assert.equal(config.artifactName, 'Lemon-AI-${version}-${os}-${arch}.${ext}')
     assert.equal(config.icon, 'assets/lemon-icon')
     assert.equal(config.mac.extendInfo.CFBundleDisplayName, 'Lemon AI')
+    assert.equal(config.mac.extendInfo.CFBundleExecutable, 'Lemon AI')
     assert.equal(config.mac.extendInfo.CFBundleName, 'Lemon AI')
     assert.equal(
       config.mac.extendInfo.NSMicrophoneUsageDescription,
