@@ -772,7 +772,9 @@ const INTERNAL_DESKTOP_HARNESS = initializeInternalDesktopHarness({
   appRoot: APP_ROOT,
   userDataPath: app.getPath('userData'),
   isWsl: IS_WSL,
-  allowBuildResource: !IS_PACKAGED && Boolean(process.env['HERMES_DESKTOP_HARNESS_CONFIG'])
+  allowBuildResource:
+    !IS_PACKAGED &&
+    Boolean(process.env['LEMON_AI_DESKTOP_HARNESS_CONFIG'] || process.env['HERMES_DESKTOP_HARNESS_CONFIG'])
 })
 
 const DESKTOP_RUNTIME_IDENTITY = resolveDesktopRuntimeIdentity({

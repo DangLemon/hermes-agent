@@ -80,7 +80,7 @@ test('electron-builder uses a schema-valid static harness resource without index
 
   const ordinary = buildElectronBuilderArgs({ dist: null, argv: ['--dir'] })
   assert.equal(
-    ordinary.some(arg => String(arg).includes('internal-desktop-harness.json')),
+    ordinary.some(arg => String(arg).includes('lemon-ai-harness.json')),
     false
   )
 
@@ -88,7 +88,7 @@ test('electron-builder uses a schema-valid static harness resource without index
   assert.deepEqual(pkg.build.extraResources.at(-1), {
     from: 'build',
     to: '.',
-    filter: ['internal-desktop-harness.json', 'internal-desktop-harness-seed.py']
+    filter: ['lemon-ai-harness.json', 'lemon-ai-harness-seed.py']
   })
   await validateConfiguration(structuredClone(pkg.build))
 })
@@ -183,7 +183,7 @@ test('validated internal package config applies Lemon physical identity while pr
     assert.deepEqual(config.extraResources.at(-1), {
       from: 'build',
       to: '.',
-      filter: ['internal-desktop-harness.json', 'internal-desktop-harness-seed.py']
+      filter: ['lemon-ai-harness.json', 'lemon-ai-harness-seed.py']
     })
     await validateConfiguration(structuredClone(config))
   })

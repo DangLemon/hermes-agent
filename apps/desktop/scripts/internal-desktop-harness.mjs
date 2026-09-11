@@ -2,9 +2,11 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-export const HARNESS_RESOURCE_FILENAME = 'internal-desktop-harness.json'
-export const HARNESS_SEED_FILENAME = 'internal-desktop-harness-seed.py'
+export const HARNESS_RESOURCE_FILENAME = 'lemon-ai-harness.json'
+export const HARNESS_SEED_FILENAME = 'lemon-ai-harness-seed.py'
+export const HARNESS_SEED_SOURCE_FILENAME = 'lemon-ai-harness-seed.py'
 export const HARNESS_SCHEMA_VERSION = 1
+export const HARNESS_CONFIG_ENV_KEYS = ['LEMON_AI_DESKTOP_HARNESS_CONFIG', 'HERMES_DESKTOP_HARNESS_CONFIG']
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DEFAULT_BUILD_DIR = path.join(APP_ROOT, 'build')
 const UI_KEYS = ['agents', 'cron', 'messaging', 'terminal', 'webhooks']
@@ -170,8 +172,17 @@ export function validateHarnessResource(input) {
   return input
 }
 
+export function selectedHarnessConfigInputPath(env = process.env) {
+  for (const key of HARNESS_CONFIG_ENV_KEYS) {
+    const selected = String(env[key] || '').trim()
+    if (selected) return selected
+  }
+
+  return ''
+}
+
 export function loadHarnessConfigInput(env = process.env) {
-  const selected = String(env.HERMES_DESKTOP_HARNESS_CONFIG || '').trim()
+  const selected = selectedHarnessConfigInputPath(env)
   if (!selected) return null
   const resolved = path.resolve(selected)
   const parsed = JSON.parse(fs.readFileSync(resolved, 'utf8'))
@@ -205,7 +216,7 @@ export function generateInternalDesktopHarnessResource({ env = process.env, buil
 
   fs.mkdirSync(buildDir, { recursive: true })
   fs.writeFileSync(outPath, `${JSON.stringify(resource, null, 2)}\n`, 'utf8')
-  fs.copyFileSync(path.join(APP_ROOT, 'electron', HARNESS_SEED_FILENAME), path.join(buildDir, HARNESS_SEED_FILENAME))
+  fs.copyFileSync(path.join(APP_ROOT, 'electron', HARNESS_SEED_SOURCE_FILENAME), path.join(buildDir, HARNESS_SEED_FILENAME))
   return { resourcePath: outPath, resource }
 }
 

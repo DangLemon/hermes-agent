@@ -42,7 +42,8 @@ import { hiddenWindowsChildOptions } from './windows-child-options'
 
 const IS_WINDOWS = process.platform === 'win32'
 
-const HARNESS_RESOURCE_FILENAME = 'internal-desktop-harness.json'
+const HARNESS_RESOURCE_FILENAME = 'lemon-ai-harness.json'
+const LEGACY_HARNESS_RESOURCE_FILENAME = 'internal-desktop-harness.json'
 const DEFAULT_SOURCE_REPOSITORY = 'NousResearch/hermes-agent'
 const INTERNAL_SOURCE_REPOSITORY = 'DangLemon/hermes-agent'
 const SOURCE_REPOSITORY_RE =
@@ -107,7 +108,7 @@ function readHarnessSourceRepository(candidate) {
     }
   } catch (error) {
     throw new Error(
-      `invalid ${HARNESS_RESOURCE_FILENAME} sourceRepository at ${candidate}: ${(error as Error).message}`
+      `invalid internal desktop harness sourceRepository at ${candidate}: ${(error as Error).message}`
     )
   }
 
@@ -123,16 +124,25 @@ function resolveBootstrapSourceRepository({
   env?: Record<string, string | undefined>
   environ?: Record<string, string | undefined>
 } = {}) {
-  const packaged = readHarnessSourceRepository(
-    resourcesPath ? path.join(resourcesPath, HARNESS_RESOURCE_FILENAME) : null
-  )
+  const packagedCandidates = resourcesPath
+    ? [
+        path.join(resourcesPath, HARNESS_RESOURCE_FILENAME),
+        path.join(resourcesPath, LEGACY_HARNESS_RESOURCE_FILENAME)
+      ]
+    : []
+
+  const packaged = packagedCandidates.map(readHarnessSourceRepository).find(Boolean) || null
 
   if (packaged) {
     return packaged
   }
 
   const selected =
-    typeof environ.HERMES_DESKTOP_HARNESS_CONFIG === 'string' ? environ.HERMES_DESKTOP_HARNESS_CONFIG.trim() : ''
+    typeof environ.LEMON_AI_DESKTOP_HARNESS_CONFIG === 'string'
+      ? environ.LEMON_AI_DESKTOP_HARNESS_CONFIG.trim()
+      : typeof environ.HERMES_DESKTOP_HARNESS_CONFIG === 'string'
+        ? environ.HERMES_DESKTOP_HARNESS_CONFIG.trim()
+        : ''
 
   return (selected ? readHarnessSourceRepository(path.resolve(selected)) : null) || DEFAULT_SOURCE_REPOSITORY
 }
@@ -578,6 +588,8 @@ function installerRuntimeEnv({
     HERMES_BOOTSTRAP_MARKER_NAME: bootstrapMarkerName || process.env['HERMES_BOOTSTRAP_MARKER_NAME'] || undefined,
     HERMES_DESKTOP_HARNESS_CONFIG:
       desktopHarnessConfigPath || process.env['HERMES_DESKTOP_HARNESS_CONFIG'] || undefined,
+    LEMON_AI_DESKTOP_HARNESS_CONFIG:
+      desktopHarnessConfigPath || process.env['LEMON_AI_DESKTOP_HARNESS_CONFIG'] || undefined,
     HERMES_HOME: hermesHome || process.env.HERMES_HOME || ''
   }
 

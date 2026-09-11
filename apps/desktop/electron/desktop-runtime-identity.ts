@@ -145,7 +145,7 @@ export function resolveDesktopRuntimeRoot(
   const runtimeDirName = runtimeDirNameOverride.trim() || identity.runtimeRootDirName
 
   if (runtimeDirName === '.' || runtimeDirName === '..' || runtimeDirName.includes('/') || runtimeDirName.includes('\\')) {
-    throw new Error('HERMES_INSTALL_RUNTIME_DIR_NAME must be a directory name')
+    throw new Error('runtime directory override must be a directory name')
   }
 
   return path.join(hermesHome, runtimeDirName)

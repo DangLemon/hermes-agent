@@ -263,7 +263,7 @@ test('resolveBootstrapSourceRepository reads packaged harness sourceRepository a
     const resourcesPath = path.join(tempRoot, 'resources')
     fs.mkdirSync(resourcesPath, { recursive: true })
     fs.writeFileSync(
-      path.join(resourcesPath, 'internal-desktop-harness.json'),
+      path.join(resourcesPath, 'lemon-ai-harness.json'),
       JSON.stringify({ schemaVersion: 1, profile: 'internal', sourceRepository: 'DangLemon/hermes-agent', ui: { agents: false, cron: true, messaging: false, terminal: true, webhooks: false } }),
       'utf8'
     )
@@ -271,7 +271,7 @@ test('resolveBootstrapSourceRepository reads packaged harness sourceRepository a
     assert.equal(resolveBootstrapSourceRepository({ resourcesPath, env: {} }), 'DangLemon/hermes-agent')
 
     fs.writeFileSync(
-      path.join(resourcesPath, 'internal-desktop-harness.json'),
+      path.join(resourcesPath, 'lemon-ai-harness.json'),
       JSON.stringify({ schemaVersion: 1, profile: 'internal', sourceRepository: 'https://github.com/DangLemon/hermes-agent', ui: { agents: false, cron: true, messaging: false, terminal: true, webhooks: false } }),
       'utf8'
     )
@@ -288,7 +288,7 @@ test('resolveBootstrapSourceRepository defaults an internal harness to the Lemon
     const resourcesPath = path.join(tempRoot, 'resources')
     fs.mkdirSync(resourcesPath, { recursive: true })
     fs.writeFileSync(
-      path.join(resourcesPath, 'internal-desktop-harness.json'),
+      path.join(resourcesPath, 'lemon-ai-harness.json'),
       JSON.stringify({
         schemaVersion: 1,
         profile: 'internal',
