@@ -581,6 +581,7 @@ function installerRuntimeEnv({
   desktopHarnessConfigPath,
   bootstrapMarkerName,
   desktopInternal = false,
+  internalDesktop = false,
   desktopHomeOverride,
   runtimeDirName
 }: any = {}): Record<string, string | undefined> {
@@ -593,7 +594,7 @@ function installerRuntimeEnv({
     HERMES_HOME: hermesHome || process.env.HERMES_HOME || ''
   }
 
-  if (desktopInternal) {
+  if (desktopInternal || internalDesktop) {
     env['HERMES_DESKTOP_INTERNAL'] = '1'
     env['HERMES_DESKTOP_HOME_OVERRIDE'] = desktopHomeOverride || hermesHome || ''
     env['HERMES_DESKTOP_RUNTIME_DIR_NAME'] = runtimeDirName || undefined
