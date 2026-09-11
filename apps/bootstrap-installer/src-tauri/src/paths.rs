@@ -105,25 +105,56 @@ fn default_runtime_dir_name(internal: bool) -> &'static str {
     }
 }
 
+fn fallback_home_dir_name(internal: bool) -> &'static str {
+    if internal {
+        ".lemon-ai"
+    } else {
+        ".hermes"
+    }
+}
+
+fn runtime_dir_name_for(
+    internal: bool,
+    desktop_override: Option<&str>,
+    legacy_override: Option<&str>,
+) -> String {
+    let selected = if internal {
+        desktop_override
+    } else {
+        legacy_override
+    };
+    safe_file_name(selected, default_runtime_dir_name(internal))
+}
+
 pub fn runtime_dir_name() -> String {
-    safe_file_name_from_env(
-        "HERMES_INSTALL_RUNTIME_DIR_NAME",
-        default_runtime_dir_name(internal_desktop_build()),
+    let internal = internal_desktop_build();
+    runtime_dir_name_for(
+        internal,
+        std::env::var("HERMES_DESKTOP_RUNTIME_DIR_NAME")
+            .ok()
+            .as_deref(),
+        std::env::var("HERMES_INSTALL_RUNTIME_DIR_NAME")
+            .ok()
+            .as_deref(),
     )
 }
 
 /// Returns the canonical Hermes home directory, respecting $HERMES_HOME if set.
 pub fn hermes_home() -> PathBuf {
-    if let Ok(override_path) = std::env::var("HERMES_HOME") {
-        if !override_path.trim().is_empty() {
-            return PathBuf::from(override_path);
-        }
+    let internal = internal_desktop_build();
+
+    if let Some(override_path) = home_override_for(
+        internal,
+        std::env::var("HERMES_DESKTOP_HOME_OVERRIDE").ok().as_deref(),
+        std::env::var("HERMES_HOME").ok().as_deref(),
+    ) {
+        return override_path;
     }
 
     #[cfg(target_os = "windows")]
     {
         if let Some(local_app_data) = dirs::data_local_dir() {
-            if internal_desktop_build() {
+            if internal {
                 return local_app_data.join("Lemon AI");
             }
             return local_app_data.join("hermes");
@@ -131,7 +162,7 @@ pub fn hermes_home() -> PathBuf {
     }
 
     if let Some(home) = dirs::home_dir() {
-        if internal_desktop_build() {
+        if internal {
             return home.join(".lemon-ai");
         }
         return home.join(".hermes");
@@ -139,7 +170,28 @@ pub fn hermes_home() -> PathBuf {
 
     // Last resort — current dir, almost certainly wrong but at least
     // doesn't panic.
-    PathBuf::from(".hermes")
+    PathBuf::from(fallback_home_dir_name(internal))
+}
+
+fn home_override_for(
+    internal: bool,
+    desktop_override: Option<&str>,
+    legacy_override: Option<&str>,
+) -> Option<PathBuf> {
+    let desktop = desktop_override.map(str::trim).filter(|value| !value.is_empty());
+
+    if let Some(value) = desktop {
+        return Some(PathBuf::from(value));
+    }
+
+    if internal {
+        return None;
+    }
+
+    legacy_override
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 fn install_root_for_home_with_runtime(
@@ -519,6 +571,25 @@ mod tests {
     fn compiled_lemon_installer_brand_is_internal_identity_signal() {
         assert!(internal_desktop_build_for(None, None, Some("lemon")));
         assert_eq!(default_runtime_dir_name(true), "lemon-agent");
+        assert_eq!(fallback_home_dir_name(true), ".lemon-ai");
+        assert_eq!(fallback_home_dir_name(false), ".hermes");
+        assert_eq!(
+            runtime_dir_name_for(true, None, Some("hermes-agent")),
+            "lemon-agent"
+        );
+        assert_eq!(
+            runtime_dir_name_for(true, Some("lemon-custom"), Some("hermes-agent")),
+            "lemon-custom"
+        );
+        assert_eq!(
+            home_override_for(true, None, Some("/legacy/hermes")),
+            None,
+            "internal installer ignores inherited legacy HERMES_HOME"
+        );
+        assert_eq!(
+            home_override_for(true, Some("/company/lemon"), Some("/legacy/hermes")),
+            Some(PathBuf::from("/company/lemon"))
+        );
         assert_eq!(
             default_update_marker_name(true),
             ".lemon-ai-update-in-progress"

@@ -98,7 +98,11 @@ else
     DEFAULT_REPOSITORY="$HERMES_DEFAULT_REPOSITORY"
 fi
 REPOSITORY="${REPOSITORY:-$DEFAULT_REPOSITORY}"
-RUNTIME_DIR_NAME="${HERMES_INSTALL_RUNTIME_DIR_NAME:-}"
+if [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
+    RUNTIME_DIR_NAME="${HERMES_DESKTOP_RUNTIME_DIR_NAME:-}"
+else
+    RUNTIME_DIR_NAME="${HERMES_INSTALL_RUNTIME_DIR_NAME:-}"
+fi
 if [ -z "$RUNTIME_DIR_NAME" ]; then
     if [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
         RUNTIME_DIR_NAME="lemon-agent"
@@ -114,7 +118,11 @@ DEFAULT_HERMES_HOME="$HOME/.hermes"
 if [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
     DEFAULT_HERMES_HOME="$HOME/.lemon-ai"
 fi
-HERMES_HOME="${HERMES_HOME:-$DEFAULT_HERMES_HOME}"
+if [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
+    HERMES_HOME="${HERMES_DESKTOP_HOME_OVERRIDE:-$DEFAULT_HERMES_HOME}"
+else
+    HERMES_HOME="${HERMES_HOME:-$DEFAULT_HERMES_HOME}"
+fi
 # INSTALL_DIR is resolved AFTER arg parsing and OS detection so we can pick an
 # FHS-style layout for root installs.  Track whether the user gave us an
 # explicit directory — if so we never override it.

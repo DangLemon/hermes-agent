@@ -386,7 +386,15 @@ $Repository = if ($Repository) {
 } else {
     "NousResearch/hermes-agent"
 }
-$RuntimeDirName = if ($env:HERMES_INSTALL_RUNTIME_DIR_NAME) { $env:HERMES_INSTALL_RUNTIME_DIR_NAME } elseif ($InternalDesktopBuild) { "lemon-agent" } else { "hermes-agent" }
+$RuntimeDirName = if ($InternalDesktopBuild -and $env:HERMES_DESKTOP_RUNTIME_DIR_NAME) {
+    $env:HERMES_DESKTOP_RUNTIME_DIR_NAME
+} elseif ((-not $InternalDesktopBuild) -and $env:HERMES_INSTALL_RUNTIME_DIR_NAME) {
+    $env:HERMES_INSTALL_RUNTIME_DIR_NAME
+} elseif ($InternalDesktopBuild) {
+    "lemon-agent"
+} else {
+    "hermes-agent"
+}
 if (-not (Test-SafeFileName $RuntimeDirName)) {
     throw "HERMES_INSTALL_RUNTIME_DIR_NAME must be a safe directory name"
 }
@@ -394,7 +402,9 @@ if ($PSBoundParameters.ContainsKey('HermesHome')) {
     $HermesHome = ConvertTo-LongPath $HermesHome
 } else {
     $HermesHome = ConvertTo-LongPath $(
-        if ($env:HERMES_HOME) {
+        if ($env:HERMES_DESKTOP_HOME_OVERRIDE) {
+            $env:HERMES_DESKTOP_HOME_OVERRIDE
+        } elseif ((-not $InternalDesktopBuild) -and $env:HERMES_HOME) {
             $env:HERMES_HOME
         } elseif ($InternalDesktopBuild) {
             "$env:LOCALAPPDATA\Lemon AI"

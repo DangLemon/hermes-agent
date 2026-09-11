@@ -6,8 +6,11 @@ import {
   HERMES_IDENTITY,
   LEMON_AI_IDENTITY,
   resolveDefaultDesktopHome,
+  resolveDesktopHomeOverride,
   resolveDesktopRuntimeIdentity,
-  resolveDesktopRuntimeRoot
+  resolveDesktopRuntimeRoot,
+  resolveDesktopRuntimeDirNameOverride,
+  shouldReadWindowsHermesHomeRegistry
 } from './desktop-runtime-identity'
 
 test('ordinary desktop runtime identity keeps the Hermes filesystem contract', () => {
@@ -65,6 +68,24 @@ test('internal desktop defaults never adopt legacy Hermes filesystem paths impli
     'C:\\Users\\test\\AppData\\Local/Lemon AI'
   )
   assert.equal(resolveDesktopRuntimeRoot('/Users/test/.lemon-ai', LEMON_AI_IDENTITY), '/Users/test/.lemon-ai/lemon-agent')
+  assert.equal(shouldReadWindowsHermesHomeRegistry(LEMON_AI_IDENTITY), false)
+  assert.equal(shouldReadWindowsHermesHomeRegistry(HERMES_IDENTITY), true)
+  assert.equal(
+    resolveDesktopHomeOverride({ HERMES_HOME: '/Users/test/.hermes' }, LEMON_AI_IDENTITY),
+    ''
+  )
+  assert.equal(
+    resolveDesktopRuntimeDirNameOverride({ HERMES_INSTALL_RUNTIME_DIR_NAME: 'hermes-agent' }, LEMON_AI_IDENTITY),
+    ''
+  )
+  assert.equal(
+    resolveDesktopHomeOverride({ HERMES_DESKTOP_HOME_OVERRIDE: '/Users/test/lemon' }, LEMON_AI_IDENTITY),
+    '/Users/test/lemon'
+  )
+  assert.equal(
+    resolveDesktopRuntimeDirNameOverride({ HERMES_DESKTOP_RUNTIME_DIR_NAME: 'lemon-custom' }, LEMON_AI_IDENTITY),
+    'lemon-custom'
+  )
 })
 
 test('legacy runtime use requires the explicit compatibility override', () => {

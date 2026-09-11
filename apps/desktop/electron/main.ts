@@ -162,8 +162,11 @@ import { formatDesktopLogLine } from './desktop-log-line'
 import { resolveDesktopRemoteRoute } from './desktop-remote-route'
 import {
   resolveDefaultDesktopHome,
+  resolveDesktopHomeOverride,
   resolveDesktopRuntimeIdentity,
-  resolveDesktopRuntimeRoot
+  resolveDesktopRuntimeRoot,
+  resolveDesktopRuntimeDirNameOverride,
+  shouldReadWindowsHermesHomeRegistry
 } from './desktop-runtime-identity'
 import {
   buildPosixCleanupScript,
@@ -804,15 +807,17 @@ function pathExists(filePath) {
 }
 
 function resolveHermesHome() {
-  if (process.env.HERMES_HOME) {
-    return normalizeHermesHomeRoot(process.env.HERMES_HOME)
+  const homeOverride = resolveDesktopHomeOverride(process['env'], DESKTOP_RUNTIME_IDENTITY)
+
+  if (homeOverride) {
+    return normalizeHermesHomeRoot(homeOverride)
   }
 
   if (USER_DATA_OVERRIDE) {
     return path.join(path.resolve(USER_DATA_OVERRIDE), DESKTOP_RUNTIME_IDENTITY.userDataHomeDirName)
   }
 
-  if (IS_WINDOWS) {
+  if (IS_WINDOWS && shouldReadWindowsHermesHomeRegistry(DESKTOP_RUNTIME_IDENTITY)) {
     // A GUI app launched from Explorer inherits the environment block captured
     // at login, so a HERMES_HOME set via `setx` AFTER login is invisible in
     // process.env even though the CLI (a fresh shell) sees it. Without this the
@@ -914,7 +919,7 @@ function resolveActiveHermesRoot(hermesHome) {
   return resolveDesktopRuntimeRoot(
     hermesHome,
     DESKTOP_RUNTIME_IDENTITY,
-    process['env'].HERMES_INSTALL_RUNTIME_DIR_NAME || ''
+    resolveDesktopRuntimeDirNameOverride(process['env'], DESKTOP_RUNTIME_IDENTITY)
   )
 }
 

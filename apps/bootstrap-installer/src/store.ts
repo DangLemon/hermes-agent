@@ -171,6 +171,25 @@ type BootstrapEvent =
 
 let unlisten: UnlistenFn | null = null
 
+function fakePreviewIdentity(): { hermesHome: string; logPath: string; productName: string } {
+  const params = typeof window === 'undefined' ? new URLSearchParams() : new URLSearchParams(window.location.search)
+  const lemon = params.get('brand') === 'lemon' || params.get('internal') === '1'
+
+  if (lemon) {
+    return {
+      hermesHome: '~/.lemon-ai',
+      logPath: '~/.lemon-ai/logs/bootstrap-installer.log',
+      productName: 'Lemon AI'
+    }
+  }
+
+  return {
+    hermesHome: '~/.hermes',
+    logPath: '~/.hermes/logs/bootstrap-installer.log',
+    productName: 'Hermes'
+  }
+}
+
 export async function initialize(): Promise<void> {
   if (unlisten) {
     return
@@ -181,10 +200,12 @@ export async function initialize(): Promise<void> {
   const fake = fakeMode()
 
   if (fake) {
+    const identity = fakePreviewIdentity()
+
     unlisten = () => {}
-    $logPath.set('~/.hermes/logs/bootstrap-installer.log')
-    $hermesHome.set('~/.hermes')
-    $productName.set('Hermes')
+    $logPath.set(identity.logPath)
+    $hermesHome.set(identity.hermesHome)
+    $productName.set(identity.productName)
     $mode.set(fake === 'update' ? 'update' : 'install')
 
     // Update auto-runs (it's a hand-off); install/failure wait for the welcome click.

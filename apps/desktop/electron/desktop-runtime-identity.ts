@@ -95,6 +95,48 @@ export function resolveDefaultDesktopHome({
   return path.join(homeDir, identity.posixHomeDirName)
 }
 
+export function shouldReadWindowsHermesHomeRegistry(identity: DesktopRuntimeIdentity): boolean {
+  return identity === HERMES_IDENTITY
+}
+
+function envValue(env: Record<string, string | undefined>, name: string): string {
+  return (env[name] || '').trim()
+}
+
+export function resolveDesktopHomeOverride(
+  env: Record<string, string | undefined>,
+  identity: DesktopRuntimeIdentity
+): string {
+  const desktopOverride = envValue(env, 'HERMES_DESKTOP_HOME_OVERRIDE')
+
+  if (desktopOverride) {
+    return desktopOverride
+  }
+
+  if (identity === HERMES_IDENTITY) {
+    return envValue(env, 'HERMES_HOME')
+  }
+
+  return ''
+}
+
+export function resolveDesktopRuntimeDirNameOverride(
+  env: Record<string, string | undefined>,
+  identity: DesktopRuntimeIdentity
+): string {
+  const desktopOverride = envValue(env, 'HERMES_DESKTOP_RUNTIME_DIR_NAME')
+
+  if (desktopOverride) {
+    return desktopOverride
+  }
+
+  if (identity === HERMES_IDENTITY) {
+    return envValue(env, 'HERMES_INSTALL_RUNTIME_DIR_NAME')
+  }
+
+  return ''
+}
+
 export function resolveDesktopRuntimeRoot(
   hermesHome: string,
   identity: DesktopRuntimeIdentity,
