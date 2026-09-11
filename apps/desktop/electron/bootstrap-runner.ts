@@ -42,11 +42,13 @@ import { hiddenWindowsChildOptions } from './windows-child-options'
 
 const IS_WINDOWS = process.platform === 'win32'
 
-const HARNESS_RESOURCE_FILENAME = 'internal-desktop-harness.json'
+const HARNESS_RESOURCE_FILENAME = 'lemon-ai-harness.json'
+const LEGACY_HARNESS_RESOURCE_FILENAME = 'internal-desktop-harness.json'
 const DEFAULT_SOURCE_REPOSITORY = 'NousResearch/hermes-agent'
 const INTERNAL_SOURCE_REPOSITORY = 'DangLemon/hermes-agent'
 const SOURCE_REPOSITORY_RE =
   /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/
+
 const STAMP_COMMIT_RE = /^[0-9a-f]{7,40}$/i
 const FALLBACK_COMMIT_RE = /^0{7,40}$/
 const FALLBACK_BRANCH = 'main'
@@ -132,7 +134,11 @@ function resolveBootstrapSourceRepository({
   }
 
   const selected =
-    typeof environ.HERMES_DESKTOP_HARNESS_CONFIG === 'string' ? environ.HERMES_DESKTOP_HARNESS_CONFIG.trim() : ''
+    typeof environ.LEMON_AI_DESKTOP_HARNESS_CONFIG === 'string'
+      ? environ.LEMON_AI_DESKTOP_HARNESS_CONFIG.trim()
+      : typeof environ.HERMES_DESKTOP_HARNESS_CONFIG === 'string'
+        ? environ.HERMES_DESKTOP_HARNESS_CONFIG.trim()
+        : ''
 
   return (selected ? readHarnessSourceRepository(path.resolve(selected)) : null) || DEFAULT_SOURCE_REPOSITORY
 }
@@ -567,11 +573,20 @@ function resolveWindowsPowerShell() {
 }
 
 function installerRuntimeEnv({ hermesHome, desktopHarnessConfigPath, bootstrapMarkerName }: any = {}) {
+  const home = hermesHome || process.env.LEMON_AI_HOME || process.env.HERMES_HOME || ''
+
+  const harnessConfigPath =
+    desktopHarnessConfigPath || process.env['LEMON_AI_DESKTOP_HARNESS_CONFIG'] || process.env['HERMES_DESKTOP_HARNESS_CONFIG'] || undefined
+
+  const markerName = bootstrapMarkerName || process.env['LEMON_AI_BOOTSTRAP_MARKER_NAME'] || process.env['HERMES_BOOTSTRAP_MARKER_NAME'] || undefined
+
   return {
-    HERMES_BOOTSTRAP_MARKER_NAME: bootstrapMarkerName || process.env['HERMES_BOOTSTRAP_MARKER_NAME'] || undefined,
-    HERMES_DESKTOP_HARNESS_CONFIG:
-      desktopHarnessConfigPath || process.env['HERMES_DESKTOP_HARNESS_CONFIG'] || undefined,
-    HERMES_HOME: hermesHome || process.env.HERMES_HOME || ''
+    LEMON_AI_BOOTSTRAP_MARKER_NAME: markerName,
+    LEMON_AI_DESKTOP_HARNESS_CONFIG: harnessConfigPath,
+    LEMON_AI_HOME: home,
+    HERMES_BOOTSTRAP_MARKER_NAME: markerName,
+    HERMES_DESKTOP_HARNESS_CONFIG: harnessConfigPath,
+    HERMES_HOME: home
   }
 }
 

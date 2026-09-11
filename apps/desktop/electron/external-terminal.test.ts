@@ -52,12 +52,18 @@ test('terminalScriptEnv carries Lemon desktop runtime identity into the launcher
       { PATH: '/desktop/path', HERMES_UPDATE_PRODUCT_NAME: 'stale' },
       '/home/b/.lemon-ai',
       {
+        LEMON_AI_DESKTOP_INTERNAL: '1',
+        LEMON_AI_HOME: '/home/b/.lemon-ai',
+        LEMON_AI_INSTALL_RUNTIME_DIR_NAME: 'lemon-agent',
         HERMES_DESKTOP_INTERNAL: '1',
         HERMES_INSTALL_RUNTIME_DIR_NAME: 'lemon-agent',
         HERMES_UPDATE_PRODUCT_NAME: 'Lemon AI'
       }
     ),
     {
+      LEMON_AI_DESKTOP_INTERNAL: '1',
+      LEMON_AI_HOME: '/home/b/.lemon-ai',
+      LEMON_AI_INSTALL_RUNTIME_DIR_NAME: 'lemon-agent',
       HERMES_DESKTOP_INTERNAL: '1',
       HERMES_HOME: '/home/b/.lemon-ai',
       HERMES_INSTALL_RUNTIME_DIR_NAME: 'lemon-agent',

@@ -769,16 +769,16 @@ const INTERNAL_DESKTOP_HARNESS = initializeInternalDesktopHarness({
   appRoot: APP_ROOT,
   userDataPath: app.getPath('userData'),
   isWsl: IS_WSL,
-  allowBuildResource: !IS_PACKAGED && Boolean(process.env['HERMES_DESKTOP_HARNESS_CONFIG'])
+  allowBuildResource: !IS_PACKAGED && Boolean(process.env['LEMON_AI_DESKTOP_HARNESS_CONFIG'] || process.env['HERMES_DESKTOP_HARNESS_CONFIG'])
 })
 
 const DESKTOP_RUNTIME_IDENTITY = resolveDesktopRuntimeIdentity({
   internalHarnessRequested: INTERNAL_DESKTOP_HARNESS.active
 })
 
-// HERMES_HOME — the user-facing root for desktop runtime data. The env var
-// name stays HERMES_HOME because the Python backend and CLI use it as a public
-// contract, but internal Lemon AI builds choose Lemon-branded defaults.
+// Lemon AI builds expose LEMON_AI_HOME as the branded runtime root. The
+// backend still receives HERMES_HOME at the Python boundary because the
+// upstream CLI reads that public contract.
 //
 // Defaults:
 //   Ordinary Windows: %LOCALAPPDATA%\hermes (matches install.ps1)
@@ -797,6 +797,7 @@ const DESKTOP_RUNTIME_IDENTITY = resolveDesktopRuntimeIdentity({
 function pathExists(filePath) {
   try {
     fs.statSync(filePath)
+
     return true
   } catch {
     return false
@@ -804,6 +805,10 @@ function pathExists(filePath) {
 }
 
 function resolveHermesHome() {
+  if (INTERNAL_DESKTOP_HARNESS.active && process.env.LEMON_AI_HOME) {
+    return normalizeHermesHomeRoot(process.env.LEMON_AI_HOME)
+  }
+
   if (process.env.HERMES_HOME) {
     return normalizeHermesHomeRoot(process.env.HERMES_HOME)
   }
@@ -819,6 +824,12 @@ function resolveHermesHome() {
     // backend silently falls back to its default home and reports "No inference
     // provider configured" despite a valid configured home (#45471). Consult
     // the live User-scoped registry value before the default below.
+    const fromLemonRegistry = INTERNAL_DESKTOP_HARNESS.active ? readWindowsUserEnvVar('LEMON_AI_HOME') : null
+
+    if (fromLemonRegistry) {
+      return normalizeHermesHomeRoot(fromLemonRegistry)
+    }
+
     const fromRegistry = readWindowsUserEnvVar('HERMES_HOME')
 
     if (fromRegistry) {
@@ -869,12 +880,29 @@ const HANDOFF_RESULT_OPTIONS = Object.freeze({
 })
 
 function desktopRuntimeEnv() {
+  const harnessConfigPath =
+    INTERNAL_DESKTOP_HARNESS.resourcePath ||
+    process.env['LEMON_AI_DESKTOP_HARNESS_CONFIG'] ||
+    process.env['HERMES_DESKTOP_HARNESS_CONFIG'] ||
+    undefined
+
+  const runtimeDirName = path.basename(ACTIVE_HERMES_ROOT)
+
   return {
+    LEMON_AI_BOOTSTRAP_MARKER_NAME: INTERNAL_DESKTOP_HARNESS.active ? DESKTOP_RUNTIME_IDENTITY.bootstrapMarkerName : undefined,
+    LEMON_AI_DESKTOP_HARNESS_CONFIG: INTERNAL_DESKTOP_HARNESS.active ? harnessConfigPath : undefined,
+    LEMON_AI_DESKTOP_INTERNAL: INTERNAL_DESKTOP_HARNESS.active ? '1' : undefined,
+    LEMON_AI_HOME: INTERNAL_DESKTOP_HARNESS.active ? HERMES_HOME : undefined,
+    LEMON_AI_INSTALL_RUNTIME_DIR_NAME: INTERNAL_DESKTOP_HARNESS.active ? runtimeDirName : undefined,
+    LEMON_AI_UPDATE_HANDOFF_LOG_NAME: INTERNAL_DESKTOP_HARNESS.active ? DESKTOP_RUNTIME_IDENTITY.updateHandoffLogName : undefined,
+    LEMON_AI_UPDATE_MARKER_NAME: INTERNAL_DESKTOP_HARNESS.active ? DESKTOP_RUNTIME_IDENTITY.updateMarkerName : undefined,
+    LEMON_AI_UPDATE_PRODUCT_NAME: INTERNAL_DESKTOP_HARNESS.active ? DESKTOP_RUNTIME_IDENTITY.appName : undefined,
+    LEMON_AI_UPDATE_RESULT_NAME: INTERNAL_DESKTOP_HARNESS.active ? DESKTOP_RUNTIME_IDENTITY.handoffResultName : undefined,
+    LEMON_AI_UPDATE_TEMP_PREFIX: INTERNAL_DESKTOP_HARNESS.active ? DESKTOP_RUNTIME_IDENTITY.updateTempPrefix : undefined,
     HERMES_BOOTSTRAP_MARKER_NAME: DESKTOP_RUNTIME_IDENTITY.bootstrapMarkerName,
-    HERMES_DESKTOP_HARNESS_CONFIG:
-      INTERNAL_DESKTOP_HARNESS.resourcePath || process.env['HERMES_DESKTOP_HARNESS_CONFIG'] || undefined,
+    HERMES_DESKTOP_HARNESS_CONFIG: harnessConfigPath,
     HERMES_DESKTOP_INTERNAL: INTERNAL_DESKTOP_HARNESS.active ? '1' : undefined,
-    HERMES_INSTALL_RUNTIME_DIR_NAME: path.basename(ACTIVE_HERMES_ROOT),
+    HERMES_INSTALL_RUNTIME_DIR_NAME: runtimeDirName,
     HERMES_UPDATE_HANDOFF_LOG_NAME: DESKTOP_RUNTIME_IDENTITY.updateHandoffLogName,
     HERMES_UPDATE_MARKER_NAME: DESKTOP_RUNTIME_IDENTITY.updateMarkerName,
     HERMES_UPDATE_PRODUCT_NAME: DESKTOP_RUNTIME_IDENTITY.appName,
@@ -914,7 +942,9 @@ function resolveActiveHermesRoot(hermesHome) {
   return resolveDesktopRuntimeRoot(
     hermesHome,
     DESKTOP_RUNTIME_IDENTITY,
-    process['env'].HERMES_INSTALL_RUNTIME_DIR_NAME || ''
+    INTERNAL_DESKTOP_HARNESS.active
+      ? process['env'].LEMON_AI_INSTALL_RUNTIME_DIR_NAME || process['env'].HERMES_INSTALL_RUNTIME_DIR_NAME || ''
+      : process['env'].HERMES_INSTALL_RUNTIME_DIR_NAME || ''
   )
 }
 

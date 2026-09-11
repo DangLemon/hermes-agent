@@ -37,12 +37,12 @@
     "name": "AI công ty",
     "base_url": "http://127.0.0.1:5173/v1",
     "model": "openai-codex-gpt-5-5",
-    "key_env": "HERMES_COMPANY_API_KEY"
+    "key_env": "LEMON_AI_COMPANY_API_KEY"
   },
   "credentialRequirements": {
     "provider": {
       "requiredEnv": [
-        "HERMES_COMPANY_API_KEY"
+        "LEMON_AI_COMPANY_API_KEY"
       ],
       "label": "Company provider API key"
     },

@@ -224,8 +224,8 @@
         "from": "build",
         "to": ".",
         "filter": [
-          "internal-desktop-harness.json",
-          "internal-desktop-harness-seed.py"
+          "lemon-ai-harness.json",
+          "lemon-ai-harness-seed.py"
         ]
       }
     ],
