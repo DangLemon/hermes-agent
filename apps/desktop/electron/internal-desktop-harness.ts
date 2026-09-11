@@ -71,7 +71,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 function fail(message: string): never {
-  throw new Error(`[internal-desktop-harness] ${message}`)
+  throw new Error(`[lemon-ai-desktop-harness] ${message}`)
 }
 
 function requireNonEmptyString(value: unknown, label: string): void {

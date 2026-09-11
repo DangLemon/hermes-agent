@@ -21,6 +21,7 @@ import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 
 import { desktopHtmlTitlePlugin } from './scripts/desktop-html-title.mjs'
+import { loadHarnessConfigInput } from './scripts/internal-desktop-harness.mjs'
 
 // `hgui` symlinks a worktree's node_modules to the main checkout. Vite realpaths
 // those before enforcing server.fs.allow, so codicon/font assets resolve outside
@@ -64,16 +65,11 @@ function defaultHarnessViteDefines() {
 
 function harnessViteDefines(env: Record<string, string | undefined>) {
   const define: Record<string, string> = defaultHarnessViteDefines()
-  const selected = String(env.HERMES_DESKTOP_HARNESS_CONFIG || '').trim()
-
-  if (!selected) {
-    return define
-  }
 
   try {
-    const resource = JSON.parse(fs.readFileSync(path.resolve(selected), 'utf8'))
+    const resource = loadHarnessConfigInput(env)
 
-    if (resource?.schemaVersion !== 1 || resource?.profile !== 'internal' || !resource?.ui) {
+    if (!resource) {
       return define
     }
 
@@ -81,10 +77,6 @@ function harnessViteDefines(env: Record<string, string | undefined>) {
     define['import.meta.env.VITE_HERMES_DESKTOP_HARNESS'] = JSON.stringify('internal')
 
     for (const key of HARNESS_UI_KEYS) {
-      if (typeof resource.ui[key] !== 'boolean') {
-        return defaultHarnessViteDefines()
-      }
-
       const value = JSON.stringify(String(resource.ui[key]))
 
       define[HARNESS_DEFINE_BY_UI_KEY[key]] = value

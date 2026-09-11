@@ -87,18 +87,18 @@ function parseArgs(argv = process.argv.slice(2), env = process.env) {
   }
 
   return {
-    platform: args.platform ?? env.HERMES_INSTALLER_PLATFORM ?? process.platform,
-    arch: args.arch ?? env.HERMES_INSTALLER_ARCH ?? process.arch,
-    expectedSha: args.sha ?? env.HERMES_INSTALLER_SHA ?? env.GITHUB_SHA,
-    expectedRef: args.ref ?? env.HERMES_INSTALLER_REF ?? env.GITHUB_REF_NAME ?? env.GITHUB_HEAD_REF,
-    appPath: args.app ?? env.HERMES_INSTALLER_APP,
-    installerPath: args.installer ?? env.HERMES_INSTALLER_ARTIFACT,
-    canonicalManifestPath: args.canonical ?? env.HERMES_INSTALLER_CANONICAL_MANIFEST ?? DEFAULT_CANONICAL_MANIFEST,
-    generatedConfigPath: args['builder-config'] ?? env.HERMES_INSTALLER_BUILDER_CONFIG ?? DEFAULT_GENERATED_CONFIG,
-    sourceSeedHelperPath: args['seed-helper'] ?? env.HERMES_INSTALLER_SEED_HELPER ?? DEFAULT_SEED_HELPER,
-    outputDir: args.out ?? env.HERMES_INSTALLER_OUTPUT_DIR,
-    releaseRoot: args['release-root'] ?? env.HERMES_INSTALLER_RELEASE_ROOT ?? DEFAULT_RELEASE_ROOT,
-    repoRoot: args['repo-root'] ?? env.HERMES_INSTALLER_REPO_ROOT ?? REPO_ROOT
+    platform: args.platform ?? env.LEMON_AI_INSTALLER_PLATFORM ?? env.HERMES_INSTALLER_PLATFORM ?? process.platform,
+    arch: args.arch ?? env.LEMON_AI_INSTALLER_ARCH ?? env.HERMES_INSTALLER_ARCH ?? process.arch,
+    expectedSha: args.sha ?? env.LEMON_AI_INSTALLER_SHA ?? env.HERMES_INSTALLER_SHA ?? env.GITHUB_SHA,
+    expectedRef: args.ref ?? env.LEMON_AI_INSTALLER_REF ?? env.HERMES_INSTALLER_REF ?? env.GITHUB_REF_NAME ?? env.GITHUB_HEAD_REF,
+    appPath: args.app ?? env.LEMON_AI_INSTALLER_APP ?? env.HERMES_INSTALLER_APP,
+    installerPath: args.installer ?? env.LEMON_AI_INSTALLER_ARTIFACT ?? env.HERMES_INSTALLER_ARTIFACT,
+    canonicalManifestPath: args.canonical ?? env.LEMON_AI_INSTALLER_CANONICAL_MANIFEST ?? env.HERMES_INSTALLER_CANONICAL_MANIFEST ?? DEFAULT_CANONICAL_MANIFEST,
+    generatedConfigPath: args['builder-config'] ?? env.LEMON_AI_INSTALLER_BUILDER_CONFIG ?? env.HERMES_INSTALLER_BUILDER_CONFIG ?? DEFAULT_GENERATED_CONFIG,
+    sourceSeedHelperPath: args['seed-helper'] ?? env.LEMON_AI_INSTALLER_SEED_HELPER ?? env.HERMES_INSTALLER_SEED_HELPER ?? DEFAULT_SEED_HELPER,
+    outputDir: args.out ?? env.LEMON_AI_INSTALLER_OUTPUT_DIR ?? env.HERMES_INSTALLER_OUTPUT_DIR,
+    releaseRoot: args['release-root'] ?? env.LEMON_AI_INSTALLER_RELEASE_ROOT ?? env.HERMES_INSTALLER_RELEASE_ROOT ?? DEFAULT_RELEASE_ROOT,
+    repoRoot: args['repo-root'] ?? env.LEMON_AI_INSTALLER_REPO_ROOT ?? env.HERMES_INSTALLER_REPO_ROOT ?? REPO_ROOT
   }
 }
 

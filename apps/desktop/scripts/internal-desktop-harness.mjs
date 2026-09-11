@@ -9,6 +9,8 @@ export const HARNESS_SCHEMA_VERSION = 1
 export const HARNESS_CONFIG_ENV_KEYS = ['LEMON_AI_DESKTOP_HARNESS_CONFIG', 'HERMES_DESKTOP_HARNESS_CONFIG']
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DEFAULT_BUILD_DIR = path.join(APP_ROOT, 'build')
+const DEFAULT_HARNESS_CONFIG_INPUT = path.join(APP_ROOT, 'lemon-ai-desktop.config.json')
+const HARNESS_CONFIG_DISABLE_VALUES = new Set(['0', 'false', 'no', 'off', 'disabled', 'none'])
 const UI_KEYS = ['agents', 'cron', 'messaging', 'terminal', 'webhooks']
 const SOURCE_REPOSITORY_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/
 const SECRET_KEY_RE = /(^|[_-])(api[_-]?key|authorization|bearer|client[_-]?secret|password|secret|token)([_-]|$)|^(api[_-]?key|authorization|bearer|client[_-]?secret|password|secret|token)$/i
@@ -21,7 +23,7 @@ function isPlainObject(value) {
 }
 
 function fail(message) {
-  throw new Error(`[internal-desktop-harness] ${message}`)
+  throw new Error(`[lemon-ai-desktop-harness] ${message}`)
 }
 
 function requireNonEmptyString(value, label) {
@@ -174,11 +176,14 @@ export function validateHarnessResource(input) {
 
 export function selectedHarnessConfigInputPath(env = process.env) {
   for (const key of HARNESS_CONFIG_ENV_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(env, key)) continue
+
     const selected = String(env[key] || '').trim()
+    if (HARNESS_CONFIG_DISABLE_VALUES.has(selected.toLowerCase())) return ''
     if (selected) return selected
   }
 
-  return ''
+  return fs.existsSync(DEFAULT_HARNESS_CONFIG_INPUT) ? DEFAULT_HARNESS_CONFIG_INPUT : ''
 }
 
 export function loadHarnessConfigInput(env = process.env) {
@@ -242,8 +247,8 @@ export function isDirectRun(metaUrl, argv1 = process.argv[1], {
 if (isDirectRun(import.meta.url)) {
   const result = generateInternalDesktopHarnessResource()
   if (result.resourcePath) {
-    console.log(`[internal-desktop-harness] wrote ${result.resourcePath}`)
+    console.log(`[lemon-ai-desktop-harness] wrote ${result.resourcePath}`)
   } else {
-    console.log('[internal-desktop-harness] no selector; stale resource removed')
+    console.log('[lemon-ai-desktop-harness] disabled; stale resource removed')
   }
 }
