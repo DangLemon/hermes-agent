@@ -11,6 +11,7 @@ asserting on a copy of it, so the shim cannot drift away from the test.
 """
 
 import re
+import shlex
 import stat
 import subprocess
 from pathlib import Path
@@ -34,8 +35,18 @@ def _extract_acp_shim_block() -> str:
     return match.group(1)
 
 
-def _run_block(tmp_path: Path, use_venv: str) -> Path:
+def _launcher_prelude(tmp_path: Path, internal: bool) -> str:
+    hermes_home = tmp_path / "Lemon AI home"
+    return (
+        f"HERMES_HOME={shlex.quote(str(hermes_home))}\n"
+        f"INTERNAL_DESKTOP_BUILD={'true' if internal else 'false'}\n"
+        "launcher_home_export(){ if [ \"$INTERNAL_DESKTOP_BUILD\" = true ]; then printf 'export HERMES_HOME=%q\\n' \"$HERMES_HOME\"; fi; }\n"
+    )
+
+
+def _run_block(tmp_path: Path, use_venv: str, *, internal: bool = False) -> Path:
     """Execute the extracted block with the env vars setup_path() sets."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
     command_link_dir = tmp_path / "local_bin"
     command_link_dir.mkdir()
     hermes_bin = tmp_path / "venv" / "bin" / "python"
@@ -51,7 +62,8 @@ def _run_block(tmp_path: Path, use_venv: str) -> Path:
         f"command_link_dir={command_link_dir}\n"
         f"command_link_display_dir={command_link_dir}\n"
         f"USE_VENV={use_venv}\n"
-        "log_success(){ :; }\n" + _extract_acp_shim_block()
+        + _launcher_prelude(tmp_path, internal)
+        + "log_success(){ :; }\n" + _extract_acp_shim_block()
     )
     result = subprocess.run(
         ["bash", "-c", script],
@@ -84,6 +96,12 @@ def test_non_venv_install_writes_acp_launcher(tmp_path):
     assert re.search(r'exec .*\bacp\b', text), text
 
 
+def test_internal_acp_launcher_exports_the_resolved_lemon_home(tmp_path):
+    text = _run_block(tmp_path, "true", internal=True).read_text(encoding="utf-8")
+    assert "export HERMES_HOME=" in text
+    assert str(tmp_path / "Lemon AI home") in text.replace("\\ ", " ")
+
+
 def test_acp_launcher_does_not_follow_a_symlink_into_the_venv(tmp_path):
     """Guards the #21454 failure mode for the new launcher.
 
@@ -114,7 +132,8 @@ def test_acp_launcher_does_not_follow_a_symlink_into_the_venv(tmp_path):
         f"command_link_dir={command_link_dir}\n"
         f"command_link_display_dir={command_link_dir}\n"
         "USE_VENV=true\n"
-        "log_success(){ :; }\n" + _extract_acp_shim_block()
+        + _launcher_prelude(tmp_path, False)
+        + "log_success(){ :; }\n" + _extract_acp_shim_block()
     )
     result = subprocess.run(
         ["bash", "-c", script], capture_output=True, text=True, cwd=tmp_path
@@ -149,13 +168,14 @@ def _extract_hermes_agent_shim_block() -> str:
     return match.group(1)
 
 
-def _run_hermes_agent_block(tmp_path: Path, use_venv: str) -> Path | None:
+def _run_hermes_agent_block(tmp_path: Path, use_venv: str, *, internal: bool = False) -> Path | None:
     """Execute the extracted hermes-agent block with the env vars setup_path() sets."""
     if use_venv == "false":
         # --no-venv: hermes-agent is NOT installed by this block (handled
         # elsewhere), so there's nothing to test here.
         return None
 
+    tmp_path.mkdir(parents=True, exist_ok=True)
     command_link_dir = tmp_path / "local_bin"
     command_link_dir.mkdir()
     hermes_bin = tmp_path / "venv" / "bin" / "python"
@@ -171,7 +191,8 @@ def _run_hermes_agent_block(tmp_path: Path, use_venv: str) -> Path | None:
         f"command_link_dir={command_link_dir}\n"
         f"command_link_display_dir={command_link_dir}\n"
         f"USE_VENV={use_venv}\n"
-        "log_success(){ :; }\n" + _extract_hermes_agent_shim_block()
+        + _launcher_prelude(tmp_path, internal)
+        + "log_success(){ :; }\n" + _extract_hermes_agent_shim_block()
     )
     result = subprocess.run(
         ["bash", "-c", script],
@@ -196,6 +217,27 @@ def test_venv_install_writes_executable_hermes_agent_launcher(tmp_path):
     assert "unset PYTHONPATH" in text
     assert "unset PYTHONHOME" in text
     assert "run_agent.py" in text, "hermes-agent must dispatch to run_agent.py"
+
+
+def test_internal_hermes_agent_launcher_exports_the_resolved_lemon_home(tmp_path):
+    shim = _run_hermes_agent_block(tmp_path, "true", internal=True)
+    assert shim is not None
+    text = shim.read_text(encoding="utf-8")
+    assert "export HERMES_HOME=" in text
+    assert str(tmp_path / "Lemon AI home") in text.replace("\\ ", " ")
+
+
+def test_ordinary_launchers_do_not_pin_a_desktop_home(tmp_path):
+    acp = _run_block(tmp_path / "acp", "true")
+    agent = _run_hermes_agent_block(tmp_path / "agent", "true")
+    assert agent is not None
+    assert "export HERMES_HOME=" not in acp.read_text(encoding="utf-8")
+    assert "export HERMES_HOME=" not in agent.read_text(encoding="utf-8")
+
+
+def test_all_launcher_variants_include_the_internal_home_export_hook():
+    source = INSTALL_SH.read_text(encoding="utf-8")
+    assert source.count("$(launcher_home_export)") == 6
 
 
 def test_hermes_agent_launcher_cleanup_on_uninstall(tmp_path):

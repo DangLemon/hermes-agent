@@ -165,21 +165,17 @@ pub async fn get_bootstrap_status(
 /// (e.g. when Stage-Desktop was skipped) so the frontend can present
 /// actionable failure UI rather than silently doing nothing.
 #[tauri::command]
-pub async fn launch_hermes_desktop(
-    app: AppHandle,
-    install_root: String,
-) -> Result<(), String> {
+pub async fn launch_hermes_desktop(app: AppHandle, install_root: String) -> Result<(), String> {
     let install_root = PathBuf::from(install_root);
-    let exe_path = resolve_hermes_desktop_exe(&install_root).ok_or_else(|| {
-        format!(
-            "Couldn't find a built Hermes desktop at {}. The desktop build step \
-             may have been skipped or failed. Run `hermes desktop` from a \
-             terminal to build and launch it.",
-            install_root.join("apps").join("desktop").join("release").display()
-        )
-    })?;
+    let release_dir = install_root.join("apps").join("desktop").join("release");
+    let exe_path = resolve_hermes_desktop_exe(&install_root)
+        .ok_or_else(|| missing_desktop_message(crate::paths::product_name(), &release_dir))?;
 
-    tracing::info!(?exe_path, "launching Hermes desktop");
+    tracing::info!(
+        ?exe_path,
+        product = crate::paths::product_name(),
+        "launching desktop"
+    );
 
     // Detach from us — the installer is about to exit. On macOS launch the
     // bundle through LaunchServices instead of exec'ing Contents/MacOS/Hermes
@@ -193,12 +189,8 @@ pub async fn launch_hermes_desktop(
         cmd.creation_flags(0x0000_0008);
     }
 
-    cmd.spawn().map_err(|e| {
-        format!(
-            "failed to launch {}: {e}",
-            exe_path.display()
-        )
-    })?;
+    cmd.spawn()
+        .map_err(|e| format!("failed to launch {}: {e}", exe_path.display()))?;
 
     // Give Windows ~150ms to actually start the new process before we exit.
     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
@@ -209,25 +201,55 @@ pub async fn launch_hermes_desktop(
     Ok(())
 }
 
+fn missing_desktop_message(product_name: &str, release_dir: &Path) -> String {
+    format!(
+        "Couldn't find a built {product_name} desktop at {}. The desktop build step \
+         may have been skipped or failed. Run `hermes desktop` from a \
+         terminal to build and launch it.",
+        release_dir.display()
+    )
+}
+
 /// Walks the well-known electron-builder unpacked-app paths under
 /// `install_root`. Mirrors the resolver in `cmd_gui` (apps/desktop/release/
 /// <os>-unpacked/<exe>).
-pub(crate) fn resolve_hermes_desktop_exe(install_root: &std::path::Path) -> Option<PathBuf> {
-    let release_dir = install_root.join("apps").join("desktop").join("release");
-    let candidates: &[(&str, &str)] = if cfg!(target_os = "windows") {
-        &[
-            ("win-unpacked", "Hermes.exe"),
-            ("win-arm64-unpacked", "Hermes.exe"),
-        ]
+fn desktop_exe_candidates(internal: bool) -> &'static [(&'static str, &'static str)] {
+    if cfg!(target_os = "windows") {
+        if internal {
+            &[
+                ("win-unpacked", "Lemon AI.exe"),
+                ("win-arm64-unpacked", "Lemon AI.exe"),
+                ("win-unpacked", "Hermes.exe"),
+                ("win-arm64-unpacked", "Hermes.exe"),
+            ]
+        } else {
+            &[
+                ("win-unpacked", "Hermes.exe"),
+                ("win-arm64-unpacked", "Hermes.exe"),
+            ]
+        }
     } else if cfg!(target_os = "macos") {
-        &[
-            ("mac/Hermes.app/Contents/MacOS", "Hermes"),
-            ("mac-arm64/Hermes.app/Contents/MacOS", "Hermes"),
-        ]
+        if internal {
+            &[
+                ("mac/Lemon AI.app/Contents/MacOS", "Lemon AI"),
+                ("mac-arm64/Lemon AI.app/Contents/MacOS", "Lemon AI"),
+                ("mac/Hermes.app/Contents/MacOS", "Hermes"),
+                ("mac-arm64/Hermes.app/Contents/MacOS", "Hermes"),
+            ]
+        } else {
+            &[
+                ("mac/Hermes.app/Contents/MacOS", "Hermes"),
+                ("mac-arm64/Hermes.app/Contents/MacOS", "Hermes"),
+            ]
+        }
     } else {
         &[("linux-unpacked", "hermes")]
-    };
-    for (subdir, exe) in candidates {
+    }
+}
+
+pub(crate) fn resolve_hermes_desktop_exe(install_root: &std::path::Path) -> Option<PathBuf> {
+    let release_dir = install_root.join("apps").join("desktop").join("release");
+    for (subdir, exe) in desktop_exe_candidates(crate::paths::internal_desktop_build()) {
         let p = release_dir.join(subdir).join(exe);
         if p.exists() {
             return Some(p);
@@ -258,7 +280,9 @@ pub(crate) fn resolve_hermes_desktop_app(install_root: &std::path::Path) -> Opti
 /// launchable desktop app exists on disk. Used by the installer's launcher fast
 /// path so a bare re-open just opens Hermes instead of re-running setup.
 pub(crate) fn hermes_is_installed(install_root: &std::path::Path) -> bool {
-    install_root.join(".hermes-bootstrap-complete").exists()
+    crate::paths::likely_bootstrap_markers(install_root)
+        .iter()
+        .any(|marker| marker.exists())
         && resolve_hermes_desktop_exe(install_root).is_some()
 }
 
@@ -317,7 +341,13 @@ fn write_bootstrap_complete_marker(install_root: &Path, pin: &Pin) -> Result<ser
     // Atomic publish (temp sibling + flush + rename), matching Electron's
     // writeFileAtomic(). hermes_is_installed() only checks existence, so a
     // partial direct write would incorrectly enable the launcher fast path.
-    let tmp_path = install_root.join(".hermes-bootstrap-complete.tmp");
+    let tmp_path = marker_path.with_file_name(format!(
+        "{}.tmp",
+        marker_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(".hermes-bootstrap-complete")
+    ));
     {
         let mut file = std::fs::File::create(&tmp_path).with_context(|| {
             format!(
@@ -451,8 +481,12 @@ async fn run_bootstrap(
     let kind = ScriptKind::for_current_os();
 
     let pin = Pin {
-        commit: args.commit.or_else(|| option_env_string("BUILD_PIN_COMMIT")),
-        branch: args.branch.or_else(|| option_env_string("BUILD_PIN_BRANCH")),
+        commit: args
+            .commit
+            .or_else(|| option_env_string("BUILD_PIN_COMMIT")),
+        branch: args
+            .branch
+            .or_else(|| option_env_string("BUILD_PIN_BRANCH")),
     };
 
     tracing::info!(
@@ -547,20 +581,21 @@ async fn run_bootstrap(
         return Err(anyhow!(err));
     }
 
-    let manifest: Manifest = powershell::parse_manifest(&manifest_result.stdout).ok_or_else(|| {
-        let err = format!(
-            "install.ps1 -Manifest produced no parseable JSON payload\n{}",
-            truncate(&manifest_result.stdout, 4000)
-        );
-        emit_event(
-            &app,
-            BootstrapEvent::Failed {
-                stage: None,
-                error: err.clone(),
-            },
-        );
-        anyhow!(err)
-    })?;
+    let manifest: Manifest =
+        powershell::parse_manifest(&manifest_result.stdout).ok_or_else(|| {
+            let err = format!(
+                "install.ps1 -Manifest produced no parseable JSON payload\n{}",
+                truncate(&manifest_result.stdout, 4000)
+            );
+            emit_event(
+                &app,
+                BootstrapEvent::Failed {
+                    stage: None,
+                    error: err.clone(),
+                },
+            );
+            anyhow!(err)
+        })?;
 
     emit_event(
         &app,
@@ -776,14 +811,14 @@ async fn run_bootstrap(
         }
     }
 
-    // 4. Resolve install_root. install.ps1 doesn't (yet) report this back
-    // explicitly; we infer it from $HermesHome which Stage-Repository clones
-    // the repo INTO at $HermesHome\hermes-agent. Mirrors hermes_constants.
+    // 4. Resolve install_root. install.ps1/install.sh install under the active
+    // runtime dir for this desktop identity and fall back to a legacy Hermes
+    // checkout when an internal Lemon build is repairing an existing install.
     let hermes_home = args
         .hermes_home
         .clone()
         .unwrap_or_else(|| crate::paths::hermes_home().to_string_lossy().into_owned());
-    let install_root = PathBuf::from(&hermes_home).join("hermes-agent");
+    let install_root = crate::paths::install_root_for_home(Path::new(&hermes_home));
 
     // Marker publish is terminal for this run: a write failure must emit Failed
     // so the UI leaves the progress state (it does not poll get_bootstrap_status).
@@ -808,7 +843,10 @@ async fn run_bootstrap(
     // we're already running from that path. Best-effort — a failure here must
     // not fail an otherwise-successful install.
     if let Err(err) = crate::paths::copy_self_to_hermes_home() {
-        tracing::warn!(?err, "failed to copy installer into HERMES_HOME (non-fatal)");
+        tracing::warn!(
+            ?err,
+            "failed to copy installer into HERMES_HOME (non-fatal)"
+        );
         emit_log(&format!(
             "[bootstrap] warning: could not stage updater binary: {err}"
         ));
@@ -825,11 +863,7 @@ async fn run_bootstrap(
     Ok(install_root.to_string_lossy().into_owned())
 }
 
-fn should_retry_missing_stage_frame(
-    exit_code: Option<i32>,
-    killed: bool,
-    attempt: usize,
-) -> bool {
+fn should_retry_missing_stage_frame(exit_code: Option<i32>, killed: bool, attempt: usize) -> bool {
     !killed && exit_code == Some(-1) && attempt < MAX_STAGE_ATTEMPTS
 }
 
@@ -1001,8 +1035,8 @@ fn truncate(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use std::path::Path;
+    use std::path::PathBuf;
 
     fn unique_tmp_dir(tag: &str) -> PathBuf {
         let base = std::env::temp_dir().join(format!(
@@ -1050,6 +1084,35 @@ mod tests {
     // what the updater ditto's over /Applications/Hermes.app). A regression in
     // this derivation breaks the post-update auto-relaunch, so guard it.
     #[test]
+    fn desktop_exe_candidates_preserve_ordinary_and_internal_identity() {
+        let ordinary = desktop_exe_candidates(false);
+        let internal = desktop_exe_candidates(true);
+
+        if cfg!(target_os = "windows") {
+            assert_eq!(ordinary[0], ("win-unpacked", "Hermes.exe"));
+            assert_eq!(internal[0], ("win-unpacked", "Lemon AI.exe"));
+            assert!(internal.contains(&("win-unpacked", "Hermes.exe")));
+        } else if cfg!(target_os = "macos") {
+            assert_eq!(ordinary[0], ("mac/Hermes.app/Contents/MacOS", "Hermes"));
+            assert_eq!(internal[0], ("mac/Lemon AI.app/Contents/MacOS", "Lemon AI"));
+            assert!(internal.contains(&("mac/Hermes.app/Contents/MacOS", "Hermes")));
+        } else {
+            assert_eq!(ordinary, internal);
+            assert_eq!(ordinary[0], ("linux-unpacked", "hermes"));
+        }
+    }
+
+    #[test]
+    fn missing_desktop_message_uses_selected_product_identity() {
+        let release = Path::new("/tmp/lemon-agent/apps/desktop/release");
+
+        assert!(missing_desktop_message("Lemon AI", release)
+            .starts_with("Couldn't find a built Lemon AI desktop at "));
+        assert!(missing_desktop_message("Hermes", release)
+            .starts_with("Couldn't find a built Hermes desktop at "));
+    }
+
+    #[test]
     fn resolve_hermes_desktop_app_finds_built_bundle() {
         let root = unique_tmp_dir("app-ok");
         let expected = make_release_tree(&root);
@@ -1094,7 +1157,7 @@ mod tests {
 
         let marker =
             write_bootstrap_complete_marker(&root, &pin).expect("marker write should succeed");
-        let marker_path = root.join(".hermes-bootstrap-complete");
+        let marker_path = crate::paths::likely_bootstrap_marker(&root);
         let from_disk: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&marker_path).unwrap()).unwrap();
 
@@ -1120,8 +1183,14 @@ mod tests {
 
         write_bootstrap_complete_marker(&root, &pin).expect("marker write should succeed");
 
-        let marker_path = root.join(".hermes-bootstrap-complete");
-        let tmp_path = root.join(".hermes-bootstrap-complete.tmp");
+        let marker_path = crate::paths::likely_bootstrap_marker(&root);
+        let tmp_path = marker_path.with_file_name(format!(
+            "{}.tmp",
+            marker_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(".hermes-bootstrap-complete")
+        ));
         assert!(
             marker_path.is_file(),
             "final marker must exist after atomic publish"
@@ -1173,11 +1242,19 @@ mod tests {
             "error should mention the marker path: {msg}"
         );
         assert!(
-            !not_a_dir.join(".hermes-bootstrap-complete").exists(),
+            !crate::paths::likely_bootstrap_marker(&not_a_dir).exists(),
             "failed write must not leave a final marker that enables the fast path"
         );
         assert!(
-            !not_a_dir.join(".hermes-bootstrap-complete.tmp").exists(),
+            !crate::paths::likely_bootstrap_marker(&not_a_dir)
+                .with_file_name(format!(
+                    "{}.tmp",
+                    crate::paths::likely_bootstrap_marker(&not_a_dir)
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or(".hermes-bootstrap-complete")
+                ))
+                .exists(),
             "failed write must not leave a temp marker sibling either"
         );
         let _ = std::fs::remove_dir_all(&base);

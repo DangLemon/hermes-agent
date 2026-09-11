@@ -1,5 +1,6 @@
 export function buildHermesBackendSpawnEnv({
   processEnv = process.env,
+  runtimeEnv = {},
   hermesHome,
   backendEnv = {},
   terminalCwd,
@@ -9,6 +10,7 @@ export function buildHermesBackendSpawnEnv({
   readyFile
 }: {
   processEnv?: NodeJS.ProcessEnv | Record<string, string | undefined>
+  runtimeEnv?: Record<string, string | undefined>
   hermesHome: string
   backendEnv?: Record<string, string>
   terminalCwd: string
@@ -19,8 +21,9 @@ export function buildHermesBackendSpawnEnv({
 }): Record<string, string | undefined> {
   return {
     ...processEnv,
-    HERMES_HOME: hermesHome,
     ...backendEnv,
+    ...runtimeEnv,
+    HERMES_HOME: hermesHome,
     TERMINAL_CWD: terminalCwd,
     HERMES_DASHBOARD_SESSION_TOKEN: sessionToken,
     HERMES_DESKTOP: '1',

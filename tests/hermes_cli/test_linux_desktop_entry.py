@@ -13,6 +13,12 @@ import pytest
 
 from hermes_cli import linux_desktop_entry as lde
 
+VALID_INTERNAL_HARNESS_JSON = '{\n  "schemaVersion": 1,\n  "profile": "internal",\n  "ui": {\n    "agents": false,\n    "cron": true,\n    "messaging": false,\n    "terminal": true,\n    "webhooks": false\n  }\n}\n'
+
+
+def _write_internal_harness(path: Path) -> None:
+    path.write_text(VALID_INTERNAL_HARNESS_JSON, encoding="utf-8")
+
 
 @pytest.fixture
 def xdg_home(tmp_path, monkeypatch) -> Path:
@@ -27,9 +33,10 @@ def xdg_home(tmp_path, monkeypatch) -> Path:
 
 def _make_project(tmp_path: Path) -> Path:
     root = tmp_path / "hermes-agent"
-    icon = root / "apps" / "desktop" / "assets" / "icon.png"
-    icon.parent.mkdir(parents=True)
-    icon.write_bytes(b"\x89PNG fake")
+    assets = root / "apps" / "desktop" / "assets"
+    assets.mkdir(parents=True)
+    (assets / "icon.png").write_bytes(b"\x89PNG fake")
+    (assets / "lemon-icon.png").write_bytes(b"\x89PNG lemon fake")
     return root
 
 
@@ -91,6 +98,33 @@ def test_install_writes_entry_with_absolute_exec_and_icon(
     icon_path = Path(values["Icon"])
     assert icon_path.is_absolute()
     assert icon_path == lde.icon_path(root)
+
+
+def test_internal_install_writes_lemon_entry_and_icon(tmp_path, xdg_home, monkeypatch):
+    config = tmp_path / "internal.json"
+    _write_internal_harness(config)
+    monkeypatch.setenv("HERMES_DESKTOP_HARNESS_CONFIG", str(config))
+    root = _make_project(tmp_path)
+    _stub_install(tmp_path, monkeypatch)
+
+    entry = lde.install_desktop_entry(root)
+
+    assert entry == xdg_home / "applications" / "lemon-ai.desktop"
+    values = _parse(entry.read_text(encoding="utf-8"))
+    assert values["Name"] == "Lemon AI"
+    assert values["Icon"] == "lemon-ai"
+    dest = xdg_home / "icons" / "hicolor" / "256x256" / "apps" / "lemon-ai.png"
+    assert dest.is_file()
+    assert dest.read_bytes() == lde.icon_path(root).read_bytes()
+
+
+def test_invalid_internal_env_keeps_linux_entry_ordinary(
+    tmp_path, xdg_home, monkeypatch
+):
+    monkeypatch.setenv("HERMES_DESKTOP_HARNESS_CONFIG", str(tmp_path / "missing.json"))
+
+    assert lde.desktop_entry_path() == xdg_home / "applications" / "hermes.desktop"
+    assert lde.icon_path(_make_project(tmp_path)).name == "icon.png"
 
 
 def test_install_prefers_themed_icon_from_hicolor(tmp_path, xdg_home, monkeypatch):
@@ -1073,9 +1107,7 @@ def test_install_exact_48_png_uses_48x48_dir(tmp_path, xdg_home, monkeypatch):
     ).exists()
 
 
-def test_install_resizes_decodable_png_to_panel_sizes(
-    tmp_path, xdg_home, monkeypatch
-):
+def test_install_resizes_decodable_png_to_panel_sizes(tmp_path, xdg_home, monkeypatch):
     """A decodeable PNG is Lanczos-resized so the 24px slot is actually 24px."""
     from PIL import Image
 

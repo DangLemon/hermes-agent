@@ -2,7 +2,7 @@
 #
 # WHY THIS EXISTS (the frozen-binary problem): the Desktop's Update button
 # used to hand off exclusively to the staged Tauri binary
-# (%HERMES_HOME%\hermes-setup.exe). That binary has no self-update path --
+# (for example, %HERMES_HOME%\hermes-setup.exe). That binary has no self-update path --
 # copy_self_to_hermes_home deliberately no-ops during --update -- so every
 # updater-side fix (cache refresh #67369, marker self-adopt #74782, straggler
 # handling) only reaches users when a new installer is built, signed, and
@@ -19,10 +19,10 @@
 # CONTRACT (keep in sync with apps/desktop/electron/main.ts):
 #   cmd /d /s /c start "" /min powershell -NoProfile -ExecutionPolicy Bypass
 #     -File scripts\desktop-update\windows.ps1
-#     -InstallRoot <path>   repo checkout (HERMES_HOME\hermes-agent)
+#     -InstallRoot <path>   repo checkout under the selected HERMES_HOME
 #     -Branch <ref>         branch to update against
 #     -DesktopPid <pid>     the Electron main process to wait out
-#     [-RelaunchExe <path>] Hermes.exe to start when done (omit = no relaunch)
+#     [-RelaunchExe <path>] desktop executable to start when done (omit = no relaunch)
 #     [-NoUi]               headless (tests); default shows a progress window
 #     [-NoMarkerCleanup]    leave .hermes-update-in-progress in place (tests)
 #
@@ -64,7 +64,7 @@ $ErrorActionPreference = "Continue"
 # WinForms window comes up backgrounded unless we explicitly claim focus --
 # and after the update we must hand focus TO the relaunched Desktop (a
 # WMI-spawned process starts unfocused). AllowSetForegroundWindow lets us
-# pass our foreground right on to the new Hermes.exe pid.
+# pass our foreground right on to the new desktop pid.
 try {
     Add-Type -Namespace HermesHandoff -Name Win32 -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr hWnd);
@@ -81,12 +81,25 @@ try {
 } catch {}
 $TempDir = if ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
 $HermesHome = if ($InstallRoot) { Split-Path -Parent $InstallRoot } else { $TempDir }
-$MarkerPath = Join-Path $HermesHome ".hermes-update-in-progress"
+$MarkerName = if ($env:HERMES_UPDATE_MARKER_NAME) { $env:HERMES_UPDATE_MARKER_NAME } else { ".hermes-update-in-progress" }
+$ResultName = if ($env:HERMES_UPDATE_RESULT_NAME) { $env:HERMES_UPDATE_RESULT_NAME } else { ".hermes-update-result.json" }
+$LogName = if ($env:HERMES_UPDATE_HANDOFF_LOG_NAME) { $env:HERMES_UPDATE_HANDOFF_LOG_NAME } else { "desktop-update-handoff.log" }
+$ProductName = if ($env:HERMES_UPDATE_PRODUCT_NAME) { $env:HERMES_UPDATE_PRODUCT_NAME } else { "Hermes" }
+$ProductName = ($ProductName -replace "[`r`n]", "").Trim()
+if ([string]::IsNullOrWhiteSpace($ProductName)) { $ProductName = "Hermes" }
+$TempPrefix = if ($env:HERMES_UPDATE_TEMP_PREFIX) { $env:HERMES_UPDATE_TEMP_PREFIX } else { "hermes-update" }
+$TempPrefix = ($TempPrefix -replace "[`r`n]", "" -replace "[^A-Za-z0-9._-]", "-").Trim(".-")
+if ([string]::IsNullOrWhiteSpace($TempPrefix)) { $TempPrefix = "hermes-update" }
+$UiProfilePrefix = "$TempPrefix-ui"
+if ([string]::IsNullOrWhiteSpace($MarkerName) -or $MarkerName.IndexOfAny([char[]]@('/', '\')) -ge 0) { $MarkerName = ".hermes-update-in-progress" }
+if ([string]::IsNullOrWhiteSpace($ResultName) -or $ResultName.IndexOfAny([char[]]@('/', '\')) -ge 0) { $ResultName = ".hermes-update-result.json" }
+if ([string]::IsNullOrWhiteSpace($LogName) -or $LogName.IndexOfAny([char[]]@('/', '\')) -ge 0) { $LogName = "desktop-update-handoff.log" }
+$MarkerPath = Join-Path $HermesHome $MarkerName
 $LogDir = Join-Path $HermesHome "logs"
-$LogPath = Join-Path $LogDir "desktop-update-handoff.log"
-$ResultPath = Join-Path $HermesHome ".hermes-update-result.json"
+$LogPath = Join-Path $LogDir $LogName
+$ResultPath = Join-Path $HermesHome $ResultName
 $script:Ui = $null
-$script:UiStage = "Hermes will open once done."   # until the first gate; matches ui.html
+$script:UiStage = "$ProductName will open once done."   # until the first gate; matches ui.html
 $script:UiStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
 function Write-HandoffLog([string]$Message) {
@@ -169,7 +182,8 @@ function Start-UiServer([string]$HtmlPath) {
         $rs.Open()
         $rs.SessionStateProxy.SetVariable("Listener", $listener)
         $rs.SessionStateProxy.SetVariable("State", $script:UiState)
-        $rs.SessionStateProxy.SetVariable("HtmlBytes", [System.IO.File]::ReadAllBytes($HtmlPath))
+        $html = [System.IO.File]::ReadAllText($HtmlPath, [System.Text.Encoding]::UTF8).Replace("__HERMES_UPDATE_PRODUCT_NAME__", $ProductName)
+        $rs.SessionStateProxy.SetVariable("HtmlBytes", [System.Text.Encoding]::UTF8.GetBytes($html))
 
         $ps = [powershell]::Create()
         $ps.Runspace = $rs
@@ -265,7 +279,7 @@ function Stop-UiServer([switch]$LeaveWindow) {
         } catch {}
     }
     # Best-effort removal of the dedicated browser profile dirs: this run's
-    # profile plus any stale hermes-update-ui-* leftovers from interrupted
+    # profile plus any stale product-scoped update UI leftovers from interrupted
     # past runs. A browser that is still shutting down may hold the lock, in
     # which case the delete silently no-ops. Safe to sweep by prefix: the
     # update marker (.hermes-update-in-progress) serialises hand-offs, so no
@@ -273,7 +287,7 @@ function Stop-UiServer([switch]$LeaveWindow) {
     try {
         $profileDirs = @()
         if ($script:UiServer.Profile) { $profileDirs += $script:UiServer.Profile }
-        Get-ChildItem -LiteralPath $TempDir -Directory -Filter "hermes-update-ui-*" -ErrorAction SilentlyContinue |
+        Get-ChildItem -LiteralPath $TempDir -Directory -Filter "$UiProfilePrefix-*" -ErrorAction SilentlyContinue |
             ForEach-Object { $profileDirs += $_.FullName }
         foreach ($dir in ($profileDirs | Select-Object -Unique)) {
             Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
@@ -343,7 +357,7 @@ function Show-ProgressWindow {
                 # we own (a default-profile launch delegates to an existing
                 # browser and returns instantly, leaving nothing to close), and
                 # avoids touching the user's real browser profile.
-                $browserProfile = Join-Path $TempDir ("hermes-update-ui-{0}" -f $PID)
+                $browserProfile = Join-Path $TempDir ("{0}-{1}" -f $UiProfilePrefix, $PID)
                 $browserArgs = @(
                     "--app=http://127.0.0.1:$($server.Port)/",
                     "--user-data-dir=$browserProfile",
@@ -379,7 +393,7 @@ function Show-ProgressWindow {
             $mute = [System.Drawing.ColorTranslator]::FromHtml("#A8A8A8")
         }
         $form = New-Object System.Windows.Forms.Form
-        $form.Text = "Hermes"
+        $form.Text = $ProductName
         $form.FormBorderStyle = "FixedSingle"
         $form.MaximizeBox = $false
         $form.MinimizeBox = $false
@@ -393,7 +407,7 @@ function Show-ProgressWindow {
         $bar.MarqueeAnimationSpeed = 30
         $bar.SetBounds(60, 128, 160, 8)
         $title = New-Object System.Windows.Forms.Label
-        $title.Text = "Updating Hermes"
+        $title.Text = "Updating $ProductName"
         $title.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 12)
         $title.ForeColor = $fore
         $title.TextAlign = "MiddleCenter"
@@ -1416,7 +1430,7 @@ try {
     }
 
     # -- 1. Wait for the Desktop to exit (FAIL CLOSED) ----------------------
-    Publish-UiProgress "Waiting for Hermes to close"
+    Publish-UiProgress "Waiting for $ProductName to close"
     if ($DesktopPid -gt 0) {
         $deadline = (Get-Date).AddSeconds(30)
         while ((Get-Date) -lt $deadline) {
@@ -1429,7 +1443,7 @@ try {
             # A live Desktop means a live backend re-locking the venv at any
             # moment. Updating under it is how installs brick. Abort.
             $finalCode = 4
-            $finalMsg = "Update aborted: the Hermes window (pid $DesktopPid) did not exit within 30s. Nothing was changed. Close Hermes fully and try again."
+            $finalMsg = "Update aborted: the $ProductName window (pid $DesktopPid) did not exit within 30s. Nothing was changed. Close $ProductName fully and try again."
             Write-HandoffLog $finalMsg
             exit $finalCode
         }
@@ -1437,7 +1451,7 @@ try {
     }
 
     # -- 2. Wait for the venv shim to unlock (FAIL CLOSED) ------------------
-    Publish-UiProgress "Preparing Hermes files"
+    Publish-UiProgress "Preparing $ProductName files"
     $shim = Join-Path $InstallRoot "venv\Scripts\hermes.exe"
     if (Test-Path -LiteralPath $shim) {
         $unlocked = $false
@@ -1457,7 +1471,7 @@ try {
             # Something still maps the venv. --force-ing past it guarantees a
             # half-updated venv (the exact 2026-08-09 Access-denied brick).
             $finalCode = 5
-            $finalMsg = "Update aborted: another process is still holding the Hermes install open (venv\Scripts\hermes.exe locked after 20s). Nothing was changed. Close other Hermes windows/terminals and try again."
+            $finalMsg = "Update aborted: another process is still holding the $ProductName install open (venv\Scripts\hermes.exe locked after 20s). Nothing was changed. Close other $ProductName windows/terminals and try again."
             Write-HandoffLog $finalMsg
             exit $finalCode
         }
@@ -1504,7 +1518,7 @@ try {
     $pythonExe = Join-Path $InstallRoot "venv\Scripts\python.exe"
     if (-not (Test-Path -LiteralPath $pythonExe)) {
         $finalCode = 3
-        $finalMsg = "Update aborted: $pythonExe is missing. The install needs repair (run the Hermes installer or `hermes doctor`)."
+        $finalMsg = "Update aborted: $pythonExe is missing. The install needs repair (run the $ProductName installer or `hermes doctor`)."
         Write-HandoffLog $finalMsg
         exit $finalCode
     }
@@ -1591,7 +1605,7 @@ try {
         # that unknown state. This is intentionally fail-closed; the marker's
         # dead-owner recovery remains the next-start escape hatch.
         $finalCode = 7
-        $finalMsg = "Update recovery could not stop every updater process. Hermes was not restarted to avoid overlapping the active install. Wait for it to finish or restart Windows, then reopen Hermes."
+        $finalMsg = "Update recovery could not stop every updater process. $ProductName was not restarted to avoid overlapping the active install. Wait for it to finish or restart Windows, then reopen $ProductName."
         Write-Result $false $finalCode $finalMsg
         Write-HandoffLog $finalMsg
         Show-ErrorFinale $finalMsg
@@ -1604,12 +1618,12 @@ try {
             Close-ProgressWindow
             [void](Start-DesktopRelaunch)
         } else {
-            Publish-UiProgress "Opening Hermes"
+            Publish-UiProgress "Opening $ProductName"
             $cameBack = Start-DesktopRelaunch
             if (-not $cameBack -and $RelaunchExe) {
                 # Launch was due and did not verifiably land: truthful result
                 # for the next boot, manual state held on screen now.
-                $finalMsg = "Update complete. Reopen Hermes to finish (it could not restart itself)."
+                $finalMsg = "Update complete. Reopen $ProductName to finish (it could not restart itself)."
                 Write-Result $true 0 $finalMsg $true
                 Show-ManualFinale $finalMsg
             }

@@ -1,7 +1,8 @@
+import { useStore } from '@nanostores/react'
 import { type CSSProperties } from 'react'
 
 import { HackeryButton } from '../components/hackery-button'
-import { startInstall } from '../store'
+import { $productName, startInstall } from '../store'
 
 /*
  * Welcome screen.
@@ -16,6 +17,9 @@ import { startInstall } from '../store'
  * flag. Showing %LOCALAPPDATA% to grandma is developer-brain.
  */
 export default function Welcome() {
+  const productName = useStore($productName)
+  const wordmark = productName === 'Lemon AI' ? 'LEMON AI' : 'HERMES AGENT'
+
   return (
     <div className="hermes-fade-in flex h-full flex-col items-center justify-center gap-10 px-12 py-10">
       {/* Hero — same recipe the desktop's chat/intro.tsx uses */}
@@ -31,14 +35,13 @@ export default function Welcome() {
           }
         >
           <span>
-            <span>HERMES AGENT</span>
+            <span>{wordmark}</span>
           </span>
-          <span aria-hidden="true">HERMES AGENT</span>
+          <span aria-hidden="true">{wordmark}</span>
         </p>
 
         <p className="m-0 text-center text-base leading-normal tracking-tight text-muted-foreground">
-          The agent that grows with you. We&rsquo;ll set things up in the
-          background &mdash; takes a few minutes.
+          The agent that grows with you. We&rsquo;ll set things up in the background &mdash; takes a few minutes.
         </p>
       </div>
 

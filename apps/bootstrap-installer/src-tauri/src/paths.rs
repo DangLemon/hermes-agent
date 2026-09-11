@@ -16,10 +16,101 @@
 //! writes to one place and the installer reads from another, breaking
 //! the bootstrap-complete check.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 #[cfg(target_os = "macos")]
 use std::process::Command;
 use tracing_appender::non_blocking::WorkerGuard;
+
+pub fn internal_desktop_build() -> bool {
+    internal_desktop_build_for(
+        std::env::var("HERMES_DESKTOP_INTERNAL").ok().as_deref(),
+        std::env::var("HERMES_DESKTOP_HARNESS_CONFIG")
+            .ok()
+            .as_deref(),
+        option_env!("HERMES_INSTALLER_BRAND"),
+    )
+}
+
+fn truthy_env(value: Option<&str>) -> bool {
+    matches!(
+        value.map(str::trim).map(str::to_ascii_lowercase).as_deref(),
+        Some("1" | "true" | "yes" | "on")
+    )
+}
+
+fn installer_brand_is_internal(brand: Option<&str>) -> bool {
+    matches!(brand.map(str::trim), Some(value) if value.eq_ignore_ascii_case("lemon"))
+}
+
+fn internal_desktop_build_for(
+    explicit_internal: Option<&str>,
+    harness_config: Option<&str>,
+    compiled_brand: Option<&str>,
+) -> bool {
+    if truthy_env(explicit_internal) || installer_brand_is_internal(compiled_brand) {
+        return true;
+    }
+    harness_config
+        .map(|value| valid_internal_harness_config(Path::new(value.trim())))
+        .unwrap_or(false)
+}
+
+fn valid_internal_harness_config(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return false;
+    };
+    let Some(ui) = value.get("ui").and_then(|ui| ui.as_object()) else {
+        return false;
+    };
+    const UI_KEYS: [&str; 5] = ["agents", "cron", "messaging", "terminal", "webhooks"];
+    value.get("schemaVersion").and_then(|v| v.as_i64()) == Some(1)
+        && value.get("profile").and_then(|v| v.as_str()) == Some("internal")
+        && ui.len() == UI_KEYS.len()
+        && UI_KEYS
+            .iter()
+            .all(|key| ui.get(*key).and_then(|v| v.as_bool()).is_some())
+}
+
+fn safe_file_name(value: Option<&str>, fallback: &str) -> String {
+    value
+        .map(str::trim)
+        .filter(|value| {
+            !value.is_empty()
+                && *value != "."
+                && *value != ".."
+                && !value.contains("..")
+                && !value.contains('/')
+                && !value.contains('\\')
+        })
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+fn safe_file_name_from_env(key: &str, fallback: &str) -> String {
+    safe_file_name(std::env::var(key).ok().as_deref(), fallback)
+}
+
+fn default_runtime_dir_name(internal: bool) -> &'static str {
+    if internal {
+        "lemon-agent"
+    } else {
+        "hermes-agent"
+    }
+}
+
+pub fn runtime_dir_name() -> String {
+    safe_file_name_from_env(
+        "HERMES_INSTALL_RUNTIME_DIR_NAME",
+        default_runtime_dir_name(internal_desktop_build()),
+    )
+}
 
 /// Returns the canonical Hermes home directory, respecting $HERMES_HOME if set.
 pub fn hermes_home() -> PathBuf {
@@ -31,21 +122,41 @@ pub fn hermes_home() -> PathBuf {
 
     #[cfg(target_os = "windows")]
     {
-        // %LOCALAPPDATA%\hermes — matches scripts/install.ps1's $HermesHome.
         if let Some(local_app_data) = dirs::data_local_dir() {
+            if internal_desktop_build() {
+                return local_app_data.join("Lemon AI");
+            }
             return local_app_data.join("hermes");
         }
     }
 
-    // macOS + Linux + fallback: ~/.hermes (matches Python get_hermes_home(),
-    // install.sh, and the Electron desktop's resolveHermesHome()).
     if let Some(home) = dirs::home_dir() {
+        if internal_desktop_build() {
+            return home.join(".lemon-ai");
+        }
         return home.join(".hermes");
     }
 
     // Last resort — current dir, almost certainly wrong but at least
     // doesn't panic.
     PathBuf::from(".hermes")
+}
+
+fn install_root_for_home_with_runtime(
+    home: &Path,
+    runtime_dir_name: &str,
+    _internal: bool,
+) -> PathBuf {
+    home.join(runtime_dir_name)
+}
+
+pub fn install_root_for_home(home: &Path) -> PathBuf {
+    install_root_for_home_with_runtime(home, &runtime_dir_name(), internal_desktop_build())
+}
+
+pub fn install_root() -> PathBuf {
+    let home = hermes_home();
+    install_root_for_home(&home)
 }
 
 pub fn log_dir() -> PathBuf {
@@ -60,6 +171,96 @@ pub fn bootstrap_cache_dir() -> PathBuf {
     hermes_home().join("bootstrap-cache")
 }
 
+fn product_name_for(internal: bool) -> &'static str {
+    if internal {
+        "Lemon AI"
+    } else {
+        "Hermes"
+    }
+}
+
+pub fn product_name() -> &'static str {
+    product_name_for(internal_desktop_build())
+}
+
+pub(crate) fn update_temp_prefix(internal: bool) -> &'static str {
+    if internal {
+        "lemon-ai-update"
+    } else {
+        "hermes-update"
+    }
+}
+
+fn update_result_name(internal: bool) -> &'static str {
+    if internal {
+        ".lemon-ai-update-result.json"
+    } else {
+        ".hermes-update-result.json"
+    }
+}
+
+fn desktop_identity_child_env_for(
+    internal: bool,
+    runtime_dir_name: String,
+    bootstrap_marker_name: String,
+    update_marker_name: String,
+    product_name: &'static str,
+) -> Vec<(&'static str, OsString)> {
+    let mut envs = vec![
+        (
+            "HERMES_INSTALL_RUNTIME_DIR_NAME",
+            OsString::from(runtime_dir_name),
+        ),
+        (
+            "HERMES_BOOTSTRAP_MARKER_NAME",
+            OsString::from(bootstrap_marker_name),
+        ),
+        (
+            "HERMES_UPDATE_MARKER_NAME",
+            OsString::from(update_marker_name),
+        ),
+        ("HERMES_UPDATE_PRODUCT_NAME", OsString::from(product_name)),
+        (
+            "HERMES_UPDATE_TEMP_PREFIX",
+            OsString::from(update_temp_prefix(internal)),
+        ),
+        (
+            "HERMES_UPDATE_RESULT_NAME",
+            OsString::from(update_result_name(internal)),
+        ),
+    ];
+    if internal {
+        envs.push(("HERMES_DESKTOP_INTERNAL", OsString::from("1")));
+    }
+    envs
+}
+
+pub(crate) fn desktop_identity_child_env() -> Vec<(&'static str, OsString)> {
+    let internal = internal_desktop_build();
+
+    desktop_identity_child_env_for(
+        internal,
+        safe_file_name_from_env(
+            "HERMES_INSTALL_RUNTIME_DIR_NAME",
+            default_runtime_dir_name(internal),
+        ),
+        safe_file_name_from_env(
+            "HERMES_BOOTSTRAP_MARKER_NAME",
+            default_bootstrap_marker_name(internal),
+        ),
+        safe_file_name_from_env(
+            "HERMES_UPDATE_MARKER_NAME",
+            default_update_marker_name(internal),
+        ),
+        product_name_for(internal),
+    )
+}
+
+#[tauri::command]
+pub fn get_product_name() -> String {
+    product_name().to_string()
+}
+
 /// Stable location the installer copies itself to after a successful install.
 /// The desktop app re-invokes this with `--update`, and the start-menu /
 /// desktop shortcuts can point users back to it. Lives directly under
@@ -69,11 +270,20 @@ pub fn bootstrap_cache_dir() -> PathBuf {
 /// On Windows this is `%LOCALAPPDATA%\hermes\hermes-setup.exe`; on other
 /// platforms the extension differs but the directory is the same.
 pub fn installer_dest() -> PathBuf {
-    let name = if cfg!(target_os = "windows") {
-        "hermes-setup.exe"
+    let fallback = if cfg!(target_os = "windows") {
+        if internal_desktop_build() {
+            "lemon-ai-setup.exe"
+        } else {
+            "hermes-setup.exe"
+        }
     } else {
-        "hermes-setup"
+        if internal_desktop_build() {
+            "lemon-ai-setup"
+        } else {
+            "hermes-setup"
+        }
     };
+    let name = safe_file_name_from_env("HERMES_STAGED_UPDATER_NAME", fallback);
     hermes_home().join(name)
 }
 
@@ -86,8 +296,23 @@ pub fn installer_dest() -> PathBuf {
 /// Lives directly under HERMES_HOME (same rationale as `installer_dest`) so the
 /// Electron desktop — which resolves HERMES_HOME identically and pins it into
 /// the updater's env — agrees on the exact path.
+fn default_update_marker_name(internal: bool) -> &'static str {
+    if internal {
+        ".lemon-ai-update-in-progress"
+    } else {
+        ".hermes-update-in-progress"
+    }
+}
+
+pub fn update_marker_name() -> String {
+    safe_file_name_from_env(
+        "HERMES_UPDATE_MARKER_NAME",
+        default_update_marker_name(internal_desktop_build()),
+    )
+}
+
 pub fn update_in_progress_marker() -> PathBuf {
-    hermes_home().join(".hermes-update-in-progress")
+    hermes_home().join(update_marker_name())
 }
 
 /// Copy the currently-running installer binary to `installer_dest()` so it's
@@ -116,7 +341,10 @@ pub fn copy_self_to_hermes_home() -> std::io::Result<()> {
         _ => src == dest,
     };
     if same {
-        tracing::info!(?dest, "installer already at destination; skipping self-copy");
+        tracing::info!(
+            ?dest,
+            "installer already at destination; skipping self-copy"
+        );
         return Ok(());
     }
 
@@ -160,8 +388,46 @@ fn repair_macos_installer_helper(_path: &Path) {}
 ///   const BOOTSTRAP_COMPLETE_MARKER = path.join(ACTIVE_HERMES_ROOT, '.hermes-bootstrap-complete')
 /// We don't always know ACTIVE_HERMES_ROOT until install.ps1 reports it, so
 /// this is a probe helper, not a definitive path.
+fn default_bootstrap_marker_name(internal: bool) -> &'static str {
+    if internal {
+        ".lemon-ai-bootstrap-complete"
+    } else {
+        ".hermes-bootstrap-complete"
+    }
+}
+
+pub fn bootstrap_marker_name() -> String {
+    safe_file_name_from_env(
+        "HERMES_BOOTSTRAP_MARKER_NAME",
+        default_bootstrap_marker_name(internal_desktop_build()),
+    )
+}
+
 pub fn likely_bootstrap_marker(install_root: &Path) -> PathBuf {
-    install_root.join(".hermes-bootstrap-complete")
+    install_root.join(bootstrap_marker_name())
+}
+
+fn likely_bootstrap_markers_with_name(
+    install_root: &Path,
+    primary_name: &str,
+    internal: bool,
+) -> Vec<PathBuf> {
+    let primary = install_root.join(primary_name);
+    if internal {
+        let legacy = install_root.join(".hermes-bootstrap-complete");
+        if legacy != primary {
+            return vec![primary, legacy];
+        }
+    }
+    vec![primary]
+}
+
+pub fn likely_bootstrap_markers(install_root: &Path) -> Vec<PathBuf> {
+    likely_bootstrap_markers_with_name(
+        install_root,
+        &bootstrap_marker_name(),
+        internal_desktop_build(),
+    )
 }
 
 /// Initializes tracing to bootstrap-installer.log under HERMES_HOME/logs/.
@@ -213,4 +479,163 @@ pub fn open_log_dir(app: tauri::AppHandle) -> Result<(), String> {
     app.opener()
         .open_path(path.to_string_lossy(), None::<&str>)
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unique_tmp_dir(tag: &str) -> PathBuf {
+        let base = std::env::temp_dir().join(format!(
+            "hermes-paths-test-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        base
+    }
+
+    #[test]
+    fn unsafe_environment_file_names_fall_back_to_identity_defaults() {
+        for value in ["", " ", ".", "..", "../x", "x/y", "x\\y", "x..y"] {
+            assert_eq!(safe_file_name(Some(value), "safe-name"), "safe-name");
+        }
+        assert_eq!(
+            safe_file_name(Some(" lemon-agent "), "fallback"),
+            "lemon-agent"
+        );
+    }
+
+    #[test]
+    fn internal_runtime_default_is_lemon_agent() {
+        assert_eq!(default_runtime_dir_name(true), "lemon-agent");
+        assert_eq!(default_runtime_dir_name(false), "hermes-agent");
+    }
+
+    #[test]
+    fn compiled_lemon_installer_brand_is_internal_identity_signal() {
+        assert!(internal_desktop_build_for(None, None, Some("lemon")));
+        assert_eq!(default_runtime_dir_name(true), "lemon-agent");
+        assert_eq!(
+            default_update_marker_name(true),
+            ".lemon-ai-update-in-progress"
+        );
+        assert!(!internal_desktop_build_for(None, None, Some("hermes")));
+        assert!(!internal_desktop_build_for(Some("0"), None, Some("hermes")));
+    }
+
+    #[test]
+    fn child_env_carries_lemon_identity_when_internal() {
+        let base = std::env::temp_dir().join(format!(
+            "hermes-paths-harness-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(
+            &base,
+            r#"{
+              "schemaVersion": 1,
+              "profile": "internal",
+              "ui": {"agents": true, "cron": true, "messaging": true, "terminal": true, "webhooks": true}
+            }"#,
+        )
+        .unwrap();
+        assert!(internal_desktop_build_for(
+            None,
+            base.to_str(),
+            Some("hermes")
+        ));
+        let envs = desktop_identity_child_env_for(
+            true,
+            default_runtime_dir_name(true).to_string(),
+            default_bootstrap_marker_name(true).to_string(),
+            default_update_marker_name(true).to_string(),
+            product_name_for(true),
+        );
+
+        let _ = std::fs::remove_file(&base);
+
+        let lookup = |name: &str| {
+            envs.iter()
+                .find(|(key, _)| *key == name)
+                .and_then(|(_, value)| value.to_str())
+        };
+        assert_eq!(lookup("HERMES_DESKTOP_INTERNAL"), Some("1"));
+        assert_eq!(
+            lookup("HERMES_INSTALL_RUNTIME_DIR_NAME"),
+            Some("lemon-agent")
+        );
+        assert_eq!(
+            lookup("HERMES_BOOTSTRAP_MARKER_NAME"),
+            Some(".lemon-ai-bootstrap-complete")
+        );
+        assert_eq!(
+            lookup("HERMES_UPDATE_MARKER_NAME"),
+            Some(".lemon-ai-update-in-progress")
+        );
+        assert_eq!(lookup("HERMES_UPDATE_PRODUCT_NAME"), Some("Lemon AI"));
+        assert_eq!(
+            lookup("HERMES_UPDATE_RESULT_NAME"),
+            Some(".lemon-ai-update-result.json")
+        );
+    }
+
+    #[test]
+    fn internal_install_root_never_adopts_legacy_checkout_implicitly() {
+        let home = unique_tmp_dir("install-root");
+        std::fs::create_dir_all(home.join("hermes-agent")).unwrap();
+
+        assert_eq!(
+            install_root_for_home_with_runtime(&home, "lemon-agent", true),
+            home.join("lemon-agent")
+        );
+
+        assert_eq!(
+            install_root_for_home_with_runtime(&home, "lemon-agent", true),
+            home.join("lemon-agent"),
+            "internal builds keep the Lemon runtime even if a legacy checkout exists"
+        );
+        assert_eq!(
+            install_root_for_home_with_runtime(&home, "hermes-agent", true),
+            home.join("hermes-agent"),
+            "an explicit compatibility runtime name can still select Hermes"
+        );
+
+        assert_eq!(
+            install_root_for_home_with_runtime(&home, "hermes-agent", false),
+            home.join("hermes-agent"),
+            "ordinary builds keep the Hermes runtime root"
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn internal_bootstrap_marker_reads_lemon_then_legacy() {
+        let root = Path::new("/tmp/root");
+        assert_eq!(
+            default_bootstrap_marker_name(true),
+            ".lemon-ai-bootstrap-complete"
+        );
+        assert_eq!(
+            default_bootstrap_marker_name(false),
+            ".hermes-bootstrap-complete"
+        );
+        assert_eq!(
+            likely_bootstrap_markers_with_name(root, ".lemon-ai-bootstrap-complete", true),
+            vec![
+                root.join(".lemon-ai-bootstrap-complete"),
+                root.join(".hermes-bootstrap-complete"),
+            ]
+        );
+        assert_eq!(
+            likely_bootstrap_markers_with_name(root, ".hermes-bootstrap-complete", false),
+            vec![root.join(".hermes-bootstrap-complete")]
+        );
+    }
 }

@@ -18,6 +18,7 @@ import { buildWindowsInteractiveCommand } from './windows-remote-lifecycle'
 
 export interface TerminalIpcDeps {
   isWindows: boolean
+  hostAppName?: string
   findOnPath: (command: string) => null | string
   rememberLog: (line: string) => void
   activeSshTerminalTarget: (webContentsId: number) => unknown
@@ -33,6 +34,7 @@ export interface TerminalIpcApi {
 
 export function registerTerminalIpc({
   isWindows,
+  hostAppName = 'Hermes',
   findOnPath,
   rememberLog,
   activeSshTerminalTarget,
@@ -158,7 +160,7 @@ export function registerTerminalIpc({
     env.COLORTERM = 'truecolor'
     env.LC_CTYPE = env.LC_CTYPE || 'UTF-8'
     env.TERM = 'xterm-256color'
-    env.TERM_PROGRAM = 'Hermes'
+    env.TERM_PROGRAM = hostAppName
     env.TERM_PROGRAM_VERSION = app.getVersion()
 
     // Let a hermes/--tui launched in this pane know it's embedded in the desktop
@@ -300,7 +302,7 @@ export function registerTerminalIpc({
 
     const remoteCommand =
       remoteState?.remotePlatform === 'Windows'
-        ? buildWindowsInteractiveCommand(String(payload?.cwd || '').trim())
+        ? buildWindowsInteractiveCommand(String(payload?.cwd || '').trim(), hostAppName)
         : undefined
 
     const ptyProcess = remote

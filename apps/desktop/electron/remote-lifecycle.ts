@@ -257,14 +257,14 @@ async function probeHermesVersion(ssh, hermesPath) {
   }
 }
 
-async function probeRemotePlatform(ssh) {
+async function probeRemotePlatform(ssh, hostAppName = 'Hermes') {
   const out = (await ssh.exec('uname -s; uname -m')).trim().split('\n')
   const osName = (out[0] || '').trim()
   const arch = (out[1] || '').trim()
 
   if (!SUPPORTED_REMOTE_OS.has(osName)) {
     const err: any = new Error(
-      `Unsupported remote platform "${osName || 'unknown'}". Hermes Desktop SSH mode supports Linux, macOS, and Windows remote hosts.`
+      `Unsupported remote platform "${osName || 'unknown'}". ${hostAppName} Desktop SSH mode supports Linux, macOS, and Windows remote hosts.`
     )
 
     err.kind = 'unsupported-platform'
@@ -913,7 +913,7 @@ finally:
 sys.exit(result.returncode if result is not None else 1)
 `.trim()
 
-  return `python3 -c ${shq(script)} ${shq(mutexPath)} ${shq(command)}`
+  return `python3 -c ${shq(script)} ${expandRemotePath(mutexPath)} ${shq(command)}`
 }
 
 /**
@@ -1045,9 +1045,7 @@ function buildSpawnCommand(hermesPath, profile, opts: any = {}) {
   const subCmd = `serve --isolated --host 127.0.0.1 --port 0${tokenArg}${ownerArg}`
   const marker = expandRemotePath(`${remoteInstallRoot(opts.hermesHome || '~/.hermes')}/.hermes-update-in-progress`)
 
-  const updateMutex = expandRemotePath(
-    `${remoteInstallRoot(opts.hermesHome || '~/.hermes')}/.hermes-update-in-progress.mutex`
-  )
+  const updateMutex = `${remoteInstallRoot(opts.hermesHome || '~/.hermes')}/.hermes-update-in-progress.mutex`
 
   // The marker probe, ownership reservation, process creation, and initial
   // lockfile publication must be one remote command. A second Desktop process
@@ -1386,6 +1384,7 @@ async function connect(deps) {
     probeReuseProof,
     adoptServedToken,
     rememberLog = () => {},
+    hostAppName = 'Hermes',
     readyTimeoutMs = DEFAULT_READY_TIMEOUT_MS,
     signal
   } = deps
@@ -1393,7 +1392,7 @@ async function connect(deps) {
   const log = msg => rememberLog(`[ssh-lifecycle] ${msg}`)
 
   assertBootstrapNotSuperseded(signal)
-  const platform = await probeRemotePlatform(ssh)
+  const platform = await probeRemotePlatform(ssh, hostAppName)
   log(`remote platform ${platform.os}/${platform.arch}`)
   const hermesHome = await probeRemoteHermesHome(ssh)
   await assertRemoteInstallUpdateClear(ssh, hermesHome)
@@ -1418,7 +1417,7 @@ async function connect(deps) {
     )
 
     const error: any = new Error(
-      `The remote ownership record ${lpath} does not match this Hermes Desktop build (${lock.reason}). ` +
+      `The remote ownership record ${lpath} does not match this ${hostAppName} Desktop build (${lock.reason}). ` +
         'It was probably written by a different or modified desktop build sharing this remote, or the file is corrupt. ' +
         'Refusing to reap or overwrite it — that could kill a live SSH backend owned by another build. ' +
         'If nothing else uses this remote, delete that file on the remote host and reconnect.'

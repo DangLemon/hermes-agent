@@ -23,6 +23,7 @@ import fs from 'fs'
 import path from 'path'
 
 export const HANDOFF_RESULT_MAX_AGE_MS = 30 * 60 * 1000
+export const HERMES_HANDOFF_RESULT_NAME = '.hermes-update-result.json'
 
 export interface HandoffResult {
   ok: boolean
@@ -36,58 +37,83 @@ export interface HandoffResult {
   branch: string
 }
 
-export function handoffResultPath(hermesHome: string): string {
-  return path.join(hermesHome, '.hermes-update-result.json')
+function uniqueNames(names: Array<string | null | undefined>) {
+  return Array.from(new Set(names.filter((name): name is string => typeof name === 'string' && name.length > 0)))
+}
+
+export function handoffResultPath(
+  hermesHome: string,
+  { resultName = HERMES_HANDOFF_RESULT_NAME }: { resultName?: string } = {}
+): string {
+  return path.join(hermesHome, resultName)
+}
+
+function handoffResultCandidatePaths(
+  hermesHome: string,
+  {
+    resultName = HERMES_HANDOFF_RESULT_NAME,
+    legacyResultNames = []
+  }: { resultName?: string; legacyResultNames?: string[] } = {}
+) {
+  return uniqueNames([resultName, ...legacyResultNames]).map(name => handoffResultPath(hermesHome, { resultName: name }))
 }
 
 export function readAndConsumeHandoffResult(
   hermesHome: string,
-  { now = Date.now, maxAgeMs = HANDOFF_RESULT_MAX_AGE_MS }: { now?: () => number; maxAgeMs?: number } = {}
+  {
+    now = Date.now,
+    maxAgeMs = HANDOFF_RESULT_MAX_AGE_MS,
+    resultName = HERMES_HANDOFF_RESULT_NAME,
+    legacyResultNames = []
+  }: { now?: () => number; maxAgeMs?: number; resultName?: string; legacyResultNames?: string[] } = {}
 ): HandoffResult | null {
-  const file = handoffResultPath(hermesHome)
-  let raw: string
+  for (const file of handoffResultCandidatePaths(hermesHome, { resultName, legacyResultNames })) {
+    let raw: string
 
-  try {
-    raw = fs.readFileSync(file, 'utf8')
-  } catch {
-    return null
+    try {
+      raw = fs.readFileSync(file, 'utf8')
+    } catch {
+      continue
+    }
+
+    // Consume unconditionally — even a malformed/stale file must not be
+    // re-reported on every subsequent boot.
+    try {
+      fs.unlinkSync(file)
+    } catch {
+      // Best-effort; a locked file just gets consumed on the next boot.
+    }
+
+    let parsed: any
+
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      return null
+    }
+
+    const manual = Boolean(parsed?.manual)
+    const finishedAt = Number(parsed?.finished_at)
+
+    if (!Number.isFinite(finishedAt)) {
+      return null
+    }
+
+    // Ordinary results expire; a manual (action-required) result never does —
+    // it's the last-resort surface for machines with no live channel, so the
+    // user must see it whenever they next reopen, not only within the window.
+    if (!manual && now() - finishedAt * 1000 > maxAgeMs) {
+      return null
+    }
+
+    return {
+      ok: Boolean(parsed?.ok),
+      exitCode: Number.isFinite(Number(parsed?.exit_code)) ? Number(parsed.exit_code) : 1,
+      manual,
+      message: typeof parsed?.message === 'string' ? parsed.message : '',
+      branch: typeof parsed?.branch === 'string' ? parsed.branch : ''
+    }
   }
 
-  // Consume unconditionally — even a malformed/stale file must not be
-  // re-reported on every subsequent boot.
-  try {
-    fs.unlinkSync(file)
-  } catch {
-    // Best-effort; a locked file just gets consumed on the next boot.
-  }
-
-  let parsed: any
-
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    return null
-  }
-
-  const manual = Boolean(parsed?.manual)
-  const finishedAt = Number(parsed?.finished_at)
-
-  if (!Number.isFinite(finishedAt)) {
-    return null
-  }
-
-  // Ordinary results expire; a manual (action-required) result never does —
-  // it's the last-resort surface for machines with no live channel, so the
-  // user must see it whenever they next reopen, not only within the window.
-  if (!manual && now() - finishedAt * 1000 > maxAgeMs) {
-    return null
-  }
-
-  return {
-    ok: Boolean(parsed?.ok),
-    exitCode: Number.isFinite(Number(parsed?.exit_code)) ? Number(parsed.exit_code) : 1,
-    manual,
-    message: typeof parsed?.message === 'string' ? parsed.message : '',
-    branch: typeof parsed?.branch === 'string' ? parsed.branch : ''
-  }
+  return null
 }

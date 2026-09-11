@@ -52,16 +52,19 @@ export function windowsQuote(value: string): string {
  */
 export function terminalScriptEnv(
   backendEnv: Record<string, string | undefined> = {},
-  hermesHome?: string
+  hermesHome?: string,
+  runtimeEnv: Record<string, string | undefined> = {}
 ): Record<string, string> {
   const out: Record<string, string> = {}
 
-  for (const [key, value] of Object.entries(backendEnv)) {
-    if (key.toUpperCase() === 'PATH' || value === undefined || value === '') {
-      continue
-    }
+  for (const env of [backendEnv, runtimeEnv]) {
+    for (const [key, value] of Object.entries(env)) {
+      if (key.toUpperCase() === 'PATH' || value === undefined || value === '') {
+        continue
+      }
 
-    out[key] = value
+      out[key] = value
+    }
   }
 
   if (hermesHome) {

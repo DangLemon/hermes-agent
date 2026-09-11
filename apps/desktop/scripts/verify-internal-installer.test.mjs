@@ -126,9 +126,9 @@ function validStamp() {
 
 function validGeneratedConfig() {
   return {
-    appId: 'com.nousresearch.hermes',
+    appId: 'com.lemondigital.lemonai',
     productName: 'Lemon AI',
-    executableName: 'Hermes',
+    executableName: 'Lemon AI',
     artifactName: 'Lemon-AI-${version}-${os}-${arch}.${ext}',
     icon: 'assets/lemon-icon',
     mac: {
@@ -184,7 +184,7 @@ function makePlist(filePath, values = {}) {
   const merged = {
     CFBundleDisplayName: 'Lemon AI',
     CFBundleName: 'Lemon AI',
-    CFBundleExecutable: 'Hermes',
+    CFBundleExecutable: 'Lemon AI',
     ...values
   }
   const body = Object.entries(merged)
@@ -208,7 +208,7 @@ function makeMacFixture(root) {
   const resources = path.join(appPath, 'Contents', 'Resources')
   const nodePty = path.join(resources, 'app.asar.unpacked', 'dist', 'node_modules', 'node-pty')
   fs.mkdirSync(path.join(appPath, 'Contents', 'MacOS'), { recursive: true })
-  makeMachO(path.join(appPath, 'Contents', 'MacOS', 'Hermes'))
+  makeMachO(path.join(appPath, 'Contents', 'MacOS', 'Lemon AI'))
   makePlist(path.join(appPath, 'Contents', 'Info.plist'))
   makeMacCodeSignature(appPath)
   fs.mkdirSync(path.join(resources, 'app.asar.unpacked', 'dist'), { recursive: true })
@@ -249,7 +249,7 @@ function makeWindowsFixture(root) {
   const resources = path.join(appPath, 'resources')
   const nodePty = path.join(resources, 'app.asar.unpacked', 'dist', 'node_modules', 'node-pty')
   const getWindows = path.join(resources, 'app.asar.unpacked', 'dist', 'node_modules', 'get-windows')
-  makePE(path.join(appPath, 'Hermes.exe'))
+  makePE(path.join(appPath, 'Lemon AI.exe'))
   fs.mkdirSync(path.join(resources, 'app.asar.unpacked', 'dist'), { recursive: true })
   fs.writeFileSync(path.join(resources, 'app.asar.unpacked', 'dist', 'index.html'), '<div></div>')
   writeJson(path.join(nodePty, 'package.json'), { name: 'node-pty' })
@@ -452,7 +452,7 @@ test('binary readers detect Mach-O and PE CPU values', () => {
 test('macOS verification rejects universal or x64 Mach-O payloads', () => {
   withTempDir(root => {
     const options = makeMacFixture(root)
-    makeFatMachO(path.join(options.appPath, 'Contents', 'MacOS', 'Hermes'))
+    makeFatMachO(path.join(options.appPath, 'Contents', 'MacOS', 'Lemon AI'))
     assert.throws(
       () =>
         verifyInternalInstaller({
@@ -590,7 +590,7 @@ test('Windows verification catches rcedit failures through executable VersionInf
     const options = makeWindowsFixture(root)
     assert.throws(
       () =>
-        validateWindowsIdentity(path.join(options.appPath, 'Hermes.exe'), {
+        validateWindowsIdentity(path.join(options.appPath, 'Lemon AI.exe'), {
           readWindowsVersionInfo: windowsVersionInfoReader({})
         }),
       /VersionInfo ProductName/
@@ -808,10 +808,14 @@ test('validateNativePayload rejects missing target node-pty binary', () => {
   })
 })
 
-test('validateGeneratedConfig requires Lemon visible product identity while keeping executable stable', () => {
+test('validateGeneratedConfig requires Lemon product and executable identity', () => {
   validateGeneratedConfig(validGeneratedConfig())
   assert.throws(
-    () => validateGeneratedConfig({ ...validGeneratedConfig(), executableName: 'Lemon AI' }),
+    () => validateGeneratedConfig({ ...validGeneratedConfig(), executableName: 'Hermes' }),
     /executableName/
+  )
+  assert.throws(
+    () => validateGeneratedConfig({ ...validGeneratedConfig(), appId: 'com.nousresearch.hermes' }),
+    /appId/
   )
 })

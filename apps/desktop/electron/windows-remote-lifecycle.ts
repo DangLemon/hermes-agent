@@ -750,7 +750,7 @@ async function connectWindowsRemote(deps) {
   }
 }
 
-function buildWindowsInteractiveCommand(remoteCwd = '') {
+function buildWindowsInteractiveCommand(remoteCwd = '', hostAppName = 'Hermes') {
   const cwd = String(remoteCwd || '').trim()
   const script = ['$ErrorActionPreference="Stop"']
 
@@ -760,7 +760,7 @@ function buildWindowsInteractiveCommand(remoteCwd = '') {
     )
   }
 
-  script.push('$host.UI.RawUI.WindowTitle="Hermes SSH"', 'powershell.exe -NoLogo')
+  script.push(`$host.UI.RawUI.WindowTitle=${psLiteral(`${hostAppName} SSH`)}`, 'powershell.exe -NoLogo')
 
   return powerShellCommand(script.join(';'))
 }

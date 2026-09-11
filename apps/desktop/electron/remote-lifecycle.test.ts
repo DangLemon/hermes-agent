@@ -396,6 +396,14 @@ test('probeRemotePlatform rejects unsupported remote platforms', async () => {
   )
 })
 
+test('probeRemotePlatform uses the Lemon host label without changing remote Hermes contracts', async () => {
+  await assert.rejects(
+    () => probeRemotePlatform(fakeSsh([[/uname/, 'MINGW64_NT\nx86_64']]), 'Lemon AI'),
+    /Lemon AI Desktop SSH mode/
+  )
+  assert.equal(ownershipDirectory(OWNERSHIP_ID), `~/.hermes/desktop-ssh/${OWNERSHIP_ID}`)
+})
+
 test('ownership paths are isolated by ownership ID and spawn nonce', () => {
   assert.equal(ownershipDirectory(OWNERSHIP_ID), `~/.hermes/desktop-ssh/${OWNERSHIP_ID}`)
   assert.equal(lockfilePath(OWNERSHIP_ID), `~/.hermes/desktop-ssh/${OWNERSHIP_ID}/backend.lock.json`)
@@ -483,6 +491,28 @@ test('connect() fails closed on lockfile schema/ownership skew: skips reap, touc
     assert.ok(!ssh.calls.some(c => /setsid|nohup/.test(c)), `${label}: must not spawn on top of foreign state`)
     assert.ok(!ssh.calls.some(c => /printf '%s' '.*schemaVersion/.test(c)), `${label}: must not overwrite the lockfile`)
   }
+})
+
+test('connect() identifies a Lemon host build while keeping the remote runtime Hermes-scoped', async () => {
+  const ssh = fakeSsh([
+    [/uname/, 'Linux\nx86_64'],
+    [/HERMES_HOME/, '/home/alice/.hermes\n'],
+    [/\.hermes-update-in-progress/, 'CLEAR'],
+    [/\[ -x/, 'OK'],
+    [/--version/, 'Hermes Agent v0.17.0'],
+    [/cat .*lock\.json/, '{"pid":333,"owner":"some-fork-desktop","version":"9.9.9"}']
+  ])
+
+  await assert.rejects(
+    () => connect(connectDeps(ssh, { hostAppName: 'Lemon AI' })),
+    (error: any) => {
+      assert.equal(error.kind, 'remote-lockfile-skew')
+      assert.match(error.message, /Lemon AI Desktop build/)
+
+      return true
+    }
+  )
+  assert.ok(ssh.calls.some(command => command.includes('/home/alice/.hermes')))
 })
 
 test('disconnect() fails closed on lockfile skew: never reaps, never drops the foreign lockfile', async () => {

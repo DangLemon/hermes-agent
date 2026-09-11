@@ -86,6 +86,7 @@ def run_repository_stage(
     commit: str | None = None,
     tag: str | None = None,
     extra_path: Path | None = None,
+    extra_env: dict[str, str] | None = None,
     check: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     cmd = [
@@ -107,10 +108,12 @@ def run_repository_stage(
     if tag:
         cmd.extend(["--tag", tag])
 
+    env = installer_env(tmp_path, gitconfig, extra_path=extra_path)
+    env.update(extra_env or {})
     result = subprocess.run(
         cmd,
         cwd=tmp_path,
-        env=installer_env(tmp_path, gitconfig, extra_path=extra_path),
+        env=env,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -130,6 +133,58 @@ def test_install_sh_fresh_clone_defaults_to_upstream_without_network(tmp_path: P
     assert '"ok":true' in result.stdout.replace(" ", "")
     assert (install_dir / "README.md").read_text(encoding="utf-8") == "upstream\n"
     assert origin_url(install_dir) == "https://github.com/NousResearch/hermes-agent.git"
+
+
+def test_install_sh_internal_fresh_clone_defaults_to_lemon_repository(tmp_path: Path) -> None:
+    internal, _ = create_remote(tmp_path, "DangLemon/hermes-agent", marker="internal")
+    gitconfig = write_gitconfig(tmp_path, {"DangLemon/hermes-agent": internal})
+    install_dir = tmp_path / "install"
+
+    result = run_repository_stage(
+        tmp_path,
+        gitconfig=gitconfig,
+        install_dir=install_dir,
+        extra_env={"HERMES_DESKTOP_INTERNAL": "1"},
+        check=True,
+    )
+
+    assert '"ok":true' in result.stdout.replace(" ", "")
+    assert (install_dir / "README.md").read_text(encoding="utf-8") == "internal\n"
+    assert origin_url(install_dir) == "https://github.com/DangLemon/hermes-agent.git"
+
+
+def test_install_sh_internal_help_reports_only_lemon_default_paths(tmp_path: Path) -> None:
+    env = os.environ.copy()
+    env.update({"HOME": str(tmp_path / "home"), "HERMES_DESKTOP_INTERNAL": "1"})
+
+    result = subprocess.run(
+        ["bash", str(INSTALL_SH), "--help"],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=True,
+    )
+
+    assert f"default (non-root):  {tmp_path / 'home' / '.lemon-ai' / 'lemon-agent'}" in result.stdout
+    assert "default: DangLemon/hermes-agent" in result.stdout
+    assert ".hermes/hermes-agent" not in result.stdout
+
+
+def test_install_sh_rejects_traversal_runtime_dir_name(tmp_path: Path) -> None:
+    env = os.environ.copy()
+    env.update({"HOME": str(tmp_path / "home"), "HERMES_INSTALL_RUNTIME_DIR_NAME": "../hermes-agent"})
+
+    result = subprocess.run(
+        ["bash", str(INSTALL_SH), "--help"],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+
+    assert result.returncode != 0
+    assert "must be a safe directory name" in result.stdout
 
 
 def test_install_sh_custom_repo_clone_and_existing_update_use_selected_repo(tmp_path: Path) -> None:
@@ -278,9 +333,15 @@ def test_install_sh_rejects_invalid_repo_identity_before_network(tmp_path: Path)
 def test_install_ps1_source_repository_contracts_are_bounded_and_repo_aware() -> None:
     source = INSTALL_PS1.read_text(encoding="utf-8")
 
-    assert '[string]$Repository = $(if ($env:HERMES_INSTALL_REPOSITORY)' in source
+    assert '[string]$Repository = ""' in source
+    assert 'elseif ($env:HERMES_INSTALL_REPOSITORY)' in source
+    assert 'elseif ($InternalDesktopBuild)' in source
+    assert '"DangLemon/hermes-agent"' in source
     assert '"NousResearch/hermes-agent"' in source
     assert 'function Test-RepositoryIdentity' in source
+    assert 'function Test-SafeFileName' in source
+    assert 'HERMES_INSTALL_RUNTIME_DIR_NAME must be a safe directory name' in source
+    assert 'HERMES_BOOTSTRAP_MARKER_NAME must be a safe file name' in source
     assert 'function Get-GitHubRepositoryIdentity' in source
     assert 'function Ensure-ManagedOrigin' in source
     assert 'does not match selected -Repository' in source

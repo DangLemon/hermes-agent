@@ -284,11 +284,12 @@ test('POSIX managed launcher executes the updater command and atomically publish
   const home = await mkdtemp(path.join(os.tmpdir(), 'hermes-managed-launch-'))
 
   try {
+    const { stdout: truePathOutput } = await exec('type -P true', { shell: '/bin/bash' })
     const command = buildPosixManagedUpdateLaunch(
       {
         ssh: { exec: async () => '' },
         platform: 'Linux',
-        hermesPath: '/bin/true',
+        hermesPath: truePathOutput.trim(),
         hermesHome: home
       },
       CORRELATION

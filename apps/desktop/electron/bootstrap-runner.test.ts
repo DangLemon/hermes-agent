@@ -280,6 +280,28 @@ test('resolveBootstrapSourceRepository reads packaged harness sourceRepository a
   }
 })
 
+test('resolveBootstrapSourceRepository defaults an internal harness to the Lemon repository', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lemon-source-repo-'))
+
+  try {
+    const resourcesPath = path.join(tempRoot, 'resources')
+    fs.mkdirSync(resourcesPath, { recursive: true })
+    fs.writeFileSync(
+      path.join(resourcesPath, 'internal-desktop-harness.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        profile: 'internal',
+        ui: { agents: false, cron: true, messaging: false, terminal: true, webhooks: false }
+      }),
+      'utf8'
+    )
+
+    assert.equal(resolveBootstrapSourceRepository({ resourcesPath, env: {} }), 'DangLemon/hermes-agent')
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
 test('resolveInstallScript prefers a cached script without touching the network', async () => {
   const home = mkTmpHome()
 

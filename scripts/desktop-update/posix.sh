@@ -65,11 +65,25 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HERMES_HOME="${INSTALL_ROOT:+$(dirname "$INSTALL_ROOT")}"
 HERMES_HOME="${HERMES_HOME:-${TMPDIR:-/tmp}}"
-MARKER="$HERMES_HOME/.hermes-update-in-progress"
+MARKER_NAME="${HERMES_UPDATE_MARKER_NAME:-.hermes-update-in-progress}"
+RESULT_NAME="${HERMES_UPDATE_RESULT_NAME:-.hermes-update-result.json}"
+LOG_NAME="${HERMES_UPDATE_HANDOFF_LOG_NAME:-desktop-update-handoff.log}"
+PRODUCT_NAME="${HERMES_UPDATE_PRODUCT_NAME:-Hermes}"
+PRODUCT_NAME="$(printf '%s' "$PRODUCT_NAME" | tr -d '\r\n')"
+[ -n "$PRODUCT_NAME" ] || PRODUCT_NAME="Hermes"
+UPDATE_TITLE="$PRODUCT_NAME update"
+TEMP_PREFIX="${HERMES_UPDATE_TEMP_PREFIX:-hermes-update}"
+TEMP_PREFIX="$(printf '%s' "$TEMP_PREFIX" | tr -d '\r\n' | sed 's/[^A-Za-z0-9._-]/-/g; s/^[.-]*//; s/[.-]*$//')"
+[ -n "$TEMP_PREFIX" ] || TEMP_PREFIX="hermes-update"
+UI_PROFILE_PREFIX="$TEMP_PREFIX-ui"
+case "$MARKER_NAME" in ""|*/*) MARKER_NAME=".hermes-update-in-progress" ;; esac
+case "$RESULT_NAME" in ""|*/*) RESULT_NAME=".hermes-update-result.json" ;; esac
+case "$LOG_NAME" in ""|*/*) LOG_NAME="desktop-update-handoff.log" ;; esac
+MARKER="$HERMES_HOME/$MARKER_NAME"
 LOG_DIR="$HERMES_HOME/logs"; mkdir -p "$LOG_DIR" 2>/dev/null || true
-LOG="$LOG_DIR/desktop-update-handoff.log"
-RESULT="$HERMES_HOME/.hermes-update-result.json"
-STATUS="${TMPDIR:-/tmp}/hermes-update-status.$$"
+LOG="$LOG_DIR/$LOG_NAME"
+RESULT="$HERMES_HOME/$RESULT_NAME"
+STATUS="${TMPDIR:-/tmp}/${TEMP_PREFIX}-status.$$"
 STARTED_AT="$(date +%s)"  # the shim's elapsed clock; see serve-ui.py
 
 UI_SERVER_PID="" UI_BROWSER_PID="" FINAL_CODE=1
@@ -130,20 +144,20 @@ notify_fallback() { # status message — renderer-free recovery surface.
   # boot surfaces it in a dialog (handoff-result.ts + main.ts).
   case "$1" in manual|error) ;; *) return 0 ;; esac
   if [ "$(uname)" = "Darwin" ]; then
-    /usr/bin/osascript -e "display notification \"$(printf '%s' "$2" | sed 's/"/\\"/g')\" with title \"Hermes update\"" 2>/dev/null && return 0
+    /usr/bin/osascript -e "display notification \"$(printf '%s' "$2" | sed 's/"/\\"/g')\" with title \"$(printf '%s' "$UPDATE_TITLE" | sed 's/"/\\"/g')\"" 2>/dev/null && return 0
   else
     if command -v notify-send >/dev/null 2>&1; then
-      notify-send -u critical "Hermes update" "$2" 2>/dev/null && return 0
+      notify-send -u critical "$UPDATE_TITLE" "$2" 2>/dev/null && return 0
     fi
     local p
     if command -v zenity >/dev/null 2>&1; then
-      zenity --warning --title="Hermes update" --text="$2" 2>/dev/null &
+      zenity --warning --title="$UPDATE_TITLE" --text="$2" 2>/dev/null &
       p=$!; sleep 1
       kill -0 "$p" 2>/dev/null && return 0
       wait "$p" 2>/dev/null
     fi
     if command -v kdialog >/dev/null 2>&1; then
-      kdialog --title "Hermes update" --sorry "$2" 2>/dev/null &
+      kdialog --title "$UPDATE_TITLE" --sorry "$2" 2>/dev/null &
       p=$!; sleep 1
       kill -0 "$p" 2>/dev/null && return 0
       wait "$p" 2>/dev/null
@@ -257,7 +271,7 @@ start_ui() {
   # window showed ERR_CONNECTION_REFUSED for the whole run; upstream #66753).
   # stop_ui ends the server with SIGKILL instead — it is stateless HTTP.
   "$py" -c 'import os, signal, sys; os.setsid(); signal.signal(signal.SIGTERM, signal.SIG_IGN); signal.signal(signal.SIGHUP, signal.SIG_IGN); os.execv(sys.argv[1], sys.argv[1:])' \
-    "$py" "$SCRIPT_DIR/serve-ui.py" "$html" "$STATUS" "$STARTED_AT" > "$LOG_DIR/desktop-update-ui-port" 2>>"$LOG" &
+    "$py" "$SCRIPT_DIR/serve-ui.py" "$html" "$STATUS" "$STARTED_AT" "$PRODUCT_NAME" > "$LOG_DIR/desktop-update-ui-port" 2>>"$LOG" &
   UI_SERVER_PID=$!
   for i in $(seq 1 10); do
     port="$(tr -cd '0-9' < "$LOG_DIR/desktop-update-ui-port" 2>/dev/null)"
@@ -268,7 +282,7 @@ start_ui() {
 
   # Throwaway profile: new window/process we own; user's browser untouched.
   "$py" -c 'import os, signal, sys; os.setsid(); signal.signal(signal.SIGTERM, signal.SIG_DFL); os.execv(sys.argv[1], sys.argv[1:])' \
-    "$browser" --app="http://127.0.0.1:$port/" --user-data-dir="${TMPDIR:-/tmp}/hermes-update-ui-$$" \
+    "$browser" --app="http://127.0.0.1:$port/" --user-data-dir="${TMPDIR:-/tmp}/${UI_PROFILE_PREFIX}-$$" \
     --no-first-run --no-default-browser-check --window-size=280,320 >/dev/null 2>&1 &
   UI_BROWSER_PID=$!
   log "shim: app window on 127.0.0.1:$port"
@@ -329,7 +343,7 @@ linux_gate() {
     [ "$arg" = "--no-sandbox" ] && { GATE=relaunch; return; }
   done
 
-  GATE=manual GATE_MSG="Update complete, but the rebuilt app can't relaunch itself (its sandbox helper needs root ownership). Reopen Hermes to finish."
+  GATE=manual GATE_MSG="Update complete, but the rebuilt app can't relaunch itself (its sandbox helper needs root ownership). Reopen $PRODUCT_NAME to finish."
 }
 
 select_newest_macos_app() {
@@ -337,15 +351,18 @@ select_newest_macos_app() {
   local candidate candidate_exe candidate_mtime candidate_priority
 
   for candidate in "$@"; do
-    candidate_exe="$candidate/Contents/MacOS/Hermes"
+    candidate_exe="$candidate/Contents/MacOS/Lemon AI"
+    if [ ! -x "$candidate_exe" ]; then
+        candidate_exe="$candidate/Contents/MacOS/Hermes"
+    fi
     if [ -d "$candidate" ] && [ -x "$candidate_exe" ]; then
       candidate_mtime="$(stat -f %m "$candidate" 2>/dev/null || stat -c %Y "$candidate" 2>/dev/null || echo 0)"
       case "$candidate" in
         *"/Lemon AI.app") candidate_priority=1 ;;
         *) candidate_priority=0 ;;
       esac
-      if [ -z "$selected" ] || [ "$candidate_mtime" -gt "$selected_mtime" ] \
-          || { [ "$candidate_mtime" -eq "$selected_mtime" ] && [ "$candidate_priority" -gt "$selected_priority" ]; }; then
+      if [ -z "$selected" ] || [ "$candidate_priority" -gt "$selected_priority" ] \
+          || { [ "$candidate_priority" -eq "$selected_priority" ] && [ "$candidate_mtime" -gt "$selected_mtime" ]; }; then
         selected="$candidate"
         selected_mtime="$candidate_mtime"
         selected_priority="$candidate_priority"
@@ -358,11 +375,20 @@ select_newest_macos_app() {
 
 mac_swap() {
   local rebuilt
-  rebuilt="$(select_newest_macos_app \
-    "$INSTALL_ROOT/apps/desktop/release/mac-arm64/Lemon AI.app" \
-    "$INSTALL_ROOT/apps/desktop/release/mac-arm64/Hermes.app" \
-    "$INSTALL_ROOT/apps/desktop/release/mac/Lemon AI.app" \
-    "$INSTALL_ROOT/apps/desktop/release/mac/Hermes.app")"
+  if [ "$PRODUCT_NAME" = "Lemon AI" ]; then
+    rebuilt="$(select_newest_macos_app \
+      "$INSTALL_ROOT/apps/desktop/release/mac-arm64/Lemon AI.app" \
+      "$INSTALL_ROOT/apps/desktop/release/mac/Lemon AI.app")"
+    if [ -z "$rebuilt" ]; then
+      rebuilt="$(select_newest_macos_app \
+        "$INSTALL_ROOT/apps/desktop/release/mac-arm64/Hermes.app" \
+        "$INSTALL_ROOT/apps/desktop/release/mac/Hermes.app")"
+    fi
+  else
+    rebuilt="$(select_newest_macos_app \
+      "$INSTALL_ROOT/apps/desktop/release/mac-arm64/Hermes.app" \
+      "$INSTALL_ROOT/apps/desktop/release/mac/Hermes.app")"
+  fi
 
   # Transactional swap: stage a full copy, move the old bundle aside, move
   # the copy in. Every step checked; a failed final move ROLLS BACK so the
@@ -479,7 +505,7 @@ finish() {
       if ! launch_app; then
         # Even the kept bundle didn't come back: the durable message must
         # carry BOTH facts (update ok, previous app not reopened).
-        FINAL_MSG="$DONE_NOTE Hermes also could not reopen itself - open it manually."
+        FINAL_MSG="$DONE_NOTE $PRODUCT_NAME also could not reopen itself - open it manually."
         write_result
       fi
     fi
@@ -489,7 +515,7 @@ finish() {
   else
     # Launch was due and did not land. Downgrade: truthful result for the
     # next boot, manual state held on screen now.
-    FINAL_MSG="Update complete. Reopen Hermes to finish (it could not restart itself)."
+    FINAL_MSG="Update complete. Reopen $PRODUCT_NAME to finish (it could not restart itself)."
     MANUAL=1
     write_result
     publish "manual" "$FINAL_MSG"; stop_ui leave-window
@@ -724,7 +750,7 @@ fi
 if [ "$DESKTOP_PID" -gt 0 ] 2>/dev/null; then
   for _ in $(seq 1 100); do kill -0 "$DESKTOP_PID" 2>/dev/null || break; sleep 0.3; done
   if kill -0 "$DESKTOP_PID" 2>/dev/null; then
-    FINAL_CODE=4 FINAL_MSG="Update aborted: the Hermes window (pid $DESKTOP_PID) did not exit within 30s. Nothing was changed. Close Hermes fully and try again."
+    FINAL_CODE=4 FINAL_MSG="Update aborted: the $PRODUCT_NAME window (pid $DESKTOP_PID) did not exit within 30s. Nothing was changed. Close $PRODUCT_NAME fully and try again."
     log "$FINAL_MSG"; exit "$FINAL_CODE"
   fi
 fi
@@ -737,7 +763,7 @@ sleep 1
 start_ui
 
 HERMES_BIN="$INSTALL_ROOT/venv/bin/hermes"
-[ -x "$HERMES_BIN" ] || { FINAL_CODE=3 FINAL_MSG="Update aborted: $HERMES_BIN is missing. The install needs repair (run the Hermes installer or hermes doctor)."; log "$FINAL_MSG"; exit 3; }
+[ -x "$HERMES_BIN" ] || { FINAL_CODE=3 FINAL_MSG="Update aborted: $HERMES_BIN is missing. The install needs repair (run the $PRODUCT_NAME installer or hermes doctor)."; log "$FINAL_MSG"; exit 3; }
 
 # Heal a venv the reverted TCC anchor left bricked BEFORE invoking the CLI:
 # venv/bin/hermes execs venv/bin/python3, so a dead alias kills every attempt
@@ -827,7 +853,7 @@ else
   # succeed — tell the user what is actually wrong (#95759).
   if ! tcc_probe_python "$INSTALL_ROOT/venv/bin/python3" \
       && ! tcc_probe_python "$INSTALL_ROOT/venv/bin/python"; then
-    FINAL_MSG="Update failed: the Python interpreter inside $INSTALL_ROOT/venv cannot start (heal state: $TCC_HEAL_STATE). Reinstall the runtime with the Hermes installer, or run hermes doctor --fix from a terminal if any hermes command still works."
+    FINAL_MSG="Update failed: the Python interpreter inside $INSTALL_ROOT/venv cannot start (heal state: $TCC_HEAL_STATE). Reinstall the runtime with the $PRODUCT_NAME installer, or run hermes doctor --fix from a terminal if any hermes command still works."
   fi
 fi
 exit "$FINAL_CODE"
