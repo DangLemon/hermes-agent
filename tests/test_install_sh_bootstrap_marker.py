@@ -20,7 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 INSTALL_SH = REPO_ROOT / "scripts" / "install.sh"
 
 
-def run_write_marker(install_dir, *, commit="", branch="main"):
+def run_write_marker(install_dir, *, commit="", branch="main", internal=False):
     """Source install.sh and invoke write_bootstrap_marker in isolation.
 
     install.sh guards its own entrypoint behind MANIFEST_MODE/STAGE_NAME/main,
@@ -32,7 +32,10 @@ set -e
 INSTALL_DIR={install_dir!s}
 INSTALL_COMMIT={commit!r}
 BRANCH={branch!r}
+INTERNAL_DESKTOP_BUILD={'true' if internal else 'false'}
 # Pull in the function definitions without triggering an install.
+eval "$(sed -n '/^is_safe_file_name()/,/^}}/p' {INSTALL_SH!s})"
+eval "$(sed -n '/^log_error()/,/^}}/p' {INSTALL_SH!s})"
 eval "$(sed -n '/^write_bootstrap_marker()/,/^}}/p' {INSTALL_SH!s})"
 log_warn() {{ echo "WARN: $*" >&2; }}
 write_bootstrap_marker
@@ -90,6 +93,16 @@ def test_explicit_commit_pin_wins_over_head(tmp_path):
 
     payload = json.loads((install_dir / ".hermes-bootstrap-complete").read_text())
     assert payload["pinnedCommit"] == pinned
+
+
+def test_internal_install_uses_lemon_bootstrap_marker(tmp_path):
+    install_dir = make_checkout(tmp_path)
+
+    result = run_write_marker(install_dir, internal=True)
+
+    assert result.returncode == 0, result.stderr
+    assert (install_dir / ".lemon-ai-bootstrap-complete").is_file()
+    assert not (install_dir / ".hermes-bootstrap-complete").exists()
 
 
 def test_no_marker_written_when_head_cannot_be_resolved(tmp_path):
