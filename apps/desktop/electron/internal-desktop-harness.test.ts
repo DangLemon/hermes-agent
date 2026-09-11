@@ -5,6 +5,11 @@ import path from 'node:path'
 
 import { test } from 'vitest'
 
+import {
+  LEMON_AI_IDENTITY,
+  resolveDesktopRuntimeIdentity,
+  resolveInternalDesktopBuild
+} from './desktop-runtime-identity'
 import type { InternalDesktopSeedExec } from './internal-desktop-harness'
 import {
   buildInternalDesktopInitialProviderSeedInvocation,
@@ -51,7 +56,11 @@ test('loadInternalDesktopHarnessResource reads packaged resources before dev bui
     const appRoot = path.join(tempRoot, 'app')
     fs.mkdirSync(resourcesPath, { recursive: true })
     fs.mkdirSync(path.join(appRoot, 'build'), { recursive: true })
-    fs.writeFileSync(path.join(appRoot, 'build', HARNESS_RESOURCE_FILENAME), JSON.stringify({ ...validResource, profile: 'dev-wrong' }), 'utf8')
+    fs.writeFileSync(
+      path.join(appRoot, 'build', HARNESS_RESOURCE_FILENAME),
+      JSON.stringify({ ...validResource, profile: 'dev-wrong' }),
+      'utf8'
+    )
     fs.writeFileSync(path.join(resourcesPath, HARNESS_RESOURCE_FILENAME), JSON.stringify(validResource), 'utf8')
 
     const loaded = loadInternalDesktopHarnessResource({ resourcesPath, appRoot, allowBuildResource: true })
@@ -109,7 +118,11 @@ test('initializeInternalDesktopHarness returns inactive instead of reusing stale
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-harness-init-'))
 
   try {
-    const state = initializeInternalDesktopHarness({ resourcesPath: path.join(tempRoot, 'missing'), appRoot: tempRoot, userDataPath: tempRoot })
+    const state = initializeInternalDesktopHarness({
+      resourcesPath: path.join(tempRoot, 'missing'),
+      appRoot: tempRoot,
+      userDataPath: tempRoot
+    })
     assert.deepEqual(state, {
       active: false,
       managedDir: null,
@@ -125,6 +138,36 @@ test('initializeInternalDesktopHarness returns inactive instead of reusing stale
   }
 })
 
+test('baked Lemon package identity survives missing and malformed packaged harness resources', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lemon-package-identity-'))
+
+  try {
+    const missingState = initializeInternalDesktopHarness({
+      resourcesPath: path.join(tempRoot, 'missing'),
+      appRoot: tempRoot,
+      userDataPath: tempRoot
+    })
+    const malformedResources = path.join(tempRoot, 'malformed')
+    fs.mkdirSync(malformedResources, { recursive: true })
+    fs.writeFileSync(path.join(malformedResources, HARNESS_RESOURCE_FILENAME), '{ bad json', 'utf8')
+    const malformedState = initializeInternalDesktopHarness({
+      resourcesPath: malformedResources,
+      appRoot: tempRoot,
+      userDataPath: tempRoot
+    })
+
+    for (const state of [missingState, malformedState]) {
+      assert.equal(state.requested, false)
+      const internalBuild = resolveInternalDesktopBuild({
+        internalPackage: true,
+        internalHarnessRequested: state.requested
+      })
+      assert.equal(resolveDesktopRuntimeIdentity({ internalHarnessRequested: internalBuild }), LEMON_AI_IDENTITY)
+    }
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
 
 test('validateInternalDesktopHarnessResource permits credential metadata and environment references but rejects real secrets', () => {
   const withEnvRef = {
@@ -148,19 +191,23 @@ test('validateInternalDesktopHarnessResource permits credential metadata and env
     () =>
       validateInternalDesktopHarnessResource({
         ...validResource,
-        managedConfig: { ...validResource.managedConfig, mcp_servers: { '<COMPANY_MCP_SERVER_ID>': { token: 'sk-live-secret-value' } } }
+        managedConfig: {
+          ...validResource.managedConfig,
+          mcp_servers: { '<COMPANY_MCP_SERVER_ID>': { token: 'sk-live-secret-value' } }
+        }
       }),
     /secret-shaped/i
   )
 })
-
 
 test('validateInternalDesktopHarnessResource accepts real nonsecret deployment identifiers in private build input', () => {
   const resource = {
     ...validResource,
     sourceRepository: 'DangLemon/hermes-agent',
     managedConfig: {
-      mcp_servers: { company_search: { url: 'https://mcp.company.example/sse', headers: { 'X-Company-Auth': '${MCP_COMPANY_AUTH}' } } }
+      mcp_servers: {
+        company_search: { url: 'https://mcp.company.example/sse', headers: { 'X-Company-Auth': '${MCP_COMPANY_AUTH}' } }
+      }
     },
     initialProvider: {
       id: 'lemon-ai-company',
@@ -177,7 +224,11 @@ test('validateInternalDesktopHarnessResource accepts real nonsecret deployment i
 
 test('validateInternalDesktopHarnessResource rejects unsafe source repositories and literal model api keys', () => {
   assert.throws(
-    () => validateInternalDesktopHarnessResource({ ...validResource, sourceRepository: 'https://github.com/DangLemon/hermes-agent' }),
+    () =>
+      validateInternalDesktopHarnessResource({
+        ...validResource,
+        sourceRepository: 'https://github.com/DangLemon/hermes-agent'
+      }),
     /sourceRepository/i
   )
   assert.throws(
@@ -185,11 +236,14 @@ test('validateInternalDesktopHarnessResource rejects unsafe source repositories 
     /sourceRepository/i
   )
   assert.throws(
-    () => validateInternalDesktopHarnessResource({ ...validResource, initialProvider: { ...validResource.initialProvider, api_key: 'sk-live-secret-value' } }),
+    () =>
+      validateInternalDesktopHarnessResource({
+        ...validResource,
+        initialProvider: { ...validResource.initialProvider, api_key: 'sk-live-secret-value' }
+      }),
     /initialProvider\.api_key/i
   )
 })
-
 
 test('valid harness stays inactive on WSL instead of injecting an untranslated host managed path', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-harness-wsl-'))
@@ -198,7 +252,13 @@ test('valid harness stays inactive on WSL instead of injecting an untranslated h
     fs.mkdirSync(path.join(tempRoot, 'build'), { recursive: true })
     fs.writeFileSync(path.join(tempRoot, 'build', HARNESS_RESOURCE_FILENAME), JSON.stringify(validResource), 'utf8')
 
-    const state = initializeInternalDesktopHarness({ resourcesPath: null, appRoot: tempRoot, userDataPath: tempRoot, isWsl: true, allowBuildResource: true })
+    const state = initializeInternalDesktopHarness({
+      resourcesPath: null,
+      appRoot: tempRoot,
+      userDataPath: tempRoot,
+      isWsl: true,
+      allowBuildResource: true
+    })
     assert.equal(state.active, false)
     assert.equal(state.managedDir, null)
     assert.match(state.diagnostic || '', /WSL/)
@@ -207,7 +267,6 @@ test('valid harness stays inactive on WSL instead of injecting an untranslated h
   }
 })
 
-
 test('ordinary development does not activate stale appRoot build resource without selector', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-harness-stale-dev-'))
 
@@ -215,7 +274,11 @@ test('ordinary development does not activate stale appRoot build resource withou
     fs.mkdirSync(path.join(tempRoot, 'build'), { recursive: true })
     fs.writeFileSync(path.join(tempRoot, 'build', HARNESS_RESOURCE_FILENAME), JSON.stringify(validResource), 'utf8')
 
-    const state = loadInternalDesktopHarnessResource({ resourcesPath: null, appRoot: tempRoot, allowBuildResource: false })
+    const state = loadInternalDesktopHarnessResource({
+      resourcesPath: null,
+      appRoot: tempRoot,
+      allowBuildResource: false
+    })
     assert.equal(state.active, false)
     assert.equal(state.resource, null)
   } finally {
@@ -229,14 +292,19 @@ test('validateInternalDesktopHarnessResource allows stdio MCP commands and Autho
     managedConfig: {
       mcp_servers: {
         company_stdio: { cmd: 'company-mcp', argv: ['--stdio'], env: { COMPANY_MCP_TOKEN: '${COMPANY_MCP_TOKEN}' } },
-        company_http: { url: 'https://mcp.company.example/sse', headers: { Authorization: 'Bearer ${COMPANY_MCP_OAUTH}' } }
+        company_http: {
+          url: 'https://mcp.company.example/sse',
+          headers: { Authorization: 'Bearer ${COMPANY_MCP_OAUTH}' }
+        }
       }
     }
   }
 
-  assert.equal(validateInternalDesktopHarnessResource(resource).managedConfig?.mcp_servers, resource.managedConfig.mcp_servers)
+  assert.equal(
+    validateInternalDesktopHarnessResource(resource).managedConfig?.mcp_servers,
+    resource.managedConfig.mcp_servers
+  )
 })
-
 
 test('validateInternalDesktopHarnessResource rejects opaque auth header literals and unknown credential requirement keys', () => {
   assert.throws(
@@ -267,7 +335,13 @@ test('requested WSL harness is unavailable but still suppresses remote/profile f
     fs.mkdirSync(path.join(tempRoot, 'build'), { recursive: true })
     fs.writeFileSync(path.join(tempRoot, 'build', HARNESS_RESOURCE_FILENAME), JSON.stringify(validResource), 'utf8')
 
-    const state = initializeInternalDesktopHarness({ resourcesPath: null, appRoot: tempRoot, userDataPath: tempRoot, isWsl: true, allowBuildResource: true })
+    const state = initializeInternalDesktopHarness({
+      resourcesPath: null,
+      appRoot: tempRoot,
+      userDataPath: tempRoot,
+      isWsl: true,
+      allowBuildResource: true
+    })
     assert.equal(state.requested, true)
     assert.equal(state.active, false)
     assert.equal(state.suppressRemoteBackends, true)
@@ -319,12 +393,23 @@ test('runInternalDesktopInitialProviderSeed invokes the packaged seed helper bef
   assert.equal(calls[0].options.shell, false)
 })
 
-
 test('buildInternalDesktopInitialProviderSeedInvocation replaces hermes module args without keeping serve args', () => {
   const invocation = buildInternalDesktopInitialProviderSeedInvocation(
     {
       command: 'wsl.exe',
-      args: ['--distribution', 'Ubuntu', '--exec', '/opt/hermes/venv/bin/python', '-m', 'hermes_cli.main', '--profile', 'sales', 'serve', '--port', '0'],
+      args: [
+        '--distribution',
+        'Ubuntu',
+        '--exec',
+        '/opt/hermes/venv/bin/python',
+        '-m',
+        'hermes_cli.main',
+        '--profile',
+        'sales',
+        'serve',
+        '--port',
+        '0'
+      ],
       shell: false
     },
     '/mnt/c/Program Files/Lemon AI/resources/lemon-ai-harness-seed.py',
@@ -384,7 +469,6 @@ test('buildInternalDesktopInitialProviderSeedInvocation resolves sibling python 
     fs.rmSync(tempRoot, { recursive: true, force: true })
   }
 })
-
 
 test('buildInternalDesktopInitialProviderSeedInvocation reads shebang python for plain hermes command backends', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-harness-pipx-'))

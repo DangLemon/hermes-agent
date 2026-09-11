@@ -77,6 +77,16 @@ export function resolveDesktopRuntimeIdentity({
   return internalHarnessRequested ? LEMON_AI_IDENTITY : HERMES_IDENTITY
 }
 
+export function resolveInternalDesktopBuild({
+  internalPackage = false,
+  internalHarnessRequested = false
+}: {
+  internalPackage?: boolean
+  internalHarnessRequested?: boolean
+} = {}): boolean {
+  return internalPackage || internalHarnessRequested
+}
+
 export function resolveDefaultDesktopHome({
   homeDir,
   identity,
@@ -117,7 +127,7 @@ export function resolveDesktopHomeOverride(
     return envValue(env, 'HERMES_HOME')
   }
 
-  return ''
+  return envValue(env, 'LEMON_AI_HOME')
 }
 
 export function resolveDesktopRuntimeDirNameOverride(
@@ -144,7 +154,12 @@ export function resolveDesktopRuntimeRoot(
 ): string {
   const runtimeDirName = runtimeDirNameOverride.trim() || identity.runtimeRootDirName
 
-  if (runtimeDirName === '.' || runtimeDirName === '..' || runtimeDirName.includes('/') || runtimeDirName.includes('\\')) {
+  if (
+    runtimeDirName === '.' ||
+    runtimeDirName === '..' ||
+    runtimeDirName.includes('/') ||
+    runtimeDirName.includes('\\')
+  ) {
     throw new Error('runtime directory override must be a directory name')
   }
 

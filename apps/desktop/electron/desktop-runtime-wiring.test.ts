@@ -16,17 +16,27 @@ function functionBody(name: string): string {
   return mainSource.slice(start, end === -1 ? undefined : end)
 }
 
-test('requested internal harness keeps Lemon identity when activation is unavailable', () => {
+test('baked internal package keeps Lemon identity when its packaged harness is missing or malformed', () => {
   assert.match(
     mainSource,
-    /resolveDesktopRuntimeIdentity\(\{\s*internalHarnessRequested:\s*INTERNAL_DESKTOP_HARNESS\.requested\s*\}\)/
+    /const INTERNAL_DESKTOP_PACKAGE =\s*process(?:\.env|\['env'\])(?:\.HERMES_DESKTOP_INTERNAL_PACKAGE|\['HERMES_DESKTOP_INTERNAL_PACKAGE'\]) === '1'/
   )
+  assert.match(
+    mainSource,
+    /const INTERNAL_DESKTOP_BUILD = resolveInternalDesktopBuild\(\{\s*internalPackage:\s*INTERNAL_DESKTOP_PACKAGE,\s*internalHarnessRequested:\s*INTERNAL_DESKTOP_HARNESS\.requested\s*\}\)/
+  )
+  assert.match(
+    mainSource,
+    /resolveDesktopRuntimeIdentity\(\{\s*internalHarnessRequested:\s*INTERNAL_DESKTOP_BUILD\s*\}\)/
+  )
+  assert.match(mainSource, /const APP_COPYRIGHT = INTERNAL_DESKTOP_BUILD/)
+  assert.match(mainSource, /appIconCandidates\(\{\s*internalHarness:\s*INTERNAL_DESKTOP_BUILD,/)
 })
 
 test('desktop child environment carries both internal overrides and legacy runtime compatibility', () => {
   const body = functionBody('desktopRuntimeEnv')
 
-  assert.match(body, /HERMES_DESKTOP_INTERNAL:\s*INTERNAL_DESKTOP_HARNESS\.requested\s*\?\s*'1'/)
+  assert.match(body, /HERMES_DESKTOP_INTERNAL:\s*INTERNAL_DESKTOP_BUILD\s*\?\s*'1'/)
   assert.match(body, /HERMES_DESKTOP_HOME_OVERRIDE:\s*HERMES_HOME/)
   assert.match(body, /const runtimeDirName = path\.basename\(ACTIVE_HERMES_ROOT\)/)
   assert.match(body, /HERMES_DESKTOP_RUNTIME_DIR_NAME:\s*runtimeDirName/)
@@ -47,7 +57,7 @@ test('first-run bootstrap receives the same internal home and runtime identity',
 
   const call = mainSource.slice(callStart, callStart + 2_000)
 
-  assert.match(call, /desktopInternal:\s*INTERNAL_DESKTOP_HARNESS\.requested/)
+  assert.match(call, /desktopInternal:\s*INTERNAL_DESKTOP_BUILD/)
   assert.match(call, /desktopHomeOverride:\s*HERMES_HOME/)
   assert.match(call, /runtimeDirName:\s*path\.basename\(ACTIVE_HERMES_ROOT\)/)
 })

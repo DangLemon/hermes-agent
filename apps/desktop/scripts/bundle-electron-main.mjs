@@ -14,6 +14,8 @@ import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mkdirSync } from 'node:fs'
 
+import { resolveElectronBundleDefines } from './electron-bundle-identity.mjs'
+
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..')
 const distDir = resolve(root, 'dist')
@@ -29,9 +31,7 @@ const external = ['electron', 'node-pty', 'get-windows', 'fs']
 // behaves like a packaged build. Dev bundles (`--dev`) leave the env alone
 // so HERMES_DESKTOP_DEV_SERVER / source-tree resolution keep working.
 const isDev = process.argv.includes('--dev')
-const define = isDev
-  ? {}
-  : { 'process.env.HERMES_DESKTOP_IS_PACKAGED': JSON.stringify(true) }
+const define = resolveElectronBundleDefines({ env: process.env, isDev })
 
 // Bundle main.ts → dist/electron-main.mjs
 await build({
@@ -43,10 +43,10 @@ await build({
   outfile: mainOut,
   external,
   banner: {
-    js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
+    js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);"
   },
   define,
-  logLevel: 'info',
+  logLevel: 'info'
 })
 console.log(`bundled ${mainOut}${isDev ? ' (dev)' : ''}`)
 
@@ -60,6 +60,6 @@ await build({
   outfile: preloadOut,
   external,
   define,
-  logLevel: 'info',
+  logLevel: 'info'
 })
 console.log(`bundled ${preloadOut}${isDev ? ' (dev)' : ''}`)

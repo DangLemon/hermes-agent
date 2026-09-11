@@ -166,6 +166,7 @@ import {
   resolveDesktopRuntimeDirNameOverride,
   resolveDesktopRuntimeIdentity,
   resolveDesktopRuntimeRoot,
+  resolveInternalDesktopBuild,
   shouldReadWindowsHermesHomeRegistry
 } from './desktop-runtime-identity'
 import {
@@ -777,8 +778,15 @@ const INTERNAL_DESKTOP_HARNESS = initializeInternalDesktopHarness({
     Boolean(process.env['LEMON_AI_DESKTOP_HARNESS_CONFIG'] || process.env['HERMES_DESKTOP_HARNESS_CONFIG'])
 })
 
-const DESKTOP_RUNTIME_IDENTITY = resolveDesktopRuntimeIdentity({
+const INTERNAL_DESKTOP_PACKAGE = process.env.HERMES_DESKTOP_INTERNAL_PACKAGE === '1'
+
+const INTERNAL_DESKTOP_BUILD = resolveInternalDesktopBuild({
+  internalPackage: INTERNAL_DESKTOP_PACKAGE,
   internalHarnessRequested: INTERNAL_DESKTOP_HARNESS.requested
+})
+
+const DESKTOP_RUNTIME_IDENTITY = resolveDesktopRuntimeIdentity({
+  internalHarnessRequested: INTERNAL_DESKTOP_BUILD
 })
 
 // HERMES_HOME — the user-facing root for desktop runtime data. The env var
@@ -883,7 +891,7 @@ function desktopRuntimeEnv() {
     HERMES_DESKTOP_HARNESS_CONFIG:
       INTERNAL_DESKTOP_HARNESS.resourcePath || process.env['HERMES_DESKTOP_HARNESS_CONFIG'] || undefined,
     HERMES_DESKTOP_HOME_OVERRIDE: HERMES_HOME,
-    HERMES_DESKTOP_INTERNAL: INTERNAL_DESKTOP_HARNESS.requested ? '1' : undefined,
+    HERMES_DESKTOP_INTERNAL: INTERNAL_DESKTOP_BUILD ? '1' : undefined,
     HERMES_DESKTOP_RUNTIME_DIR_NAME: runtimeDirName,
     HERMES_HOME,
     HERMES_INSTALL_RUNTIME_DIR_NAME: runtimeDirName,
@@ -1018,9 +1026,7 @@ const BOOT_FAKE_STEP_MS = (() => {
 
 const APP_NAME = process.env['HERMES_DESKTOP_APP_NAME'] || DESKTOP_RUNTIME_IDENTITY.appName
 
-const APP_COPYRIGHT = INTERNAL_DESKTOP_HARNESS.requested
-  ? 'Copyright © 2026 Lemon Digital'
-  : 'Copyright © 2026 Nous Research'
+const APP_COPYRIGHT = INTERNAL_DESKTOP_BUILD ? 'Copyright © 2026 Lemon Digital' : 'Copyright © 2026 Nous Research'
 
 const HUD_WINDOW_TITLE = `${APP_NAME} HUD`
 const TITLEBAR_HEIGHT = 34
@@ -1044,7 +1050,7 @@ const WINDOW_BUTTON_POSITION = {
 // resolveAppIcon (decoding probe): existence alone is not proof the bytes
 // decode, and an undecodable icon must never take the main process down.
 const APP_ICON_PATHS = appIconCandidates({
-  internalHarness: INTERNAL_DESKTOP_HARNESS.requested,
+  internalHarness: INTERNAL_DESKTOP_BUILD,
   isWindows: IS_WINDOWS,
   appRoot: APP_ROOT,
   resourcesPath: process.resourcesPath,
@@ -5309,7 +5315,7 @@ async function ensureRuntime(backend) {
       writeMarker: writeBootstrapMarker,
       desktopHarnessConfigPath: INTERNAL_DESKTOP_HARNESS.resourcePath,
       bootstrapMarkerName: DESKTOP_RUNTIME_IDENTITY.bootstrapMarkerName,
-      desktopInternal: INTERNAL_DESKTOP_HARNESS.requested,
+      desktopInternal: INTERNAL_DESKTOP_BUILD,
       desktopHomeOverride: HERMES_HOME,
       legacyBootstrapMarkerNames: DESKTOP_RUNTIME_IDENTITY.legacyBootstrapMarkerNames,
       runtimeDirName: path.basename(ACTIVE_HERMES_ROOT),
