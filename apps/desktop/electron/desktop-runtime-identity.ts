@@ -154,12 +154,7 @@ export function resolveDesktopRuntimeRoot(
 ): string {
   const runtimeDirName = runtimeDirNameOverride.trim() || identity.runtimeRootDirName
 
-  if (
-    runtimeDirName === '.' ||
-    runtimeDirName === '..' ||
-    runtimeDirName.includes('/') ||
-    runtimeDirName.includes('\\')
-  ) {
+  if (runtimeDirName === '.' || runtimeDirName === '..' || runtimeDirName.includes('/') || runtimeDirName.includes('\\')) {
     throw new Error('runtime directory override must be a directory name')
   }
 

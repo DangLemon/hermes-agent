@@ -43,10 +43,10 @@ await build({
   outfile: mainOut,
   external,
   banner: {
-    js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);"
+    js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
   },
   define,
-  logLevel: 'info'
+  logLevel: 'info',
 })
 console.log(`bundled ${mainOut}${isDev ? ' (dev)' : ''}`)
 
@@ -60,6 +60,6 @@ await build({
   outfile: preloadOut,
   external,
   define,
-  logLevel: 'info'
+  logLevel: 'info',
 })
 console.log(`bundled ${preloadOut}${isDev ? ' (dev)' : ''}`)

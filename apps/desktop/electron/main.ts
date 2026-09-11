@@ -1026,7 +1026,9 @@ const BOOT_FAKE_STEP_MS = (() => {
 
 const APP_NAME = process.env['HERMES_DESKTOP_APP_NAME'] || DESKTOP_RUNTIME_IDENTITY.appName
 
-const APP_COPYRIGHT = INTERNAL_DESKTOP_BUILD ? 'Copyright © 2026 Lemon Digital' : 'Copyright © 2026 Nous Research'
+const APP_COPYRIGHT = INTERNAL_DESKTOP_BUILD
+  ? 'Copyright © 2026 Lemon Digital'
+  : 'Copyright © 2026 Nous Research'
 
 const HUD_WINDOW_TITLE = `${APP_NAME} HUD`
 const TITLEBAR_HEIGHT = 34
