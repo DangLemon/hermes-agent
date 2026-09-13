@@ -387,8 +387,10 @@ function changedCanonicalManifest() {
 }
 
 function electronExePath() {
-  const electronMain = require.resolve('electron')
-  return path.join(path.dirname(electronMain), 'dist', 'electron.exe')
+  // Electron 42 no longer runs its binary download as an npm lifecycle
+  // script. Requiring the package uses its supported resolver, which invokes
+  // install.js when npm ci left the platform binary absent.
+  return require('electron')
 }
 
 function escapeRegex(value) {
