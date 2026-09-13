@@ -6,6 +6,7 @@ artifacts (built renderer/release/node_modules, packaged bundle, Electron
 userData) while leaving the Python agent + config/sessions/.env intact.
 """
 
+import base64
 import os
 import subprocess
 import sys
@@ -399,29 +400,47 @@ def test_windows_known_folder_path_resolves_with_system_api(tmp_path, csidl):
 
 
 @pytest.mark.windows_only
-def test_windows_shortcut_target_probe_reads_unicode_shortcut(tmp_path):
+def test_windows_shortcut_target_probe_reads_unicode_target(tmp_path):
     target_dir = tmp_path / "Ứng dụng Lemon"
     target_dir.mkdir()
     target = target_dir / "Lemon AI.exe"
     target.write_bytes(b"")
-    shortcut = tmp_path / "Lemon AI Đặc biệt.lnk"
+    shortcut = tmp_path / "Lemon AI.lnk"
     create_script = (
+        "$ErrorActionPreference='Stop'; "
+        "[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); "
         "$s=New-Object -ComObject WScript.Shell; "
         "$l=$s.CreateShortcut($env:TEST_SHORTCUT_PATH); "
         "$l.TargetPath=$env:TEST_SHORTCUT_TARGET; "
         "$l.Save()"
+    )
+    encoded_create_script = base64.b64encode(create_script.encode("utf-16le")).decode(
+        "ascii"
     )
     env = {
         **os.environ,
         "TEST_SHORTCUT_PATH": str(shortcut),
         "TEST_SHORTCUT_TARGET": str(target),
     }
-    subprocess.run(
-        ["powershell.exe", "-NoProfile", "-Command", create_script],
-        check=True,
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-EncodedCommand",
+            encoded_create_script,
+        ],
+        check=False,
         capture_output=True,
+        encoding="utf-8",
         env=env,
         timeout=10,
+    )
+    assert result.returncode == 0, (
+        "failed to create Windows shortcut for COM target-probe test\n"
+        f"stdout: {result.stdout}\n"
+        f"stderr: {result.stderr}"
     )
 
     assert gu._read_windows_shortcut_target(shortcut) == str(target)
