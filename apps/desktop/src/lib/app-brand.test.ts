@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { harnessEnvFromBuildConstants } from '@/app/internal-company/capabilities'
 
-import { appBrandForEnv, applyAppBrandRoot } from './app-brand'
+import { appBrandForEnv, applyAppBrandRoot, lemonAppBrand, replaceAppBrandTokens, upstreamAppBrand } from './app-brand'
 
 describe('appBrandForEnv', () => {
   it('keeps upstream Hermes branding by default', () => {
@@ -29,6 +29,22 @@ describe('appBrandForEnv', () => {
 
     expect(brand.mode).toBe('internal-harness')
     expect(brand.displayName).toBe('Lemon AI')
+  })
+
+  it('centralizes user-facing URLs for upstream and Lemon builds', () => {
+    expect(upstreamAppBrand.urls.releaseNotes).toBe('https://github.com/NousResearch/hermes-agent/releases')
+    expect(upstreamAppBrand.urls.installer).toBe('https://hermes-agent.nousresearch.com/')
+    expect(lemonAppBrand.urls.releaseNotes).toBe('https://github.com/DangLemon/hermes-agent/releases')
+    expect(lemonAppBrand.urls.installer).toBe('https://github.com/DangLemon/hermes-agent/releases/latest')
+  })
+
+  it('replaces brand tokens without changing Hermes defaults', () => {
+    expect(replaceAppBrandTokens('Uninstall {appName}: remove {agentName}.', upstreamAppBrand)).toBe(
+      'Uninstall Hermes: remove the Hermes agent.'
+    )
+    expect(replaceAppBrandTokens('Uninstall {appName}: remove {agentName}.', lemonAppBrand)).toBe(
+      'Uninstall Lemon AI: remove the Lemon AI agent.'
+    )
   })
 })
 

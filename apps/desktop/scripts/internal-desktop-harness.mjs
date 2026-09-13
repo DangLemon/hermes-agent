@@ -8,6 +8,7 @@ export const HARNESS_SEED_SOURCE_FILENAME = 'lemon-ai-harness-seed.py'
 export const HARNESS_SCHEMA_VERSION = 1
 export const HARNESS_CONFIG_ENV_KEYS = ['LEMON_AI_DESKTOP_HARNESS_CONFIG', 'HERMES_DESKTOP_HARNESS_CONFIG']
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+export const DEFAULT_HARNESS_CONFIG_INPUT_PATH = path.join(APP_ROOT, 'lemon-ai-desktop.config.json')
 const DEFAULT_BUILD_DIR = path.join(APP_ROOT, 'build')
 const UI_KEYS = ['agents', 'cron', 'messaging', 'terminal', 'webhooks']
 const SOURCE_REPOSITORY_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/
@@ -176,6 +177,10 @@ export function selectedHarnessConfigInputPath(env = process.env) {
   for (const key of HARNESS_CONFIG_ENV_KEYS) {
     const selected = String(env[key] || '').trim()
     if (selected) return selected
+  }
+
+  if (fs.existsSync(DEFAULT_HARNESS_CONFIG_INPUT_PATH)) {
+    return DEFAULT_HARNESS_CONFIG_INPUT_PATH
   }
 
   return ''

@@ -95,6 +95,11 @@ export function createDesktopPackageConfig(baseBuild, { env = process.env, harne
     shortcutName: 'Lemon AI',
     uninstallDisplayName: 'Lemon AI'
   }
+  config.protocols = config.protocols.map(protocol =>
+    Array.isArray(protocol?.schemes) && protocol.schemes.includes('hermes')
+      ? { ...protocol, name: 'Lemon AI Protocol' }
+      : protocol
+  )
 
   return config
 }

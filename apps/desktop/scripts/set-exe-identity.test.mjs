@@ -33,8 +33,18 @@ function withTempExe(fn) {
   }
 }
 
-test('resolveExeIdentity keeps Hermes resources without an internal selector', () => {
+test('resolveExeIdentity uses Lemon resources by default', () => {
   assert.deepEqual(resolveExeIdentity({ desktopRoot, env: {} }), {
+    icon: path.join(desktopRoot, 'assets', 'lemon-icon.ico'),
+    productName: 'Lemon AI',
+    fileDescription: 'Lemon AI',
+    companyName: 'Lemon Digital',
+    legalCopyright: 'Copyright (c) 2026 Lemon Digital'
+  })
+})
+
+test('resolveExeIdentity keeps Hermes resources for compatibility mode', () => {
+  assert.deepEqual(resolveExeIdentity({ desktopRoot, env: {}, harnessResource: null }), {
     icon: path.join(desktopRoot, 'assets', 'icon.ico'),
     productName: 'Hermes',
     fileDescription: 'Hermes',
@@ -84,4 +94,3 @@ test('stampExeIdentity passes the selected identity to rcedit', async () => {
     })
   })
 })
-

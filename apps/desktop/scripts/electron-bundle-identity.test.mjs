@@ -61,15 +61,17 @@ test('production bundle remains compatible with the legacy Hermes selector', () 
   })
 })
 
-test('ordinary production bundle bakes an empty internal-package identity', () => {
+test('production bundle uses the canonical Lemon internal-package identity by default', () => {
   assert.deepEqual(resolveElectronBundleDefines({ env: {}, isDev: false }), {
     [packagedKey]: 'true',
-    [internalPackageKey]: JSON.stringify('')
+    [internalPackageKey]: JSON.stringify('1')
   })
 })
 
-test('ordinary development bundle leaves package identity to the runtime environment', () => {
-  assert.deepEqual(resolveElectronBundleDefines({ env: {}, isDev: true }), {})
+test('development bundle uses the canonical Lemon identity by default', () => {
+  assert.deepEqual(resolveElectronBundleDefines({ env: {}, isDev: true }), {
+    [internalPackageKey]: JSON.stringify('1')
+  })
 })
 
 test('internal development bundle bakes Lemon identity before Electron reads userData', () => {

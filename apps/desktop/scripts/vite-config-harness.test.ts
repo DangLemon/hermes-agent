@@ -44,6 +44,14 @@ test('Vite compiles internal harness defines from the Lemon selector alone', () 
   })
 })
 
+test('Vite compiles internal harness defines from the canonical Lemon config by default', () => {
+  const define = harnessViteDefines({})
+
+  assert.equal(define.__HERMES_DESKTOP_HARNESS__, JSON.stringify('internal'))
+  assert.equal(define.__HERMES_HARNESS_SHOW_AGENTS__, JSON.stringify('false'))
+  assert.equal(define.__HERMES_HARNESS_SHOW_CRON__, JSON.stringify('true'))
+})
+
 test('Vite falls back to the Hermes selector when the Lemon selector is blank', () => {
   withHarnessConfigs((_lemonPath, hermesPath) => {
     const define = harnessViteDefines({
