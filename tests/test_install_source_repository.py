@@ -602,7 +602,9 @@ def test_install_ps1_source_repository_contracts_are_bounded_and_repo_aware() ->
     assert '$PSScriptRoot' in source
     assert 'lemon-ai-desktop.config.json' in source
     assert 'return (Test-InternalHarnessResource $selected)' in source
-    assert '} elseif ($env:HERMES_INSTALL_RUNTIME_DIR_NAME) {' in source
+    assert 'elseif ($InternalDesktopBuild -and $env:LEMON_AI_INSTALL_RUNTIME_DIR_NAME)' in source
+    assert 'elseif (-not $InternalDesktopBuild -and $env:HERMES_INSTALL_RUNTIME_DIR_NAME)' in source
+    assert 'elseif ($InternalDesktopBuild -and $env:LEMON_AI_HOME)' in source
     assert 'elseif ((-not $InternalDesktopBuild) -and $env:HERMES_HOME)' in source
     assert 'function Get-DesktopShortcutIdentity' in source
     assert "'Lemon AI.lnk'" in source
@@ -620,6 +622,8 @@ def test_install_ps1_source_repository_contracts_are_bounded_and_repo_aware() ->
     assert 'HERMES_BOOTSTRAP_MARKER_NAME must be a safe file name' in source
     assert 'function Get-GitHubRepositoryIdentity' in source
     assert 'function Ensure-ManagedOrigin' in source
+    assert 'function Get-InstallerRecoveryUrl' in source
+    assert 'raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.ps1' in source
     assert 'does not match selected -Repository' in source
     assert 'git@github.com:$Repository.git' in source
     assert 'https://github.com/$Repository.git' in source

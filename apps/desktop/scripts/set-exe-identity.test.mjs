@@ -33,13 +33,13 @@ function withTempExe(fn) {
   }
 }
 
-test('resolveExeIdentity uses Lemon resources by default', () => {
+test('resolveExeIdentity keeps Hermes resources by default', () => {
   assert.deepEqual(resolveExeIdentity({ desktopRoot, env: {} }), {
-    icon: path.join(desktopRoot, 'assets', 'lemon-icon.ico'),
-    productName: 'Lemon AI',
-    fileDescription: 'Lemon AI',
-    companyName: 'Lemon Digital',
-    legalCopyright: 'Copyright (c) 2026 Lemon Digital'
+    icon: path.join(desktopRoot, 'assets', 'icon.ico'),
+    productName: 'Hermes',
+    fileDescription: 'Hermes',
+    companyName: 'Nous Research',
+    legalCopyright: 'Copyright (c) 2026 Nous Research'
   })
 })
 
@@ -66,6 +66,24 @@ test('resolveExeIdentity uses Lemon resources only for a validated internal sele
         fileDescription: 'Lemon AI',
         companyName: 'Lemon Digital',
         legalCopyright: 'Copyright (c) 2026 Lemon Digital'
+      }
+    )
+  })
+})
+
+test('resolveExeIdentity keeps Hermes resources when a Lemon selector is inherited by Hermes', () => {
+  withTempExe((_exe, config) => {
+    assert.deepEqual(
+      resolveExeIdentity({
+        desktopRoot,
+        env: { HERMES_INSTALLER_BRAND: 'hermes', LEMON_AI_DESKTOP_HARNESS_CONFIG: config }
+      }),
+      {
+        icon: path.join(desktopRoot, 'assets', 'icon.ico'),
+        productName: 'Hermes',
+        fileDescription: 'Hermes',
+        companyName: 'Nous Research',
+        legalCopyright: 'Copyright (c) 2026 Nous Research'
       }
     )
   })

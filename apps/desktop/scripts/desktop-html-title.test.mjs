@@ -24,14 +24,14 @@ function transformHtml(plugin, html) {
     : plugin.transformIndexHtml.handler(html)
 }
 
-test('desktop HTML uses the Lemon AI title by default', () => {
-  assert.equal(desktopHtmlTitleForEnv({}), 'Lemon AI')
+test('ordinary desktop HTML keeps the Hermes title by default', () => {
+  assert.equal(desktopHtmlTitleForEnv({}), 'Hermes')
   const plugin = desktopHtmlTitlePlugin({})
   const html = transformHtml(plugin, source)
 
   assert.equal(plugin.transformIndexHtml.order, 'pre')
-  assert.match(html, /<title>Lemon AI<\/title>/)
-  assert.equal(html.match(/\/lemon-apple-touch-icon\.png/g)?.length, 3)
+  assert.match(html, /<title>Hermes<\/title>/)
+  assert.equal(html.match(/\/apple-touch-icon\.png/g)?.length, 3)
 })
 
 test('internal desktop HTML uses the Lemon AI title', () => {

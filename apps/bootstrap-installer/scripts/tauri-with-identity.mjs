@@ -38,6 +38,9 @@ const LEMON_TAURI_CONFIG = {
 }
 
 export function internalDesktopBuild(env = process.env, loadConfig = loadHarnessConfigInput) {
+  const brand = String(env.HERMES_INSTALLER_BRAND || '').trim().toLowerCase()
+  if (brand === 'hermes') return false
+  if (brand === 'lemon') return true
   if (String(env.HERMES_DESKTOP_INTERNAL || '').trim() === '1') return true
   try {
     return Boolean(loadConfig(env))

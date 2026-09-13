@@ -144,20 +144,19 @@ test('ordinary package config keeps Hermes installer metadata and assets for com
   await validateConfiguration(structuredClone(config))
 })
 
-test('package config uses the canonical Lemon identity when no selector is set', async () => {
+test('Hermes installer brand keeps the package config on the Hermes identity', async () => {
   const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
   const config = createElectronBuilderConfig(pkg.build, {
-    env: { CSC_IDENTITY_AUTO_DISCOVERY: 'false' }
+    env: {
+      HERMES_INSTALLER_BRAND: 'hermes',
+      LEMON_AI_DESKTOP_HARNESS_CONFIG: path.resolve('lemon-ai-desktop.config.json'),
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    }
   })
 
-  assertPhysicalIdentity(config, {
-    expectedProductName: 'Lemon AI',
-    expectedAppId: 'com.lemondigital.lemonai',
-    expectedExecutableName: 'Lemon AI',
-    expectedProtocolName: 'Lemon AI Protocol'
-  })
-  assert.equal(config.artifactName, 'Lemon-AI-${version}-${os}-${arch}.${ext}')
-  assert.equal(config.dmg.title, 'Install Lemon AI')
+  assertPhysicalIdentity(config)
+  assert.equal(config.artifactName, 'Hermes-${version}-${os}-${arch}.${ext}')
+  assert.equal(config.dmg.title, 'Install Hermes')
   await validateConfiguration(structuredClone(config))
 })
 

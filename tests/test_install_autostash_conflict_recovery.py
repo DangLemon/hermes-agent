@@ -37,6 +37,7 @@ def _git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProce
 
 def _installer_env(tmp_path: Path, managed: Path, remote: Path) -> dict[str, str]:
     return os.environ | {
+        "HERMES_INSTALLER_BRAND": "hermes",
         "HERMES_HOME": str(tmp_path / "hermes-home"),
         "HERMES_INSTALL_DIR": str(managed),
         "GIT_CONFIG_COUNT": "1",

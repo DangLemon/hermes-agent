@@ -427,7 +427,9 @@ $Repository = if ($Repository) {
 }
 $RuntimeDirName = if ($InternalDesktopBuild -and $env:HERMES_DESKTOP_RUNTIME_DIR_NAME) {
     $env:HERMES_DESKTOP_RUNTIME_DIR_NAME
-} elseif ($env:HERMES_INSTALL_RUNTIME_DIR_NAME) {
+} elseif ($InternalDesktopBuild -and $env:LEMON_AI_INSTALL_RUNTIME_DIR_NAME) {
+    $env:LEMON_AI_INSTALL_RUNTIME_DIR_NAME
+} elseif (-not $InternalDesktopBuild -and $env:HERMES_INSTALL_RUNTIME_DIR_NAME) {
     $env:HERMES_INSTALL_RUNTIME_DIR_NAME
 } elseif ($InternalDesktopBuild) {
     "lemon-agent"
@@ -443,6 +445,8 @@ if ($PSBoundParameters.ContainsKey('HermesHome')) {
     $HermesHome = ConvertTo-LongPath $(
         if ($env:HERMES_DESKTOP_HOME_OVERRIDE) {
             $env:HERMES_DESKTOP_HOME_OVERRIDE
+        } elseif ($InternalDesktopBuild -and $env:LEMON_AI_HOME) {
+            $env:LEMON_AI_HOME
         } elseif ((-not $InternalDesktopBuild) -and $env:HERMES_HOME) {
             $env:HERMES_HOME
         } elseif ($InternalDesktopBuild) {
@@ -463,6 +467,13 @@ if ($script:NormalizedProfilePaths) {
     Write-PathDiag "resolved install paths: HermesHome=$HermesHome InstallDir=$InstallDir"
 }
 
+function Get-InstallerRecoveryUrl {
+    if ($InternalDesktopBuild) {
+        return "https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.ps1"
+    }
+    return "https://hermes-agent.nousresearch.com/install.ps1"
+}
+
 # Captured here, where the values are final, and emitted from the entry-point
 # dispatch at the bottom (alongside -ProtocolVersion / -Manifest) so
 # -ShowResolvedPaths exits before any stage runs.
@@ -480,6 +491,7 @@ $script:ResolvedPathReport = @{
     repository        = $Repository
     runtime_dir_name  = $RuntimeDirName
     bootstrap_marker  = if ($InternalDesktopBuild) { ".lemon-ai-bootstrap-complete" } else { ".hermes-bootstrap-complete" }
+    recovery_url      = (Get-InstallerRecoveryUrl)
     hermes_home       = $HermesHome
     install_dir       = $InstallDir
 }
@@ -3377,6 +3389,20 @@ function Install-HermesCommandLaunchers {
     return $Destination
 }
 
+function Set-UserEnvironmentVariableIfChanged {
+    param(
+        [Parameter(Mandatory=$true)] [string]$Name,
+        [Parameter(Mandatory=$true)] [string]$Value
+    )
+
+    $current = [Environment]::GetEnvironmentVariable($Name, "User")
+    if (-not $current -or $current -ne $Value) {
+        [Environment]::SetEnvironmentVariable($Name, $Value, "User")
+        Write-Success "Set $Name=$Value"
+    }
+    Set-Item -Path "Env:$Name" -Value $Value
+}
+
 function Set-PathVariable {
     Write-Info "Setting up hermes command..."
     
@@ -3426,15 +3452,14 @@ function Set-PathVariable {
         Write-Info "PATH already configured"
     }
     
-    # Set HERMES_HOME so the Python code finds config/data in the right place.
-    # Only needed on Windows where we install to %LOCALAPPDATA%\hermes instead
-    # of the Unix default ~/.hermes
-    $currentHermesHome = [Environment]::GetEnvironmentVariable("HERMES_HOME", "User")
-    if (-not $currentHermesHome -or $currentHermesHome -ne $HermesHome) {
-        [Environment]::SetEnvironmentVariable("HERMES_HOME", $HermesHome, "User")
-        Write-Success "Set HERMES_HOME=$HermesHome"
+    # Set runtime identity so Python code finds config/data in the right place
+    # and Lemon Desktop can read its branded aliases from HKCU after Explorer
+    # launches with a stale environment block.
+    Set-UserEnvironmentVariableIfChanged -Name "HERMES_HOME" -Value $HermesHome
+    if ($InternalDesktopBuild) {
+        Set-UserEnvironmentVariableIfChanged -Name "LEMON_AI_HOME" -Value $HermesHome
+        Set-UserEnvironmentVariableIfChanged -Name "LEMON_AI_INSTALL_RUNTIME_DIR_NAME" -Value $RuntimeDirName
     }
-    $env:HERMES_HOME = $HermesHome
     
     # Update current session
     $env:Path = "$hermesBin;$env:Path"
@@ -5324,7 +5349,13 @@ try {
     Write-Err "Installation failed: $_"
     Write-Host ""
     Write-Info "If the error is unclear, try downloading and running the script directly:"
-    Write-Host "  Invoke-WebRequest -Uri 'https://hermes-agent.nousresearch.com/install.ps1' -OutFile install.ps1" -ForegroundColor Yellow
+    $recoveryUrl = Get-InstallerRecoveryUrl
+    Write-Host "  Invoke-WebRequest -Uri '$recoveryUrl' -OutFile install.ps1" -ForegroundColor Yellow
+    if ($InternalDesktopBuild) {
+        # A raw script download has no checkout manifest to infer the Lemon
+        # profile from, so carry the product choice into the retry command.
+        Write-Host "  `$env:HERMES_INSTALLER_BRAND='lemon'" -ForegroundColor Yellow
+    }
     Write-Host "  .\install.ps1" -ForegroundColor Yellow
     Write-Host ""
 }

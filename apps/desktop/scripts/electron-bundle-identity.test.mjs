@@ -61,16 +61,26 @@ test('production bundle remains compatible with the legacy Hermes selector', () 
   })
 })
 
-test('production bundle uses the canonical Lemon internal-package identity by default', () => {
+test('ordinary production bundle bakes an empty internal-package identity by default', () => {
   assert.deepEqual(resolveElectronBundleDefines({ env: {}, isDev: false }), {
     [packagedKey]: 'true',
-    [internalPackageKey]: JSON.stringify('1')
+    [internalPackageKey]: JSON.stringify('')
   })
 })
 
-test('development bundle uses the canonical Lemon identity by default', () => {
-  assert.deepEqual(resolveElectronBundleDefines({ env: {}, isDev: true }), {
-    [internalPackageKey]: JSON.stringify('1')
+test('ordinary development bundle leaves package identity to the runtime environment', () => {
+  assert.deepEqual(resolveElectronBundleDefines({ env: {}, isDev: true }), {})
+})
+
+test('Hermes installer brand keeps inherited Lemon selectors out of the bundle', () => {
+  withHarnessConfig(configPath => {
+    assert.deepEqual(resolveElectronBundleDefines({
+      env: { HERMES_INSTALLER_BRAND: 'hermes', LEMON_AI_DESKTOP_HARNESS_CONFIG: configPath },
+      isDev: false
+    }), {
+      [packagedKey]: 'true',
+      [internalPackageKey]: JSON.stringify('')
+    })
   })
 })
 
@@ -104,4 +114,11 @@ test('clean development bundle materializes the Lemon harness for the Electron r
       fs.rmSync(buildDir, { recursive: true, force: true })
     }
   })
+})
+
+test('fresh desktop launch pins the sandbox home ahead of live Windows registry aliases', () => {
+  const source = fs.readFileSync(new URL('./test-desktop.mjs', import.meta.url), 'utf8')
+
+  assert.match(source, /env\.HERMES_DESKTOP_HOME_OVERRIDE = hermesHome/)
+  assert.match(source, /env\.HERMES_DESKTOP_RUNTIME_DIR_NAME = PRIMARY_IDENTITY\.runtimeRootDirName/)
 })

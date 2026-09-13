@@ -8,10 +8,17 @@ import {
   LEMON_AI_IDENTITY,
   resolveDefaultDesktopHome,
   resolveDesktopHomeOverride,
+  resolveDesktopHomeOverrideFromWindowsRegistry,
+  resolveDesktopHomeOverrideWithRegistry,
+  resolveDesktopHomeRegistryEnvVarName,
   resolveDesktopRuntimeDirNameOverride,
+  resolveDesktopRuntimeDirNameOverrideFromWindowsRegistry,
+  resolveDesktopRuntimeDirNameOverrideWithRegistry,
+  resolveDesktopRuntimeDirNameRegistryEnvVarName,
   resolveDesktopRuntimeIdentity,
   resolveDesktopRuntimeRoot,
   resolveInternalDesktopBuild,
+  shouldPreferWindowsDesktopRegistry,
   shouldReadWindowsHermesHomeRegistry
 } from './desktop-runtime-identity'
 
@@ -33,6 +40,9 @@ test('desktop runtime child env carries Lemon identity and compatibility variabl
       HERMES_DESKTOP_RUNTIME_DIR_NAME: 'lemon-agent',
       HERMES_HOME: '/Users/test/.lemon-ai',
       HERMES_INSTALL_RUNTIME_DIR_NAME: 'lemon-agent',
+      LEMON_AI_DESKTOP_INTERNAL: '1',
+      LEMON_AI_HOME: '/Users/test/.lemon-ai',
+      LEMON_AI_INSTALL_RUNTIME_DIR_NAME: 'lemon-agent',
       HERMES_UPDATE_HANDOFF_LOG_NAME: 'lemon-ai-desktop-update-handoff.log',
       HERMES_UPDATE_MARKER_NAME: '.lemon-ai-update-in-progress',
       HERMES_UPDATE_PRODUCT_NAME: 'Lemon AI',
@@ -110,8 +120,14 @@ test('internal desktop defaults never adopt legacy Hermes filesystem paths impli
     resolveDesktopRuntimeRoot('/Users/test/.lemon-ai', LEMON_AI_IDENTITY),
     '/Users/test/.lemon-ai/lemon-agent'
   )
-  assert.equal(shouldReadWindowsHermesHomeRegistry(LEMON_AI_IDENTITY), false)
+  assert.equal(shouldReadWindowsHermesHomeRegistry(LEMON_AI_IDENTITY), true)
   assert.equal(shouldReadWindowsHermesHomeRegistry(HERMES_IDENTITY), true)
+  assert.equal(resolveDesktopHomeRegistryEnvVarName(LEMON_AI_IDENTITY), 'LEMON_AI_HOME')
+  assert.equal(resolveDesktopHomeRegistryEnvVarName(HERMES_IDENTITY), 'HERMES_HOME')
+  assert.equal(resolveDesktopRuntimeDirNameRegistryEnvVarName(LEMON_AI_IDENTITY), 'LEMON_AI_INSTALL_RUNTIME_DIR_NAME')
+  assert.equal(resolveDesktopRuntimeDirNameRegistryEnvVarName(HERMES_IDENTITY), 'HERMES_INSTALL_RUNTIME_DIR_NAME')
+  assert.equal(shouldPreferWindowsDesktopRegistry(LEMON_AI_IDENTITY), true)
+  assert.equal(shouldPreferWindowsDesktopRegistry(HERMES_IDENTITY), false)
   assert.equal(resolveDesktopHomeOverride({ HERMES_HOME: '/Users/test/.hermes' }, LEMON_AI_IDENTITY), '')
   assert.equal(
     resolveDesktopHomeOverride({ LEMON_AI_HOME: '/Users/test/.lemon-ai-custom' }, LEMON_AI_IDENTITY),
@@ -122,6 +138,10 @@ test('internal desktop defaults never adopt legacy Hermes filesystem paths impli
     ''
   )
   assert.equal(
+    resolveDesktopRuntimeDirNameOverride({ LEMON_AI_INSTALL_RUNTIME_DIR_NAME: 'lemon-custom' }, LEMON_AI_IDENTITY),
+    'lemon-custom'
+  )
+  assert.equal(
     resolveDesktopHomeOverride({ HERMES_DESKTOP_HOME_OVERRIDE: '/Users/test/lemon' }, LEMON_AI_IDENTITY),
     '/Users/test/lemon'
   )
@@ -129,6 +149,178 @@ test('internal desktop defaults never adopt legacy Hermes filesystem paths impli
     resolveDesktopRuntimeDirNameOverride({ HERMES_DESKTOP_RUNTIME_DIR_NAME: 'lemon-custom' }, LEMON_AI_IDENTITY),
     'lemon-custom'
   )
+})
+
+test('Windows Lemon identity prefers live registry aliases over stale process aliases', () => {
+  assert.equal(
+    resolveDesktopHomeOverrideWithRegistry({
+      env: { LEMON_AI_HOME: 'C:\\stale-lemon-home' },
+      identity: LEMON_AI_IDENTITY,
+      preferRegistry: true,
+      registryValue: 'D:\\fresh-lemon-home'
+    }),
+    'D:\\fresh-lemon-home'
+  )
+  assert.equal(
+    resolveDesktopRuntimeDirNameOverrideWithRegistry({
+      env: { LEMON_AI_INSTALL_RUNTIME_DIR_NAME: 'stale-runtime' },
+      identity: LEMON_AI_IDENTITY,
+      preferRegistry: true,
+      registryValue: 'fresh-runtime'
+    }),
+    'fresh-runtime'
+  )
+  assert.equal(
+    resolveDesktopHomeOverrideWithRegistry({
+      env: {
+        HERMES_DESKTOP_HOME_OVERRIDE: 'E:\\explicit-desktop-home',
+        LEMON_AI_HOME: 'C:\\stale-lemon-home'
+      },
+      identity: LEMON_AI_IDENTITY,
+      preferRegistry: true,
+      registryValue: 'D:\\fresh-lemon-home'
+    }),
+    'E:\\explicit-desktop-home'
+  )
+})
+
+test('Windows Hermes identity keeps process aliases ahead of registry fallback', () => {
+  assert.equal(
+    resolveDesktopHomeOverrideWithRegistry({
+      env: { HERMES_HOME: 'C:\\process-hermes-home' },
+      identity: HERMES_IDENTITY,
+      registryValue: 'D:\\registry-hermes-home'
+    }),
+    'C:\\process-hermes-home'
+  )
+  assert.equal(
+    resolveDesktopRuntimeDirNameOverrideWithRegistry({
+      env: { HERMES_INSTALL_RUNTIME_DIR_NAME: 'process-runtime' },
+      identity: HERMES_IDENTITY,
+      registryValue: 'registry-runtime'
+    }),
+    'process-runtime'
+  )
+  assert.equal(
+    resolveDesktopHomeOverrideWithRegistry({
+      env: {},
+      identity: HERMES_IDENTITY,
+      registryValue: 'D:\\registry-hermes-home'
+    }),
+    'D:\\registry-hermes-home'
+  )
+})
+
+test('explicit desktop overrides bypass Windows registry reads for fresh sandboxes', () => {
+  const reads: string[] = []
+
+  const readRegistry = (name: string) => {
+    reads.push(name)
+
+    return 'registry-value'
+  }
+
+  const env = {
+    HERMES_DESKTOP_HOME_OVERRIDE: 'E:\\sandbox-home',
+    HERMES_DESKTOP_RUNTIME_DIR_NAME: 'sandbox-runtime',
+    LEMON_AI_HOME: 'C:\\stale-lemon-home',
+    LEMON_AI_INSTALL_RUNTIME_DIR_NAME: 'stale-runtime'
+  }
+
+  assert.equal(
+    resolveDesktopHomeOverrideFromWindowsRegistry({
+      env,
+      identity: LEMON_AI_IDENTITY,
+      isWindows: true,
+      readRegistry
+    }),
+    'E:\\sandbox-home'
+  )
+  assert.equal(
+    resolveDesktopRuntimeDirNameOverrideFromWindowsRegistry({
+      env,
+      identity: LEMON_AI_IDENTITY,
+      isWindows: true,
+      readRegistry
+    }),
+    'sandbox-runtime'
+  )
+  assert.deepEqual(reads, [])
+})
+
+test('ordinary Hermes process aliases bypass Windows registry reads', () => {
+  const reads: string[] = []
+
+  const readRegistry = (name: string) => {
+    reads.push(name)
+
+    return 'registry-value'
+  }
+
+  const env = {
+    HERMES_HOME: 'E:\\hermes-home',
+    HERMES_INSTALL_RUNTIME_DIR_NAME: 'hermes-runtime'
+  }
+
+  assert.equal(
+    resolveDesktopHomeOverrideFromWindowsRegistry({
+      env,
+      identity: HERMES_IDENTITY,
+      isWindows: true,
+      readRegistry
+    }),
+    'E:\\hermes-home'
+  )
+  assert.equal(
+    resolveDesktopRuntimeDirNameOverrideFromWindowsRegistry({
+      env,
+      identity: HERMES_IDENTITY,
+      isWindows: true,
+      readRegistry
+    }),
+    'hermes-runtime'
+  )
+  assert.deepEqual(reads, [])
+})
+
+test('Windows Lemon identity still reads live registry aliases ahead of stale process values', () => {
+  const reads: string[] = []
+
+  const values: Record<string, string> = {
+    LEMON_AI_HOME: 'D:\\fresh-lemon-home',
+    LEMON_AI_INSTALL_RUNTIME_DIR_NAME: 'fresh-runtime'
+  }
+
+  const readRegistry = (name: string) => {
+    reads.push(name)
+
+    return values[name]
+  }
+
+  const env = {
+    LEMON_AI_HOME: 'C:\\stale-lemon-home',
+    LEMON_AI_INSTALL_RUNTIME_DIR_NAME: 'stale-runtime'
+  }
+
+  assert.equal(
+    resolveDesktopHomeOverrideFromWindowsRegistry({
+      env,
+      identity: LEMON_AI_IDENTITY,
+      isWindows: true,
+      readRegistry
+    }),
+    'D:\\fresh-lemon-home'
+  )
+  assert.equal(
+    resolveDesktopRuntimeDirNameOverrideFromWindowsRegistry({
+      env,
+      identity: LEMON_AI_IDENTITY,
+      isWindows: true,
+      readRegistry
+    }),
+    'fresh-runtime'
+  )
+  assert.deepEqual(reads, ['LEMON_AI_HOME', 'LEMON_AI_INSTALL_RUNTIME_DIR_NAME'])
 })
 
 test('legacy runtime use requires the explicit compatibility override', () => {

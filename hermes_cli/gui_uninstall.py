@@ -2,9 +2,12 @@
 app, and the desktop's own ``userData`` — never agent source, venv, config, sessions or .env."""
 
 import os
+import base64
 import shutil
+import subprocess
 import sys
 from pathlib import Path
+from uuid import UUID
 
 from hermes_constants import get_hermes_home
 
@@ -17,6 +20,13 @@ def _logger(mark: str, col: str):
 
 log_info, log_success = _logger("→", Colors.CYAN), _logger("✓", Colors.GREEN)
 log_warn = _logger("⚠", Colors.YELLOW)
+
+CSIDL_PROGRAMS = 0x0002
+CSIDL_DESKTOPDIRECTORY = 0x0010
+_KNOWN_FOLDER_IDS = {
+    CSIDL_PROGRAMS: "A77F5D77-2E2B-44C3-A6A2-ABA601054A51",
+    CSIDL_DESKTOPDIRECTORY: "B4BFCC3A-DB2C-424C-B029-7FE99A87C641",
+}
 
 
 def _env_dir(var: str, fallback: Path) -> Path:
@@ -165,6 +175,161 @@ def packaged_gui_app_paths() -> "list[Path]":
     return [*entry_paths, *icon_paths]
 
 
+def _windows_known_folder_path(csidl: int, fallback: Path) -> Path:
+    if sys.platform != "win32":
+        return fallback
+
+    folder_id_text = _KNOWN_FOLDER_IDS.get(csidl)
+    if not folder_id_text:
+        return fallback
+
+    allocated_path = None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class Guid(ctypes.Structure):
+            _fields_ = [
+                ("data1", wintypes.DWORD),
+                ("data2", wintypes.WORD),
+                ("data3", wintypes.WORD),
+                ("data4", wintypes.BYTE * 8),
+            ]
+
+        folder_id = Guid.from_buffer_copy(UUID(folder_id_text).bytes_le)
+        path_ptr = ctypes.c_wchar_p()
+        shell32 = ctypes.windll.shell32
+        shell32.SHGetKnownFolderPath.argtypes = [
+            ctypes.POINTER(Guid),
+            wintypes.DWORD,
+            wintypes.HANDLE,
+            ctypes.POINTER(ctypes.c_wchar_p),
+        ]
+        shell32.SHGetKnownFolderPath.restype = ctypes.c_long
+        result = shell32.SHGetKnownFolderPath(
+            ctypes.byref(folder_id), 0, None, ctypes.byref(path_ptr)
+        )
+        allocated_path = ctypes.cast(path_ptr, ctypes.c_void_p)
+        resolved = Path(path_ptr.value) if result == 0 and path_ptr.value else fallback
+    except Exception:
+        return fallback
+    finally:
+        if allocated_path and allocated_path.value:
+            try:
+                ole32 = ctypes.windll.ole32
+                ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+                ole32.CoTaskMemFree(allocated_path)
+            except Exception:
+                pass
+
+    return resolved
+
+
+def _read_windows_shortcut_target(path: Path) -> "str | None":
+    if sys.platform != "win32":
+        return None
+
+    script = (
+        "[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); "
+        "$p=$env:LEMON_AI_SHORTCUT_PATH; "
+        "if ([string]::IsNullOrWhiteSpace($p)) { exit 1 }; "
+        "$s=New-Object -ComObject WScript.Shell; "
+        "$l=$s.CreateShortcut($p); "
+        "[Console]::Out.Write($l.TargetPath)"
+    )
+    encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+    env = {**os.environ, "LEMON_AI_SHORTCUT_PATH": str(path)}
+
+    try:
+        result = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-EncodedCommand",
+                encoded,
+            ],
+            capture_output=True,
+            check=False,
+            encoding="utf-8",
+            env=env,
+            timeout=5,
+        )
+    except Exception:
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    target = result.stdout.strip()
+    return target or None
+
+
+def _path_is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _windows_shortcut_install_roots(hermes_home: Path) -> "list[Path]":
+    return [
+        *packaged_gui_app_paths(),
+        *[
+            hermes_home / root_name / "apps" / "desktop" / "release"
+            for root_name in _runtime_root_names()
+        ],
+    ]
+
+
+def _windows_shortcut_owned(path: Path, hermes_home: Path) -> bool:
+    if path.name.casefold() not in {
+        f"{name}.lnk".casefold() for name in _desktop_product_names()
+    }:
+        return False
+
+    target = _read_windows_shortcut_target(path)
+    if not target:
+        return False
+
+    target_path = Path(target)
+    return any(
+        _path_is_relative_to(target_path, root)
+        for root in _windows_shortcut_install_roots(hermes_home)
+    )
+
+
+def windows_shortcut_paths(hermes_home: "Path | None" = None) -> "list[Path]":
+    """Return shortcuts owned by the active desktop product on Windows.
+
+    The PowerShell installer creates one link in the user's Start Menu
+    ``Programs`` folder and one on the user's Desktop. A same-name shortcut is
+    removable only when its TargetPath points inside the active install roots.
+    """
+    if sys.platform != "win32":
+        return []
+
+    home = hermes_home if hermes_home is not None else get_hermes_home()
+    appdata = _env_dir("APPDATA", Path.home() / "AppData" / "Roaming")
+    desktop = _windows_known_folder_path(
+        CSIDL_DESKTOPDIRECTORY,
+        _env_dir("USERPROFILE", Path.home()) / "Desktop",
+    )
+    programs = _windows_known_folder_path(
+        CSIDL_PROGRAMS,
+        appdata / "Microsoft" / "Windows" / "Start Menu" / "Programs",
+    )
+
+    return [
+        path
+        for name in _desktop_product_names()
+        for path in (programs / f"{name}.lnk", desktop / f"{name}.lnk")
+        if path.exists() and _windows_shortcut_owned(path, home)
+    ]
+
+
 def agent_is_installed(hermes_home: Path) -> bool:
     """True when a usable Python agent install exists under HERMES_HOME (gates the desktop UI's options).
     Package source or a venv alone is enough — a source checkout without a venv is still "the agent is here"."""
@@ -242,6 +407,10 @@ def uninstall_gui(
     log_info("Removing installed desktop app...")
     if not _remove_existing(packaged_gui_app_paths()):
         log_info("No packaged desktop app found in standard locations")
+    if sys.platform == "win32":
+        log_info("Removing desktop shortcuts...")
+        if not _remove_existing(windows_shortcut_paths(home)):
+            log_info("No desktop shortcuts found in standard locations")
     if remove_userdata:
         userdatas = [path for path in desktop_userdata_dirs() if path.exists()]
         if userdatas:
