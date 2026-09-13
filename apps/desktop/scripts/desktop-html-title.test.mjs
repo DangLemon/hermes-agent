@@ -24,7 +24,7 @@ function transformHtml(plugin, html) {
     : plugin.transformIndexHtml.handler(html)
 }
 
-test('ordinary desktop HTML keeps the Hermes title', () => {
+test('ordinary desktop HTML keeps the Hermes title by default', () => {
   assert.equal(desktopHtmlTitleForEnv({}), 'Hermes')
   const plugin = desktopHtmlTitlePlugin({})
   const html = transformHtml(plugin, source)

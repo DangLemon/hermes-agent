@@ -166,21 +166,39 @@ function Write-PathDiag {
 }
 
 function Test-InternalHarnessConfig {
-    # A selector path alone is not an identity signal.  Electron passes the
-    # explicit HERMES_DESKTOP_INTERNAL child signal after validating the
-    # packaged resource; direct script invocations can use the same frozen
-    # schema as a fallback.  Invalid or unrelated files stay ordinary Hermes.
+    $brand = [string]$env:HERMES_INSTALLER_BRAND
+    if (-not [string]::IsNullOrWhiteSpace($brand)) {
+        switch ($brand) {
+            "lemon" { return $true }
+            "hermes" { return $false }
+            default { throw "HERMES_INSTALLER_BRAND must be 'hermes' or 'lemon'" }
+        }
+    }
+
     if ($env:HERMES_DESKTOP_INTERNAL -eq "1") { return $true }
+
     $selected = if (-not [string]::IsNullOrWhiteSpace([string]$env:LEMON_AI_DESKTOP_HARNESS_CONFIG)) {
         [string]$env:LEMON_AI_DESKTOP_HARNESS_CONFIG
     } else {
         [string]$env:HERMES_DESKTOP_HARNESS_CONFIG
     }
-    if ([string]::IsNullOrWhiteSpace($selected) -or -not (Test-Path -LiteralPath $selected -PathType Leaf)) {
+
+    # An explicit selector is authoritative. If it is invalid, stay in the
+    # public Hermes shape instead of falling through to checkout auto-detect.
+    if (-not [string]::IsNullOrWhiteSpace($selected)) {
+        return (Test-InternalHarnessResource $selected)
+    }
+
+    return (Test-CheckoutInternalHarnessConfig)
+}
+
+function Test-InternalHarnessResource {
+    param([string]$Selected)
+    if ([string]::IsNullOrWhiteSpace($Selected) -or -not (Test-Path -LiteralPath $Selected -PathType Leaf)) {
         return $false
     }
     try {
-        $resource = Get-Content -LiteralPath $selected -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $resource = Get-Content -LiteralPath $Selected -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         if ($null -eq $resource -or $resource.schemaVersion -ne 1 -or $resource.profile -ne "internal") { return $false }
         if ($null -eq $resource.ui) { return $false }
         $keys = @($resource.ui.PSObject.Properties.Name)
@@ -190,6 +208,23 @@ function Test-InternalHarnessConfig {
             if (-not ($keys -contains $key) -or $resource.ui.$key -isnot [bool]) { return $false }
         }
         return $true
+    } catch {
+        return $false
+    }
+}
+
+function Test-CheckoutInternalHarnessConfig {
+    if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { return $false }
+    try {
+        $scriptDir = (Resolve-Path -LiteralPath $PSScriptRoot -ErrorAction Stop).ProviderPath
+        $repoRoot = (Resolve-Path -LiteralPath (Join-Path $scriptDir "..") -ErrorAction Stop).ProviderPath
+        if (-not (Test-Path -LiteralPath (Join-Path $repoRoot ".git"))) { return $false }
+        $cliDir = Join-Path $repoRoot "hermes_cli"
+        if (-not (Test-Path -LiteralPath (Join-Path $cliDir "main.py") -PathType Leaf)) { return $false }
+        $appsDir = Join-Path $repoRoot "apps"
+        $desktopDir = Join-Path $appsDir "desktop"
+        $manifest = Join-Path $desktopDir "lemon-ai-desktop.config.json"
+        return (Test-InternalHarnessResource $manifest)
     } catch {
         return $false
     }
@@ -392,7 +427,9 @@ $Repository = if ($Repository) {
 }
 $RuntimeDirName = if ($InternalDesktopBuild -and $env:HERMES_DESKTOP_RUNTIME_DIR_NAME) {
     $env:HERMES_DESKTOP_RUNTIME_DIR_NAME
-} elseif ((-not $InternalDesktopBuild) -and $env:HERMES_INSTALL_RUNTIME_DIR_NAME) {
+} elseif ($InternalDesktopBuild -and $env:LEMON_AI_INSTALL_RUNTIME_DIR_NAME) {
+    $env:LEMON_AI_INSTALL_RUNTIME_DIR_NAME
+} elseif (-not $InternalDesktopBuild -and $env:HERMES_INSTALL_RUNTIME_DIR_NAME) {
     $env:HERMES_INSTALL_RUNTIME_DIR_NAME
 } elseif ($InternalDesktopBuild) {
     "lemon-agent"
@@ -408,6 +445,8 @@ if ($PSBoundParameters.ContainsKey('HermesHome')) {
     $HermesHome = ConvertTo-LongPath $(
         if ($env:HERMES_DESKTOP_HOME_OVERRIDE) {
             $env:HERMES_DESKTOP_HOME_OVERRIDE
+        } elseif ($InternalDesktopBuild -and $env:LEMON_AI_HOME) {
+            $env:LEMON_AI_HOME
         } elseif ((-not $InternalDesktopBuild) -and $env:HERMES_HOME) {
             $env:HERMES_HOME
         } elseif ($InternalDesktopBuild) {
@@ -428,6 +467,13 @@ if ($script:NormalizedProfilePaths) {
     Write-PathDiag "resolved install paths: HermesHome=$HermesHome InstallDir=$InstallDir"
 }
 
+function Get-InstallerRecoveryUrl {
+    if ($InternalDesktopBuild) {
+        return "https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.ps1"
+    }
+    return "https://hermes-agent.nousresearch.com/install.ps1"
+}
+
 # Captured here, where the values are final, and emitted from the entry-point
 # dispatch at the bottom (alongside -ProtocolVersion / -Manifest) so
 # -ShowResolvedPaths exits before any stage runs.
@@ -445,6 +491,7 @@ $script:ResolvedPathReport = @{
     repository        = $Repository
     runtime_dir_name  = $RuntimeDirName
     bootstrap_marker  = if ($InternalDesktopBuild) { ".lemon-ai-bootstrap-complete" } else { ".hermes-bootstrap-complete" }
+    recovery_url      = (Get-InstallerRecoveryUrl)
     hermes_home       = $HermesHome
     install_dir       = $InstallDir
 }
@@ -598,11 +645,13 @@ function Get-WindowsArch {
 # ============================================================================
 
 function Write-Banner {
+    $title = if ($InternalDesktopBuild) { "Lemon AI Installer" } else { "* Hermes Agent Installer" }
+    $subtitle = if ($InternalDesktopBuild) { "Internal AI desktop harness by Lemon Digital." } else { "An open source AI agent by Nous Research." }
     Write-Host ""
     Write-Host "+---------------------------------------------------------+" -ForegroundColor Magenta
-    Write-Host "|             * Hermes Agent Installer                    |" -ForegroundColor Magenta
+    Write-Host ("| {0,-55} |" -f $title) -ForegroundColor Magenta
     Write-Host "+---------------------------------------------------------+" -ForegroundColor Magenta
-    Write-Host "|  An open source AI agent by Nous Research.              |" -ForegroundColor Magenta
+    Write-Host ("| {0,-55} |" -f $subtitle) -ForegroundColor Magenta
     Write-Host "+---------------------------------------------------------+" -ForegroundColor Magenta
     Write-Host ""
 }
@@ -3340,6 +3389,20 @@ function Install-HermesCommandLaunchers {
     return $Destination
 }
 
+function Set-UserEnvironmentVariableIfChanged {
+    param(
+        [Parameter(Mandatory=$true)] [string]$Name,
+        [Parameter(Mandatory=$true)] [string]$Value
+    )
+
+    $current = [Environment]::GetEnvironmentVariable($Name, "User")
+    if (-not $current -or $current -ne $Value) {
+        [Environment]::SetEnvironmentVariable($Name, $Value, "User")
+        Write-Success "Set $Name=$Value"
+    }
+    Set-Item -Path "Env:$Name" -Value $Value
+}
+
 function Set-PathVariable {
     Write-Info "Setting up hermes command..."
     
@@ -3389,15 +3452,14 @@ function Set-PathVariable {
         Write-Info "PATH already configured"
     }
     
-    # Set HERMES_HOME so the Python code finds config/data in the right place.
-    # Only needed on Windows where we install to %LOCALAPPDATA%\hermes instead
-    # of the Unix default ~/.hermes
-    $currentHermesHome = [Environment]::GetEnvironmentVariable("HERMES_HOME", "User")
-    if (-not $currentHermesHome -or $currentHermesHome -ne $HermesHome) {
-        [Environment]::SetEnvironmentVariable("HERMES_HOME", $HermesHome, "User")
-        Write-Success "Set HERMES_HOME=$HermesHome"
+    # Set runtime identity so Python code finds config/data in the right place
+    # and Lemon Desktop can read its branded aliases from HKCU after Explorer
+    # launches with a stale environment block.
+    Set-UserEnvironmentVariableIfChanged -Name "HERMES_HOME" -Value $HermesHome
+    if ($InternalDesktopBuild) {
+        Set-UserEnvironmentVariableIfChanged -Name "LEMON_AI_HOME" -Value $HermesHome
+        Set-UserEnvironmentVariableIfChanged -Name "LEMON_AI_INSTALL_RUNTIME_DIR_NAME" -Value $RuntimeDirName
     }
-    $env:HERMES_HOME = $HermesHome
     
     # Update current session
     $env:Path = "$hermesBin;$env:Path"
@@ -4490,6 +4552,46 @@ function Install-Desktop {
     New-DesktopShortcuts -TargetExe $desktopExe
 }
 
+function Get-DesktopShortcutIdentity {
+    param([Parameter(Mandatory = $true)][string]$TargetExe)
+
+    if ($InternalDesktopBuild -and ([System.IO.Path]::GetFileName($TargetExe) -ieq 'Lemon AI.exe')) {
+        return [pscustomobject]@{
+            LinkName    = 'Lemon AI.lnk'
+            Description = 'Lemon AI'
+        }
+    }
+
+    return [pscustomobject]@{
+        LinkName    = 'Hermes.lnk'
+        Description = 'Hermes Agent'
+    }
+}
+
+function Test-ShortcutOwnsTarget {
+    param(
+        [Parameter(Mandatory = $true)]$Shortcut,
+        [Parameter(Mandatory = $true)][string]$TargetExe,
+        [string]$WorkDir = ""
+    )
+
+    try {
+        if ([string]::IsNullOrWhiteSpace([string]$Shortcut.TargetPath)) { return $false }
+        $shortcutTarget = ConvertTo-LongPath ([string]$Shortcut.TargetPath)
+        $expectedTarget = ConvertTo-LongPath $TargetExe
+        if ([string]::Equals($shortcutTarget, $expectedTarget, [StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+        if (-not $InternalDesktopBuild -or [string]::IsNullOrWhiteSpace($WorkDir)) { return $false }
+        if ([System.IO.Path]::GetFileName($shortcutTarget) -ine 'Hermes.exe') { return $false }
+        $shortcutDir = ConvertTo-LongPath (Split-Path -Parent $shortcutTarget)
+        $expectedDir = ConvertTo-LongPath $WorkDir
+        return [string]::Equals($shortcutDir, $expectedDir, [StringComparison]::OrdinalIgnoreCase)
+    } catch {
+        return $false
+    }
+}
+
 function New-DesktopShortcuts {
     param([Parameter(Mandatory = $true)][string]$TargetExe)
 
@@ -4497,6 +4599,7 @@ function New-DesktopShortcuts {
     try {
         $shell = New-Object -ComObject WScript.Shell
         $workDir = Split-Path -Parent $TargetExe
+        $identity = Get-DesktopShortcutIdentity -TargetExe $TargetExe
 
         # Prefer the standalone icon.ico (shipped beside the exe via
         # electron-builder extraResources -> resources/icon.ico) over the exe's
@@ -4513,8 +4616,8 @@ function New-DesktopShortcuts {
         }
 
         $targets = @(
-            (Join-Path ([Environment]::GetFolderPath('Programs')) 'Hermes.lnk'),
-            (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Hermes.lnk')
+            (Join-Path ([Environment]::GetFolderPath('Programs')) $identity.LinkName),
+            (Join-Path ([Environment]::GetFolderPath('Desktop')) $identity.LinkName)
         )
 
         foreach ($lnkPath in $targets) {
@@ -4527,11 +4630,30 @@ function New-DesktopShortcuts {
                 $sc.TargetPath = $TargetExe
                 $sc.WorkingDirectory = $workDir
                 $sc.IconLocation = $iconLocation
-                $sc.Description = 'Hermes Agent'
+                $sc.Description = $identity.Description
                 $sc.Save()
                 Write-Success "Shortcut created: $lnkPath"
             } catch {
                 Write-Warn "Could not create shortcut $lnkPath : $($_.Exception.Message)"
+            }
+        }
+
+        if ($identity.LinkName -ne 'Hermes.lnk') {
+            $legacyTargets = @(
+                (Join-Path ([Environment]::GetFolderPath('Programs')) 'Hermes.lnk'),
+                (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Hermes.lnk')
+            )
+            foreach ($legacyPath in $legacyTargets) {
+                try {
+                    if (-not (Test-Path -LiteralPath $legacyPath -PathType Leaf)) { continue }
+                    $legacy = $shell.CreateShortcut($legacyPath)
+                    if (Test-ShortcutOwnsTarget -Shortcut $legacy -TargetExe $TargetExe -WorkDir $workDir) {
+                        Remove-Item -LiteralPath $legacyPath -Force -ErrorAction Stop
+                        Write-Success "Removed old shortcut: $legacyPath"
+                    }
+                } catch {
+                    Write-Warn "Could not inspect old shortcut $legacyPath : $($_.Exception.Message)"
+                }
             }
         }
 
@@ -4898,12 +5020,15 @@ function Write-Completion {
 # implements it.  ``Title`` is what UIs show; ``Category`` lets UIs group
 # stages; ``NeedsUserInput`` tells UIs "this stage prompts -- either skip it
 # or arrange to provide answers another way."
+$RepositoryStageTitle = if ($InternalDesktopBuild) { "Cloning Lemon AI repository" } else { "Cloning Hermes repository" }
+$DesktopStageTitle = if ($InternalDesktopBuild) { "Building Lemon AI desktop app" } else { "Building desktop app" }
+$PathStageTitle = if ($InternalDesktopBuild) { "Adding command line launcher" } else { "Adding Hermes to PATH" }
 $InstallStages = @(
     @{ Name = "uv";               Title = "Installing uv package manager";        Category = "prereqs";      NeedsUserInput = $false; Worker = "Stage-Uv" }
     @{ Name = "git";              Title = "Installing Git";                       Category = "prereqs";      NeedsUserInput = $false; Worker = "Stage-Git" }
     @{ Name = "node";             Title = "Detecting Node.js";                    Category = "prereqs";      NeedsUserInput = $false; Worker = "Stage-Node" }
     @{ Name = "system-packages";  Title = "Installing ripgrep and ffmpeg";        Category = "prereqs";      NeedsUserInput = $false; Worker = "Stage-SystemPackages" }
-    @{ Name = "repository";       Title = "Cloning Hermes repository";            Category = "install";      NeedsUserInput = $false; Worker = "Stage-Repository" }
+    @{ Name = "repository";       Title = $RepositoryStageTitle;                  Category = "install";      NeedsUserInput = $false; Worker = "Stage-Repository" }
     # Managed Python lives under $InstallDir\.hermes-runtime, so the checkout
     # must exist before this stage creates that directory. Otherwise the later
     # repository stage treats the runtime-only directory as a broken checkout,
@@ -4917,10 +5042,10 @@ if ($IncludeDesktop) {
     # Insert AFTER node-deps so workspace npm is already installed when
     # the desktop build runs. Inserted only when explicitly requested
     # (Hermes-Setup.exe), never via the irm|iex CLI one-liner.
-    $InstallStages += @{ Name = "desktop"; Title = "Building desktop app"; Category = "install"; NeedsUserInput = $false; Worker = "Stage-Desktop" }
+    $InstallStages += @{ Name = "desktop"; Title = $DesktopStageTitle; Category = "install"; NeedsUserInput = $false; Worker = "Stage-Desktop" }
 }
 $InstallStages += @(
-    @{ Name = "path";             Title = "Adding Hermes to PATH";                Category = "finalize";     NeedsUserInput = $false; Worker = "Stage-Path" }
+    @{ Name = "path";             Title = $PathStageTitle;                        Category = "finalize";     NeedsUserInput = $false; Worker = "Stage-Path" }
     @{ Name = "config-templates"; Title = "Writing configuration templates";      Category = "finalize";     NeedsUserInput = $false; Worker = "Stage-ConfigTemplates" }
     @{ Name = "platform-sdks";    Title = "Installing messaging platform SDKs";   Category = "finalize";     NeedsUserInput = $false; Worker = "Stage-PlatformSdks" }
     @{ Name = "bootstrap-marker"; Title = "Marking install complete";              Category = "finalize";     NeedsUserInput = $false; Worker = "Stage-BootstrapMarker" }
@@ -5224,7 +5349,13 @@ try {
     Write-Err "Installation failed: $_"
     Write-Host ""
     Write-Info "If the error is unclear, try downloading and running the script directly:"
-    Write-Host "  Invoke-WebRequest -Uri 'https://hermes-agent.nousresearch.com/install.ps1' -OutFile install.ps1" -ForegroundColor Yellow
+    $recoveryUrl = Get-InstallerRecoveryUrl
+    Write-Host "  Invoke-WebRequest -Uri '$recoveryUrl' -OutFile install.ps1" -ForegroundColor Yellow
+    if ($InternalDesktopBuild) {
+        # A raw script download has no checkout manifest to infer the Lemon
+        # profile from, so carry the product choice into the retry command.
+        Write-Host "  `$env:HERMES_INSTALLER_BRAND='lemon'" -ForegroundColor Yellow
+    }
     Write-Host "  .\install.ps1" -ForegroundColor Yellow
     Write-Host ""
 }

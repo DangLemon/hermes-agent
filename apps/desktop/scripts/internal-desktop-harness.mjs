@@ -173,6 +173,14 @@ export function validateHarnessResource(input) {
 }
 
 export function selectedHarnessConfigInputPath(env = process.env) {
+  // The installer brand is an explicit product choice. A Hermes build may
+  // still inherit the Lemon selector from a shared package script or shell
+  // environment, so let the brand suppress that selector before looking at
+  // either config variable.
+  if (String(env.HERMES_INSTALLER_BRAND || '').trim().toLowerCase() === 'hermes') {
+    return ''
+  }
+
   for (const key of HARNESS_CONFIG_ENV_KEYS) {
     const selected = String(env[key] || '').trim()
     if (selected) return selected

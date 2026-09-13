@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import type { DesktopUninstallMode, DesktopUninstallSummary } from '@/global'
+import { type AppBrand, appBrandForEnv, replaceAppBrandTokens } from '@/lib/app-brand'
 import { AlertTriangle, Loader2, Trash2 } from '@/lib/icons'
 import { cn } from '@/lib/utils'
 
@@ -17,7 +18,35 @@ interface ModeOption {
   needsAgent: boolean
 }
 
-const OPTIONS: ModeOption[] = [
+const OPTION_TEMPLATES: ModeOption[] = [
+  {
+    mode: 'gui',
+    title: 'Uninstall Chat GUI only',
+    description: 'Remove this desktop app. {agentName}, your config, and chats all stay.',
+    consequence: '{chatGuiName} (this app and its data)',
+    needsAgent: false
+  },
+  {
+    mode: 'lite',
+    title: 'Uninstall GUI + agent, keep my data',
+    description: 'Remove the app and {agentName}, but keep config, chats, and secrets for a future reinstall.',
+    consequence: '{chatGuiName} and {agentName} (config, chats, and secrets are kept)',
+    needsAgent: true
+  },
+  {
+    mode: 'full',
+    title: 'Uninstall everything',
+    description: 'Remove the app, the agent, and all user data — config, chats, scheduled jobs, secrets, logs.',
+    consequence: 'EVERYTHING — {chatGuiName}, {agentName}, and all of your config, chats, secrets, and logs',
+    // full removes the agent (and user data), so it's an agent-removing option:
+    // hide it on a lite client with no local agent, same as lite. A lite client
+    // connecting to a remote backend has no local agent OR local user data the
+    // GUI installed, so gui-only is the correct (and only) option there.
+    needsAgent: true
+  }
+]
+
+const UPSTREAM_OPTIONS: ModeOption[] = [
   {
     mode: 'gui',
     title: 'Uninstall Chat GUI only',
@@ -37,13 +66,41 @@ const OPTIONS: ModeOption[] = [
     title: 'Uninstall everything',
     description: 'Remove the app, the agent, and all user data — config, chats, scheduled jobs, secrets, logs.',
     consequence: 'EVERYTHING — the Chat GUI, the Hermes agent, and all of your config, chats, secrets, and logs',
-    // full removes the agent (and user data), so it's an agent-removing option:
-    // hide it on a lite client with no local agent, same as lite. A lite client
-    // connecting to a remote backend has no local agent OR local user data the
-    // GUI installed, so gui-only is the correct (and only) option there.
     needsAgent: true
   }
 ]
+
+interface UninstallCopy {
+  heading: string
+  intro: string
+  options: ModeOption[]
+}
+
+export function uninstallCopyForBrand(brand: AppBrand = appBrandForEnv()): UninstallCopy {
+  if (brand.mode === 'upstream') {
+    return {
+      heading: 'Uninstall Hermes',
+      intro: 'Choose how much to remove. The app closes to finish the job; reopen the installer any time to come back.',
+      options: UPSTREAM_OPTIONS
+    }
+  }
+
+  const replace = (value: string) => replaceAppBrandTokens(value, brand)
+
+  return {
+    heading: replace('Uninstall {appName}'),
+    intro: 'Choose how much to remove. The app closes to finish the job; reopen the installer any time to come back.',
+    options: OPTION_TEMPLATES.map(option => ({
+      ...option,
+      description: replace(option.description),
+      consequence: replace(option.consequence)
+    }))
+  }
+}
+
+export function uninstallOptionsForBrand(brand: AppBrand = appBrandForEnv(), agentInstalled: boolean): ModeOption[] {
+  return uninstallCopyForBrand(brand).options.filter(opt => agentInstalled || !opt.needsAgent)
+}
 
 export function UninstallSection() {
   const [summary, setSummary] = useState<DesktopUninstallSummary | null>(null)
@@ -84,6 +141,8 @@ export function UninstallSection() {
   }, [])
 
   const bridge = window.hermesDesktop?.uninstall
+  const brand = appBrandForEnv()
+  const copy = uninstallCopyForBrand(brand)
 
   if (!bridge) {
     return null
@@ -92,7 +151,7 @@ export function UninstallSection() {
   // Gate the agent-removing options on whether an agent is actually present.
   // A future lite client that ships without the bundled agent shows GUI-only.
   const agentInstalled = summary?.agent_installed ?? false
-  const visibleOptions = OPTIONS.filter(opt => agentInstalled || !opt.needsAgent)
+  const visibleOptions = uninstallOptionsForBrand(brand, agentInstalled)
 
   const handleConfirm = async () => {
     if (!pending) {
@@ -118,7 +177,7 @@ export function UninstallSection() {
     }
   }
 
-  const pendingOption = OPTIONS.find(opt => opt.mode === pending) ?? null
+  const pendingOption = copy.options.find(opt => opt.mode === pending) ?? null
 
   return (
     <div className="mx-auto mt-8 w-full max-w-2xl">
@@ -152,10 +211,8 @@ export function UninstallSection() {
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium">Uninstall Hermes</p>
-            <p className="text-xs text-muted-foreground">
-              Choose how much to remove. The app closes to finish the job; reopen the installer any time to come back.
-            </p>
+            <p className="text-sm font-medium">{copy.heading}</p>
+            <p className="text-xs text-muted-foreground">{copy.intro}</p>
             <div className="mt-1 flex flex-col gap-2">
               {visibleOptions.map(opt => (
                 <button

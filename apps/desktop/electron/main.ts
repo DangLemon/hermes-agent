@@ -163,12 +163,11 @@ import { resolveDesktopRemoteRoute } from './desktop-remote-route'
 import {
   buildDesktopRuntimeEnv,
   resolveDefaultDesktopHome,
-  resolveDesktopHomeOverride,
-  resolveDesktopRuntimeDirNameOverride,
+  resolveDesktopHomeOverrideFromWindowsRegistry,
+  resolveDesktopRuntimeDirNameOverrideFromWindowsRegistry,
   resolveDesktopRuntimeIdentity,
   resolveDesktopRuntimeRoot,
-  resolveInternalDesktopBuild,
-  shouldReadWindowsHermesHomeRegistry
+  resolveInternalDesktopBuild
 } from './desktop-runtime-identity'
 import {
   buildPosixCleanupScript,
@@ -815,9 +814,11 @@ const DESKTOP_RUNTIME_IDENTITY = resolveDesktopRuntimeIdentity({
 // HERMES_DESKTOP_USER_DATA_DIR (used by test:desktop:fresh) puts the sandbox
 // HERMES_HOME beneath the throwaway userData dir so a fresh-install run never
 // touches the user's real home.
+
 function pathExists(filePath) {
   try {
     fs.statSync(filePath)
+
     return true
   } catch {
     return false
@@ -825,7 +826,12 @@ function pathExists(filePath) {
 }
 
 function resolveHermesHome() {
-  const homeOverride = resolveDesktopHomeOverride(process['env'], DESKTOP_RUNTIME_IDENTITY)
+  const homeOverride = resolveDesktopHomeOverrideFromWindowsRegistry({
+    env: process['env'],
+    identity: DESKTOP_RUNTIME_IDENTITY,
+    isWindows: IS_WINDOWS,
+    readRegistry: readWindowsUserEnvVar
+  })
 
   if (homeOverride) {
     return normalizeHermesHomeRoot(homeOverride)
@@ -833,20 +839,6 @@ function resolveHermesHome() {
 
   if (USER_DATA_OVERRIDE) {
     return path.join(path.resolve(USER_DATA_OVERRIDE), DESKTOP_RUNTIME_IDENTITY.userDataHomeDirName)
-  }
-
-  if (IS_WINDOWS && shouldReadWindowsHermesHomeRegistry(DESKTOP_RUNTIME_IDENTITY)) {
-    // A GUI app launched from Explorer inherits the environment block captured
-    // at login, so a HERMES_HOME set via `setx` AFTER login is invisible in
-    // process.env even though the CLI (a fresh shell) sees it. Without this the
-    // backend silently falls back to its default home and reports "No inference
-    // provider configured" despite a valid configured home (#45471). Consult
-    // the live User-scoped registry value before the default below.
-    const fromRegistry = readWindowsUserEnvVar('HERMES_HOME')
-
-    if (fromRegistry) {
-      return normalizeHermesHomeRoot(fromRegistry)
-    }
   }
 
   if (IS_WINDOWS && process['env'].LOCALAPPDATA) {
@@ -932,10 +924,17 @@ function pathWithHermesManagedNode(...entries) {
 // install.ps1 / install.sh use, so a desktop-only user and a CLI-only user end
 // up with identical layouts and can share one install.
 function resolveActiveHermesRoot(hermesHome) {
+  const runtimeDirNameOverride = resolveDesktopRuntimeDirNameOverrideFromWindowsRegistry({
+    env: process['env'],
+    identity: DESKTOP_RUNTIME_IDENTITY,
+    isWindows: IS_WINDOWS,
+    readRegistry: readWindowsUserEnvVar
+  })
+
   return resolveDesktopRuntimeRoot(
     hermesHome,
     DESKTOP_RUNTIME_IDENTITY,
-    resolveDesktopRuntimeDirNameOverride(process['env'], DESKTOP_RUNTIME_IDENTITY)
+    runtimeDirNameOverride
   )
 }
 

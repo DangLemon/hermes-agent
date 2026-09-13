@@ -9,6 +9,7 @@ import {
   generateInternalDesktopHarnessResource,
   loadHarnessConfigInput,
   resolveHarnessViteDefines,
+  selectedHarnessConfigInputPath,
   validateHarnessResource,
   isDirectRun
 } from './internal-desktop-harness.mjs'
@@ -157,10 +158,34 @@ test('loadHarnessConfigInput reads only the explicit selector', () => {
 
     assert.equal(loadHarnessConfigInput({ LEMON_AI_DESKTOP_HARNESS_CONFIG: input })?.profile, 'internal')
     assert.equal(loadHarnessConfigInput({ HERMES_DESKTOP_HARNESS_CONFIG: input })?.profile, 'internal')
-    assert.equal(loadHarnessConfigInput({}), null)
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true })
   }
+})
+
+test('loadHarnessConfigInput stays ordinary when no selector is set', () => {
+  assert.equal(selectedHarnessConfigInputPath({}), '')
+  assert.equal(loadHarnessConfigInput({}), null)
+  assert.equal(selectedHarnessConfigInputPath({ LEMON_AI_DESKTOP_HARNESS_CONFIG: '  ' }), '')
+  assert.throws(() => loadHarnessConfigInput({ LEMON_AI_DESKTOP_HARNESS_CONFIG: '/missing/lemon.json' }), /ENOENT/)
+})
+
+test('Hermes installer brand suppresses inherited Lemon selectors', () => {
+  assert.equal(
+    selectedHarnessConfigInputPath({
+      HERMES_INSTALLER_BRAND: 'hermes',
+      LEMON_AI_DESKTOP_HARNESS_CONFIG: path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'lemon-ai-desktop.config.json'),
+      HERMES_DESKTOP_HARNESS_CONFIG: '/also/not-selected.json'
+    }),
+    ''
+  )
+  assert.equal(
+    loadHarnessConfigInput({
+      HERMES_INSTALLER_BRAND: 'hermes',
+      LEMON_AI_DESKTOP_HARNESS_CONFIG: path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'lemon-ai-desktop.config.json')
+    }),
+    null
+  )
 })
 
 test('generateInternalDesktopHarnessResource writes selected input and removes stale output when absent or invalid', () => {
@@ -170,18 +195,18 @@ test('generateInternalDesktopHarnessResource writes selected input and removes s
     const input = path.join(tempRoot, 'input.json')
     fs.writeFileSync(input, JSON.stringify(validResource), 'utf8')
 
-  const written = generateInternalDesktopHarnessResource({
-    env: { LEMON_AI_DESKTOP_HARNESS_CONFIG: input },
-    buildDir
-  })
-  assert.equal(written.resourcePath, path.join(buildDir, HARNESS_RESOURCE_FILENAME))
-  assert.equal(JSON.parse(fs.readFileSync(written.resourcePath, 'utf8')).profile, 'internal')
-  assert.equal(fs.existsSync(path.join(buildDir, 'lemon-ai-harness-seed.py')), true)
+    const written = generateInternalDesktopHarnessResource({
+      env: { LEMON_AI_DESKTOP_HARNESS_CONFIG: input },
+      buildDir
+    })
+    assert.equal(written.resourcePath, path.join(buildDir, HARNESS_RESOURCE_FILENAME))
+    assert.equal(JSON.parse(fs.readFileSync(written.resourcePath, 'utf8')).profile, 'internal')
+    assert.equal(fs.existsSync(path.join(buildDir, 'lemon-ai-harness-seed.py')), true)
 
-  const absent = generateInternalDesktopHarnessResource({ env: {}, buildDir })
-  assert.equal(absent.resourcePath, null)
-  assert.equal(fs.existsSync(path.join(buildDir, HARNESS_RESOURCE_FILENAME)), false)
-  assert.equal(fs.existsSync(path.join(buildDir, 'lemon-ai-harness-seed.py')), false)
+    const absent = generateInternalDesktopHarnessResource({ env: {}, buildDir })
+    assert.equal(absent.resourcePath, null)
+    assert.equal(fs.existsSync(path.join(buildDir, HARNESS_RESOURCE_FILENAME)), false)
+    assert.equal(fs.existsSync(path.join(buildDir, 'lemon-ai-harness-seed.py')), false)
 
     fs.writeFileSync(path.join(buildDir, HARNESS_RESOURCE_FILENAME), JSON.stringify(validResource), 'utf8')
     const invalidInput = path.join(tempRoot, 'invalid.json')
@@ -190,8 +215,8 @@ test('generateInternalDesktopHarnessResource writes selected input and removes s
       () => generateInternalDesktopHarnessResource({ env: { LEMON_AI_DESKTOP_HARNESS_CONFIG: invalidInput }, buildDir }),
       /schemaVersion/
     )
-  assert.equal(fs.existsSync(path.join(buildDir, HARNESS_RESOURCE_FILENAME)), false)
-  assert.equal(fs.existsSync(path.join(buildDir, 'lemon-ai-harness-seed.py')), false)
+    assert.equal(fs.existsSync(path.join(buildDir, HARNESS_RESOURCE_FILENAME)), false)
+    assert.equal(fs.existsSync(path.join(buildDir, 'lemon-ai-harness-seed.py')), false)
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true })
   }
