@@ -5,6 +5,9 @@ export type AppBrandMode = 'upstream' | 'internal-harness'
 export interface AppBrand {
   accent: string
   accentForeground: string
+  agentName: string
+  appName: string
+  chatGuiName: string
   displayName: string
   lockupSrc: string
   markSrc: string
@@ -13,16 +16,24 @@ export interface AppBrand {
   primaryForeground: string
   ring: string
   sidebarForeground: string
+  urls: {
+    installer: string
+    releaseNotes: string
+  }
   wordmark: string
 }
 
 type BrandEnv = Record<string, unknown>
+type AppBrandToken = 'agentName' | 'appName' | 'chatGuiName'
 
 const assetPath = (path: string): string => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, '')}`
 
 export const upstreamAppBrand: AppBrand = {
   accent: '#0053fd',
   accentForeground: '#ffffff',
+  agentName: 'the Hermes agent',
+  appName: 'Hermes',
+  chatGuiName: 'the desktop Chat GUI',
   displayName: 'Hermes Agent',
   lockupSrc: '',
   markSrc: assetPath('nous-girl.jpg'),
@@ -31,12 +42,19 @@ export const upstreamAppBrand: AppBrand = {
   primaryForeground: '#ffffff',
   ring: '#0053fd',
   sidebarForeground: 'var(--ui-text-secondary)',
+  urls: {
+    installer: 'https://hermes-agent.nousresearch.com/',
+    releaseNotes: 'https://github.com/NousResearch/hermes-agent/releases'
+  },
   wordmark: 'HERMES AGENT'
 }
 
 export const lemonAppBrand: AppBrand = {
   accent: '#ffdd00',
   accentForeground: '#322b29',
+  agentName: 'the Lemon AI agent',
+  appName: 'Lemon AI',
+  chatGuiName: 'the Lemon AI desktop app',
   displayName: 'Lemon AI',
   lockupSrc: assetPath('lemon-lockup.png'),
   markSrc: assetPath('lemon-mark.png'),
@@ -45,6 +63,15 @@ export const lemonAppBrand: AppBrand = {
   primaryForeground: '#322b29',
   ring: '#806b00',
   sidebarForeground: '#322b29',
+  urls: {
+    // Lemon CI publishes signed/notarized-ready artifacts as prereleases
+    // (`lemon-v*`). GitHub's `/releases/latest` endpoint ignores prereleases
+    // and returns 404 until a stable release exists, which would make the
+    // bundle recovery action unusable. The releases index always resolves and
+    // exposes the current Lemon AI prerelease installer when one is available.
+    installer: 'https://github.com/DangLemon/hermes-agent/releases',
+    releaseNotes: 'https://github.com/DangLemon/hermes-agent/releases'
+  },
   wordmark: 'Lemon AI'
 }
 
@@ -53,6 +80,10 @@ export function appBrandForEnv(env: BrandEnv = internalCompanyBuildEnv()): AppBr
 }
 
 export const appBrand = appBrandForEnv
+
+export function replaceAppBrandTokens(input: string, brand: AppBrand = appBrandForEnv()): string {
+  return input.replace(/\{(agentName|appName|chatGuiName)\}/g, (token, key: AppBrandToken) => brand[key] ?? token)
+}
 
 export function applyAppBrandRoot(
   root: HTMLElement,

@@ -339,6 +339,8 @@ function launchFresh() {
   env.HERMES_DESKTOP_CWD = cwd
   env.HERMES_DESKTOP_IGNORE_EXISTING = '1'
   env.HERMES_DESKTOP_TEST_MODE = 'fresh-install'
+  env.HERMES_DESKTOP_HOME_OVERRIDE = hermesHome
+  env.HERMES_DESKTOP_RUNTIME_DIR_NAME = PRIMARY_IDENTITY.runtimeRootDirName
   env.HERMES_DESKTOP_USER_DATA_DIR = userDataDir
   if (INTERNAL_DESKTOP_BUILD) {
     env.LEMON_AI_HOME = hermesHome

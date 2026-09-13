@@ -96,8 +96,51 @@ selected_internal_harness_config() {
     fi
 }
 
+checkout_internal_harness_config() {
+    local source_path="${BASH_SOURCE[0]:-}"
+    local script_dir repo_dir selected
+
+    case "$source_path" in
+        */*) ;;
+        *) return 1 ;;
+    esac
+
+    script_dir="$(cd "$(dirname "$source_path")" 2>/dev/null && pwd -P)" || return 1
+    repo_dir="$(cd "$script_dir/.." 2>/dev/null && pwd -P)" || return 1
+    valid_runtime_root "$repo_dir" || return 1
+
+    selected="$repo_dir/apps/desktop/lemon-ai-desktop.config.json"
+    valid_internal_harness_config "$selected" || return 1
+}
+
+is_internal_desktop_build() {
+    case "${HERMES_INSTALLER_BRAND:-}" in
+        lemon) return 0 ;;
+        hermes) return 1 ;;
+        "")
+            ;;
+        *)
+            echo "Error: HERMES_INSTALLER_BRAND must be 'hermes' or 'lemon'" >&2
+            exit 1
+            ;;
+    esac
+
+    if [ "${HERMES_DESKTOP_INTERNAL:-}" = "1" ]; then
+        return 0
+    fi
+
+    local selected
+    selected="$(selected_internal_harness_config)"
+    if [ -n "$selected" ]; then
+        valid_internal_harness_config "$selected"
+        return $?
+    fi
+
+    checkout_internal_harness_config
+}
+
 INTERNAL_DESKTOP_BUILD=false
-if [ "${HERMES_DESKTOP_INTERNAL:-}" = "1" ] || valid_internal_harness_config "$(selected_internal_harness_config)"; then
+if is_internal_desktop_build; then
     INTERNAL_DESKTOP_BUILD=true
 fi
 if [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
@@ -108,6 +151,9 @@ fi
 REPOSITORY="${REPOSITORY:-$DEFAULT_REPOSITORY}"
 if [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
     RUNTIME_DIR_NAME="${HERMES_DESKTOP_RUNTIME_DIR_NAME:-}"
+    if [ -z "$RUNTIME_DIR_NAME" ]; then
+        RUNTIME_DIR_NAME="${HERMES_INSTALL_RUNTIME_DIR_NAME:-}"
+    fi
 else
     RUNTIME_DIR_NAME="${HERMES_INSTALL_RUNTIME_DIR_NAME:-}"
 fi
@@ -143,6 +189,14 @@ else
 fi
 PYTHON_VERSION="3.11"
 NODE_VERSION="26"
+INSTALLER_DISPLAY_NAME="Hermes Agent Installer"
+INSTALLER_PRODUCT_NAME="Hermes"
+INSTALLER_DESCRIPTION="An open source AI agent by Nous Research."
+if [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
+    INSTALLER_DISPLAY_NAME="Lemon AI Installer"
+    INSTALLER_PRODUCT_NAME="Lemon AI"
+    INSTALLER_DESCRIPTION="Internal AI desktop harness by Lemon Digital."
+fi
 
 # FHS-style root install layout (set by resolve_install_layout when applicable):
 #   code at /usr/local/lib/hermes-agent, command at /usr/local/bin/hermes,
@@ -256,7 +310,7 @@ while [[ $# -gt 0 ]]; do
             ;;
 
         -h|--help)
-            echo "Hermes Agent Installer"
+            echo "$INSTALLER_DISPLAY_NAME"
             echo ""
             echo "Usage: install.sh [OPTIONS]"
             echo ""
@@ -286,7 +340,7 @@ while [[ $# -gt 0 ]]; do
             echo "  -h, --help     Show this help"
             echo ""
             echo "Notes:"
-            echo "  When running as root on Linux, Hermes installs the code under"
+            echo "  When running as root on Linux, $INSTALLER_PRODUCT_NAME installs the code under"
             echo "  /usr/local/lib/$RUNTIME_DIR_NAME and links the command into"
             echo "  /usr/local/bin/hermes (FHS layout — matches Claude Code / Codex CLI)."
             echo "  Data, config, sessions, and logs still live in \$HERMES_HOME"
@@ -314,9 +368,9 @@ print_banner() {
     echo ""
     echo -e "${MAGENTA}${BOLD}"
     echo "┌─────────────────────────────────────────────────────────┐"
-    echo "│             ⚕ Hermes Agent Installer                    │"
+    printf "│ %-55s │\n" "⚕ $INSTALLER_DISPLAY_NAME"
     echo "├─────────────────────────────────────────────────────────┤"
-    echo "│  An open source AI agent by Nous Research.              │"
+    printf "│ %-55s │\n" "$INSTALLER_DESCRIPTION"
     echo "└─────────────────────────────────────────────────────────┘"
     echo -e "${NC}"
 }
@@ -604,10 +658,26 @@ emit_manifest() {
     # first-launch bootstrap and the CLI one-liner omit it (building the
     # desktop from inside the already-running app would clobber it).
     local desktop_stage=""
-    if [ "$INCLUDE_DESKTOP" = true ]; then
-        desktop_stage='{"name":"desktop","title":"Build desktop app","category":"runtime","needs_user_input":false},'
+    local repository_title="Download Hermes Agent"
+    local path_title="Install hermes command"
+    local config_title="Prepare config and skills"
+    local setup_title="Configure API keys and settings"
+    local gateway_title="Configure gateway service"
+    local desktop_title="Build desktop app"
+    local complete_title="Finish install"
+    if [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
+        repository_title="Download Lemon AI"
+        path_title="Install command line launcher"
+        config_title="Prepare Lemon AI config and skills"
+        setup_title="Configure Lemon AI API keys and settings"
+        gateway_title="Configure Lemon AI gateway service"
+        desktop_title="Build Lemon AI desktop app"
+        complete_title="Finish Lemon AI install"
     fi
-    printf '%s' '{"protocol_version":1,"stages":[{"name":"prerequisites","title":"System prerequisites","category":"runtime","needs_user_input":false},{"name":"repository","title":"Download Hermes Agent","category":"runtime","needs_user_input":false},{"name":"venv","title":"Create Python virtual environment","category":"runtime","needs_user_input":false},{"name":"python-deps","title":"Install Python dependencies","category":"runtime","needs_user_input":false},{"name":"node-deps","title":"Install browser-tool dependencies","category":"runtime","needs_user_input":false},{"name":"path","title":"Install hermes command","category":"runtime","needs_user_input":false},{"name":"config","title":"Prepare config and skills","category":"configuration","needs_user_input":false},{"name":"setup","title":"Configure API keys and settings","category":"configuration","needs_user_input":true},{"name":"gateway","title":"Configure gateway service","category":"configuration","needs_user_input":true},'"$desktop_stage"'{"name":"complete","title":"Finish install","category":"runtime","needs_user_input":false}]}'
+    if [ "$INCLUDE_DESKTOP" = true ]; then
+        desktop_stage='{"name":"desktop","title":"'"$desktop_title"'","category":"runtime","needs_user_input":false},'
+    fi
+    printf '%s' '{"protocol_version":1,"stages":[{"name":"prerequisites","title":"System prerequisites","category":"runtime","needs_user_input":false},{"name":"repository","title":"'"$repository_title"'","category":"runtime","needs_user_input":false},{"name":"venv","title":"Create Python virtual environment","category":"runtime","needs_user_input":false},{"name":"python-deps","title":"Install Python dependencies","category":"runtime","needs_user_input":false},{"name":"node-deps","title":"Install browser-tool dependencies","category":"runtime","needs_user_input":false},{"name":"path","title":"'"$path_title"'","category":"runtime","needs_user_input":false},{"name":"config","title":"'"$config_title"'","category":"configuration","needs_user_input":false},{"name":"setup","title":"'"$setup_title"'","category":"configuration","needs_user_input":true},{"name":"gateway","title":"'"$gateway_title"'","category":"configuration","needs_user_input":true},'"$desktop_stage"'{"name":"complete","title":"'"$complete_title"'","category":"runtime","needs_user_input":false}]}'
     printf '\n'
 }
 

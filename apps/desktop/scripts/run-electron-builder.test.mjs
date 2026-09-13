@@ -39,14 +39,19 @@ function withTempHarness(resource, fn) {
 
 function assertPhysicalIdentity(
   config,
-  { expectedProductName = 'Hermes', expectedAppId = 'com.nousresearch.hermes', expectedExecutableName = 'Hermes' } = {}
+  {
+    expectedProductName = 'Hermes',
+    expectedAppId = 'com.nousresearch.hermes',
+    expectedExecutableName = 'Hermes',
+    expectedProtocolName = 'Hermes Protocol'
+  } = {}
 ) {
   assert.equal(config.appId, expectedAppId)
   assert.equal(config.productName, expectedProductName)
   assert.equal(config.executableName, expectedExecutableName)
   assert.deepEqual(config.protocols, [
     {
-      name: 'Hermes Protocol',
+      name: expectedProtocolName,
       schemes: ['hermes']
     }
   ])
@@ -101,10 +106,11 @@ test('package build script generates harness resource before Vite reads harness 
   )
 })
 
-test('ordinary package config keeps Hermes installer metadata and assets without a selector', async () => {
+test('ordinary package config keeps Hermes installer metadata and assets for compatibility', async () => {
   const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
   const config = createElectronBuilderConfig(pkg.build, {
-    env: { CSC_IDENTITY_AUTO_DISCOVERY: 'false' }
+    env: { CSC_IDENTITY_AUTO_DISCOVERY: 'false' },
+    harnessResource: null
   })
 
   assertPhysicalIdentity(config)
@@ -138,6 +144,22 @@ test('ordinary package config keeps Hermes installer metadata and assets without
   await validateConfiguration(structuredClone(config))
 })
 
+test('Hermes installer brand keeps the package config on the Hermes identity', async () => {
+  const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+  const config = createElectronBuilderConfig(pkg.build, {
+    env: {
+      HERMES_INSTALLER_BRAND: 'hermes',
+      LEMON_AI_DESKTOP_HARNESS_CONFIG: path.resolve('lemon-ai-desktop.config.json'),
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    }
+  })
+
+  assertPhysicalIdentity(config)
+  assert.equal(config.artifactName, 'Hermes-${version}-${os}-${arch}.${ext}')
+  assert.equal(config.dmg.title, 'Install Hermes')
+  await validateConfiguration(structuredClone(config))
+})
+
 test('validated internal package config applies Lemon physical identity while preserving protocol compatibility', async () => {
   await withTempHarness(validHarnessResource, async configPath => {
     const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
@@ -151,7 +173,8 @@ test('validated internal package config applies Lemon physical identity while pr
     assertPhysicalIdentity(config, {
       expectedProductName: 'Lemon AI',
       expectedAppId: 'com.lemondigital.lemonai',
-      expectedExecutableName: 'Lemon AI'
+      expectedExecutableName: 'Lemon AI',
+      expectedProtocolName: 'Lemon AI Protocol'
     })
     assert.equal(config.mac.identity, '-')
     assert.equal(productFilenameFor(config, config.mac), 'Lemon AI')
@@ -293,6 +316,7 @@ test('builder writes a fresh ordinary config after an internal config', () => {
 
     const ordinaryPath = writeElectronBuilderConfig(pkg.build, {
       env: {},
+      harnessResource: null,
       configPath: internalPath
     })
     assert.equal(

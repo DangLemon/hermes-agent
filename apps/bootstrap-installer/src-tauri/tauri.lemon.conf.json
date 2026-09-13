@@ -26,6 +26,7 @@
     "publisher": "Lemon Digital",
     "copyright": "Copyright \u00a9 2026 Lemon Digital",
     "macOS": {
+      "infoPlist": "Info.lemon.plist",
       "signingIdentity": "-"
     },
     "icon": [

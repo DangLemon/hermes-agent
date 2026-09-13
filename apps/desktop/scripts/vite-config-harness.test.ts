@@ -44,6 +44,26 @@ test('Vite compiles internal harness defines from the Lemon selector alone', () 
   })
 })
 
+test('Vite leaves ordinary builds unbranded when no selector is set', () => {
+  const define = harnessViteDefines({})
+
+  assert.equal(define.__HERMES_DESKTOP_HARNESS__, JSON.stringify(''))
+  assert.equal(define.__HERMES_HARNESS_SHOW_AGENTS__, JSON.stringify('false'))
+  assert.equal(define.__HERMES_HARNESS_SHOW_CRON__, JSON.stringify('true'))
+})
+
+test('Vite keeps ordinary builds unbranded when a Lemon selector is inherited by Hermes', () => {
+  withHarnessConfigs(lemonPath => {
+    const define = harnessViteDefines({
+      HERMES_INSTALLER_BRAND: 'hermes',
+      LEMON_AI_DESKTOP_HARNESS_CONFIG: lemonPath
+    })
+
+    assert.equal(define.__HERMES_DESKTOP_HARNESS__, JSON.stringify(''))
+    assert.equal(define.__HERMES_HARNESS_SHOW_AGENTS__, JSON.stringify('false'))
+  })
+})
+
 test('Vite falls back to the Hermes selector when the Lemon selector is blank', () => {
   withHarnessConfigs((_lemonPath, hermesPath) => {
     const define = harnessViteDefines({

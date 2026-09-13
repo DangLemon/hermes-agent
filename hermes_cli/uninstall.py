@@ -253,7 +253,7 @@ _GATEWAY_SERVICE_REMOVERS = {
     "Windows": (_remove_windows_gateway, "Could not check Windows gateway service")}
 
 # Windows helpers. install.ps1 leaves four things no rc file covers: User-scope env vars
-# HERMES_HOME / HERMES_GIT_BASH_PATH (HKCU\Environment), User-scope PATH entries
+# HERMES_HOME / HERMES_GIT_BASH_PATH / Lemon aliases (HKCU\Environment), User-scope PATH entries
 # (%LOCALAPPDATA%\hermes\git\{cmd,bin,usr\bin}, ...\hermes\node), PortableGit + Node copies
 # (~200MB) and the gateway-service dir. Direct winreg writes (not PowerShell): no subprocess, and
 # they work under Constrained Language Mode; new shells see them without WM_SETTINGCHANGE.
@@ -288,10 +288,51 @@ def remove_path_from_windows_registry(hermes_home: Path, *, include_managed_bin:
     return _edit_user_environment(edit, warn_label="Could not edit User PATH in registry")
 
 
-def remove_hermes_env_vars_windows() -> list[str]:
-    """Delete HERMES_HOME and HERMES_GIT_BASH_PATH from User-scope env vars."""
+def _query_user_env_value(winreg, key, name: str) -> "str | None":
+    try:
+        value, _value_type = winreg.QueryValueEx(key, name)
+    except FileNotFoundError:
+        return None
+    return str(value) if value is not None else None
+
+
+def _same_windows_path(left: str | Path | None, right: str | Path | None) -> bool:
+    if not left or not right:
+        return False
+    return str(left).rstrip("\\/").casefold() == str(right).rstrip("\\/").casefold()
+
+
+def _windows_path_is_within(path: str | Path | None, root: str | Path | None) -> bool:
+    if not path or not root:
+        return False
+    normalized_path = str(path).replace("/", "\\").rstrip("\\").casefold()
+    normalized_root = str(root).replace("/", "\\").rstrip("\\").casefold()
+    return normalized_path == normalized_root or normalized_path.startswith(f"{normalized_root}\\")
+
+
+def _windows_uninstall_env_var_names(winreg, key, hermes_home: "Path | None" = None) -> tuple[str, ...]:
+    names: list[str] = []
+    registered_hermes_home = _query_user_env_value(winreg, key, "HERMES_HOME")
+    active_home = str(hermes_home) if hermes_home is not None else registered_hermes_home
+    registered_git_bash = _query_user_env_value(winreg, key, "HERMES_GIT_BASH_PATH")
+    lemon_home = _query_user_env_value(winreg, key, "LEMON_AI_HOME")
+    owns_generic_hermes_aliases = hermes_home is None or _same_windows_path(
+        active_home, registered_hermes_home
+    )
+
+    if owns_generic_hermes_aliases:
+        names.append("HERMES_HOME")
+    if owns_generic_hermes_aliases or _windows_path_is_within(registered_git_bash, active_home):
+        names.append("HERMES_GIT_BASH_PATH")
+    if _same_windows_path(active_home, lemon_home):
+        names.extend(["LEMON_AI_HOME", "LEMON_AI_INSTALL_RUNTIME_DIR_NAME"])
+    return tuple(names)
+
+
+def remove_hermes_env_vars_windows(hermes_home: "Path | None" = None) -> list[str]:
+    """Delete active-runtime User-scope env vars written by install.ps1."""
     def edit(winreg, key, removed):
-        for name in ("HERMES_HOME", "HERMES_GIT_BASH_PATH"):
+        for name in _windows_uninstall_env_var_names(winreg, key, hermes_home):
             try:
                 winreg.QueryValueEx(key, name)
             except FileNotFoundError:
@@ -637,8 +678,9 @@ def _perform_uninstall(
          lambda: remove_path_from_windows_registry(
              Path(os.path.expandvars(str(hermes_home))), include_managed_bin=sweep_managed_bin),
          "Removed from User PATH: {}", "No Hermes-owned PATH entries in User environment"),
-        (windows, "Removing HERMES_HOME / HERMES_GIT_BASH_PATH User env vars...",
-         remove_hermes_env_vars_windows, "Removed User env var: {}", "No Hermes-set User env vars to remove"),
+        (windows, "Removing Hermes runtime User env vars...",
+         lambda: remove_hermes_env_vars_windows(Path(os.path.expandvars(str(hermes_home)))),
+         "Removed User env var: {}", "No Hermes-set User env vars to remove"),
         (True, "Removing hermes command...", remove_wrapper_script, "Removed {}", "No wrapper script found"),
         (windows, "Removing Windows hermes launchers...",
          remove_windows_bin_launchers, "Removed {}", "No Windows hermes launchers found"),

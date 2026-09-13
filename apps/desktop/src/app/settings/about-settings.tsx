@@ -5,6 +5,7 @@ import { BrandMark } from '@/components/brand-mark'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import { type Translations, useI18n } from '@/i18n'
+import { type AppBrand, appBrandForEnv, replaceAppBrandTokens } from '@/lib/app-brand'
 import { AlertTriangle, CheckCircle2, ExternalLink, Loader2, RefreshCw } from '@/lib/icons'
 import { cn } from '@/lib/utils'
 import {
@@ -21,8 +22,37 @@ import {
 import { ListRow, SectionHeading, SettingsContent } from './primitives'
 import { UninstallSection } from './uninstall-section'
 
-const RELEASE_NOTES_URL = 'https://github.com/NousResearch/hermes-agent/releases'
-const INSTALLER_URL = 'https://hermes-agent.nousresearch.com/'
+export function aboutSettingsLinksForBrand(brand: AppBrand) {
+  return brand.urls
+}
+
+type BrandableAboutCopy = Pick<
+  Translations['settings']['about'],
+  'automaticUpdatesDesc' | 'bundleOutOfSyncDesc' | 'bundleSwapPendingAction' | 'bundleSwapPendingDesc' | 'heading'
+>
+
+function replaceAboutBrandTerms(value: string, brand: AppBrand): string {
+  const tokenized = value
+    .replaceAll('Hermes Desktop', '{appName}')
+    .replaceAll('Hermes Agent', '{appName}')
+    .replaceAll('Hermes', '{appName}')
+
+  return replaceAppBrandTokens(tokenized, brand)
+}
+
+export function aboutSettingsCopyForBrand(copy: BrandableAboutCopy, brand: AppBrand): BrandableAboutCopy {
+  if (brand.mode === 'upstream') {
+    return copy
+  }
+
+  return {
+    heading: replaceAboutBrandTerms(copy.heading, brand),
+    bundleOutOfSyncDesc: replaceAboutBrandTerms(copy.bundleOutOfSyncDesc, brand),
+    bundleSwapPendingDesc: replaceAboutBrandTerms(copy.bundleSwapPendingDesc, brand),
+    bundleSwapPendingAction: replaceAboutBrandTerms(copy.bundleSwapPendingAction, brand),
+    automaticUpdatesDesc: replaceAboutBrandTerms(copy.automaticUpdatesDesc, brand)
+  }
+}
 
 function relativeTime(ms: number | undefined, a: Translations['settings']['about']) {
   if (!ms) {
@@ -69,6 +99,9 @@ export function AboutSettings() {
   const updateAvailable = behind > 0 || Boolean(status?.updateAvailable)
   const supported = status?.supported !== false
   const applying = apply.applying || apply.stage === 'restart'
+  const brand = appBrandForEnv()
+  const links = aboutSettingsLinksForBrand(brand)
+  const copy = aboutSettingsCopyForBrand(a, brand)
 
   const handleCheck = async () => {
     setJustChecked(false)
@@ -102,7 +135,7 @@ export function AboutSettings() {
       <div className="flex flex-col items-center gap-3 pt-6 pb-2 text-center">
         <BrandMark className="size-16" />
         <div>
-          <h2 className="text-lg font-semibold tracking-tight">{a.heading}</h2>
+          <h2 className="text-lg font-semibold tracking-tight">{copy.heading}</h2>
           <p className="mt-1 text-xs text-muted-foreground">
             {version?.appVersion ? a.version(version.appVersion) : a.versionUnavailable}
           </p>
@@ -120,7 +153,7 @@ export function AboutSettings() {
                   // already reports the runtime as current.
                   <>
                     <p className="font-medium">{a.bundleSwapPending}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{a.bundleSwapPendingDesc}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{copy.bundleSwapPendingDesc}</p>
                     <Button
                       className="mt-2"
                       onClick={() => void window.hermesDesktop?.relaunchApp?.()}
@@ -128,19 +161,19 @@ export function AboutSettings() {
                       variant="textStrong"
                     >
                       <RefreshCw className="size-3" />
-                      {a.bundleSwapPendingAction}
+                      {copy.bundleSwapPendingAction}
                     </Button>
                   </>
                 ) : (
                   <>
                     <p className="font-medium">{a.bundleOutOfSync}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{a.bundleOutOfSyncDesc}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{copy.bundleOutOfSyncDesc}</p>
                     <Button asChild className="mt-2" size="sm" variant="textStrong">
                       <a
-                        href={INSTALLER_URL}
+                        href={links.installer}
                         onClick={event => {
                           event.preventDefault()
-                          void window.hermesDesktop?.openExternal?.(INSTALLER_URL)
+                          void window.hermesDesktop?.openExternal?.(links.installer)
                         }}
                         rel="noreferrer"
                         target="_blank"
@@ -207,10 +240,10 @@ export function AboutSettings() {
 
             <Button asChild className="ml-auto" size="sm" variant="text">
               <a
-                href={RELEASE_NOTES_URL}
+                href={links.releaseNotes}
                 onClick={event => {
                   event.preventDefault()
-                  void window.hermesDesktop?.openExternal?.(RELEASE_NOTES_URL)
+                  void window.hermesDesktop?.openExternal?.(links.releaseNotes)
                 }}
                 rel="noreferrer"
                 target="_blank"
@@ -223,7 +256,7 @@ export function AboutSettings() {
         </div>
 
         <ListRow
-          description={a.automaticUpdatesDesc}
+          description={copy.automaticUpdatesDesc}
           hint={a.branchCommit(status?.branch ?? 'unknown', status?.currentSha?.slice(0, 7) ?? 'unknown')}
           title={a.automaticUpdates}
         />

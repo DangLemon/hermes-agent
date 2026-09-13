@@ -73,6 +73,24 @@ test('readWindowsUserEnvVar queries HKCU\\Environment and expands the value', ()
   assert.deepEqual(calls, [['reg', ['query', 'HKCU\\Environment', '/v', 'HERMES_HOME']]])
 })
 
+test('readWindowsUserEnvVar can query the Lemon AI home alias from HKCU\\Environment', () => {
+  const calls = []
+
+  const exec = (cmd, args) => {
+    calls.push([cmd, args])
+
+    return 'HKEY_CURRENT_USER\\Environment\r\n    LEMON_AI_HOME    REG_SZ    D:\\Lemon AI\\data\r\n'
+  }
+
+  const value = readWindowsUserEnvVar('LEMON_AI_HOME', {
+    platform: 'win32',
+    exec
+  })
+
+  assert.equal(value, 'D:\\Lemon AI\\data')
+  assert.deepEqual(calls, [['reg', ['query', 'HKCU\\Environment', '/v', 'LEMON_AI_HOME']]])
+})
+
 test('readWindowsUserEnvVar returns null when reg exits non-zero (value missing)', () => {
   const exec = () => {
     throw new Error('reg exited 1')

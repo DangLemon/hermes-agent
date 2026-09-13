@@ -6,6 +6,10 @@ artifacts (built renderer/release/node_modules, packaged bundle, Electron
 userData) while leaving the Python agent + config/sessions/.env intact.
 """
 
+import base64
+import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -44,6 +48,122 @@ def _make_user_data(hermes_home: Path) -> None:
     (hermes_home / "config.yaml").write_text("x: 1\n")
     (hermes_home / ".env").write_text("KEY=secret\n")
     (hermes_home / "sessions").mkdir()
+
+
+def _create_windows_shortcut(shortcut: Path, target: Path) -> None:
+    create_script = r'''
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new()
+$source = @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+[ComImport]
+[Guid("00021401-0000-0000-C000-000000000046")]
+public class ShellLink
+{
+}
+
+[ComImport]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+[Guid("000214F9-0000-0000-C000-000000000046")]
+public interface IShellLinkW
+{
+    void GetPath(
+        [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile,
+        int cchMaxPath,
+        IntPtr pfd,
+        uint fFlags);
+    void GetIDList(out IntPtr ppidl);
+    void SetIDList(IntPtr pidl);
+    void GetDescription(
+        [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszName,
+        int cchMaxName);
+    void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+    void GetWorkingDirectory(
+        [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszDir,
+        int cchMaxPath);
+    void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+    void GetArguments(
+        [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszArgs,
+        int cchMaxPath);
+    void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+    void GetHotkey(out short pwHotkey);
+    void SetHotkey(short wHotkey);
+    void GetShowCmd(out int piShowCmd);
+    void SetShowCmd(int iShowCmd);
+    void GetIconLocation(
+        [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszIconPath,
+        int cchIconPath,
+        out int piIcon);
+    void SetIconLocation(
+        [MarshalAs(UnmanagedType.LPWStr)] string pszIconPath,
+        int iIcon);
+    void SetRelativePath(
+        [MarshalAs(UnmanagedType.LPWStr)] string pszPathRel,
+        uint dwReserved);
+    void Resolve(IntPtr hwnd, uint fFlags);
+    void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
+}
+
+[ComImport]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+[Guid("0000010B-0000-0000-C000-000000000046")]
+public interface IPersistFile
+{
+    void GetClassID(out Guid pClassID);
+    [PreserveSig]
+    int IsDirty();
+    void Load([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, uint dwMode);
+    void Save(
+        [MarshalAs(UnmanagedType.LPWStr)] string pszFileName,
+        [MarshalAs(UnmanagedType.Bool)] bool fRemember);
+    void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string pszFileName);
+    void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string ppszFileName);
+}
+
+public static class ShellLinkCom
+{
+    public static void Create(string shortcutPath, string targetPath)
+    {
+        IShellLinkW shellLink = (IShellLinkW)new ShellLink();
+        shellLink.SetPath(targetPath);
+        ((IPersistFile)shellLink).Save(shortcutPath, true);
+    }
+}
+"@
+Add-Type -TypeDefinition $source
+[ShellLinkCom]::Create($env:TEST_SHORTCUT_PATH, $env:TEST_SHORTCUT_TARGET)
+'''
+    encoded_create_script = base64.b64encode(create_script.encode("utf-16le")).decode(
+        "ascii"
+    )
+    env = {
+        **os.environ,
+        "TEST_SHORTCUT_PATH": str(shortcut),
+        "TEST_SHORTCUT_TARGET": str(target),
+    }
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-EncodedCommand",
+            encoded_create_script,
+        ],
+        check=False,
+        capture_output=True,
+        encoding="utf-8",
+        env=env,
+        timeout=20,
+    )
+    assert result.returncode == 0, (
+        "failed to create Windows shortcut with IShellLinkW fixture\n"
+        f"stdout: {result.stdout}\n"
+        f"stderr: {result.stderr}"
+    )
 
 
 def test_gui_install_summary_shape(tmp_path, monkeypatch):
@@ -241,6 +361,194 @@ def test_windows_lemon_uninstall_includes_existing_legacy_desktop_for_explicit_m
     assert legacy_path in gu.packaged_gui_app_paths()
 
 
+def test_windows_lemon_gui_uninstall_removes_only_lemon_shortcuts(tmp_path, monkeypatch):
+    config = tmp_path / "internal.json"
+    _write_internal_harness(config)
+    monkeypatch.setattr(gu.sys, "platform", "win32")
+    monkeypatch.setenv("HERMES_DESKTOP_HARNESS_CONFIG", str(config))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+
+    programs = tmp_path / "roaming" / "Microsoft" / "Windows" / "Start Menu" / "Programs"
+    desktop = tmp_path / "profile" / "Desktop"
+    programs.mkdir(parents=True)
+    desktop.mkdir(parents=True)
+    lemon_program = programs / "Lemon AI.lnk"
+    lemon_desktop = desktop / "Lemon AI.lnk"
+    hermes_program = programs / "Hermes.lnk"
+    hermes_desktop = desktop / "Hermes.lnk"
+    for shortcut in (lemon_program, lemon_desktop, hermes_program, hermes_desktop):
+        shortcut.write_text("shortcut", encoding="utf-8")
+    target_map = {
+        lemon_program: tmp_path / "local" / "Programs" / "Lemon AI" / "Lemon AI.exe",
+        lemon_desktop: tmp_path / ".lemon-ai" / "lemon-agent" / "apps" / "desktop" / "release" / "win-unpacked" / "Lemon AI.exe",
+        hermes_program: tmp_path / "local" / "Programs" / "Hermes" / "Hermes.exe",
+        hermes_desktop: tmp_path / ".hermes" / "hermes-agent" / "apps" / "desktop" / "release" / "win-unpacked" / "Hermes.exe",
+    }
+    known_calls: list[int] = []
+
+    def known_folder(csidl: int, fallback: Path) -> Path:
+        known_calls.append(csidl)
+        return programs if csidl == gu.CSIDL_PROGRAMS else desktop
+
+    monkeypatch.setattr(gu, "_windows_known_folder_path", known_folder)
+    monkeypatch.setattr(gu, "_read_windows_shortcut_target", lambda path: str(target_map[path]))
+
+    removed = gu.uninstall_gui(tmp_path / ".lemon-ai")
+
+    assert lemon_program in removed
+    assert lemon_desktop in removed
+    assert not lemon_program.exists()
+    assert not lemon_desktop.exists()
+    assert hermes_program.exists()
+    assert hermes_desktop.exists()
+    assert known_calls == [gu.CSIDL_DESKTOPDIRECTORY, gu.CSIDL_PROGRAMS]
+
+
+def test_windows_shortcut_paths_keep_same_name_shortcut_targeting_other_app(
+    tmp_path, monkeypatch
+):
+    config = tmp_path / "internal.json"
+    _write_internal_harness(config)
+    monkeypatch.setattr(gu.sys, "platform", "win32")
+    monkeypatch.setenv("HERMES_DESKTOP_HARNESS_CONFIG", str(config))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+
+    programs = tmp_path / "programs"
+    desktop = tmp_path / "desktop"
+    programs.mkdir()
+    desktop.mkdir()
+    owned = programs / "Lemon AI.lnk"
+    same_name_other_target = desktop / "Lemon AI.lnk"
+    owned.write_text("shortcut", encoding="utf-8")
+    same_name_other_target.write_text("shortcut", encoding="utf-8")
+
+    target_map = {
+        owned: tmp_path / "local" / "Programs" / "Lemon AI" / "Lemon AI.exe",
+        same_name_other_target: tmp_path / "other-vendor" / "Lemon AI" / "Lemon AI.exe",
+    }
+
+    monkeypatch.setattr(
+        gu,
+        "_windows_known_folder_path",
+        lambda csidl, fallback: programs if csidl == gu.CSIDL_PROGRAMS else desktop,
+    )
+    monkeypatch.setattr(gu, "_read_windows_shortcut_target", lambda path: str(target_map[path]))
+
+    assert gu.windows_shortcut_paths(tmp_path / ".lemon-ai") == [owned]
+
+
+def test_windows_shortcut_owned_matches_product_name_case_insensitively(
+    tmp_path, monkeypatch
+):
+    config = tmp_path / "internal.json"
+    _write_internal_harness(config)
+    monkeypatch.setenv("HERMES_DESKTOP_HARNESS_CONFIG", str(config))
+    shortcut = tmp_path / "lemon ai.lnk"
+    target = (
+        tmp_path
+        / ".lemon-ai"
+        / "lemon-agent"
+        / "apps"
+        / "desktop"
+        / "release"
+        / "win-unpacked"
+        / "Lemon AI.exe"
+    )
+
+    monkeypatch.setattr(gu, "_read_windows_shortcut_target", lambda path: str(target))
+
+    assert gu._windows_shortcut_owned(shortcut, tmp_path / ".lemon-ai") is True
+
+
+def test_windows_known_folder_lookup_uses_unbounded_modern_api():
+    source = Path(gu.__file__).read_text(encoding="utf-8")
+
+    assert "SHGetKnownFolderPath" in source
+    assert "SHGetFolderPathW" not in source
+    assert "MAX_PATH" not in source
+
+
+def test_windows_shortcut_target_probe_uses_encoded_script_and_env_path(
+    tmp_path, monkeypatch
+):
+    shortcut = tmp_path / "Lemon AI $(hostile) Đặc biệt.lnk"
+    expected_target = "C:\\Program Files\\Lemon AI\\Ứng dụng Lemon\\Lemon AI.exe"
+    encoded_target = base64.b64encode(expected_target.encode("utf-8")).decode("ascii")
+    calls = []
+
+    class Result:
+        def __init__(self) -> None:
+            self.returncode = 0
+            self.stdout = f"{encoded_target}\n"
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        return Result()
+
+    monkeypatch.setattr(gu.sys, "platform", "win32")
+    monkeypatch.setattr(gu.subprocess, "run", fake_run)
+
+    assert gu._read_windows_shortcut_target(shortcut) == expected_target
+    args, kwargs = calls[0]
+    assert args[:5] == [
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-EncodedCommand",
+    ]
+    decoded = gu.base64.b64decode(args[5]).decode("utf-16le")
+    assert "$env:LEMON_AI_SHORTCUT_PATH" in decoded
+    assert "OutputEncoding" in decoded
+    assert (
+        "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($l.TargetPath))"
+        in decoded
+    )
+    assert str(shortcut) not in args
+    assert kwargs["env"]["LEMON_AI_SHORTCUT_PATH"] == str(shortcut)
+    assert kwargs["encoding"] == "utf-8"
+    assert kwargs["timeout"] == 5
+
+
+@pytest.mark.parametrize("stdout", ["", "not base64"])
+def test_windows_shortcut_target_probe_returns_none_for_malformed_stdout(
+    tmp_path, monkeypatch, stdout
+):
+    class Result:
+        returncode = 0
+
+        def __init__(self) -> None:
+            self.stdout = stdout
+
+    monkeypatch.setattr(gu.sys, "platform", "win32")
+    monkeypatch.setattr(gu.subprocess, "run", lambda *args, **kwargs: Result())
+
+    assert gu._read_windows_shortcut_target(tmp_path / "Lemon AI.lnk") is None
+
+
+@pytest.mark.windows_only
+@pytest.mark.parametrize("csidl", [gu.CSIDL_DESKTOPDIRECTORY, gu.CSIDL_PROGRAMS])
+def test_windows_known_folder_path_resolves_with_system_api(tmp_path, csidl):
+    fallback = tmp_path / "known-folder-fallback"
+
+    resolved = gu._windows_known_folder_path(csidl, fallback)
+
+    assert resolved != fallback
+    assert resolved.is_absolute()
+
+
+@pytest.mark.windows_only
+def test_windows_shortcut_target_probe_reads_unicode_target(tmp_path):
+    target_dir = tmp_path / "Ứng dụng Lemon"
+    target_dir.mkdir()
+    target = target_dir / "Lemon AI.exe"
+    shutil.copy2(sys.executable, target)
+    shortcut = tmp_path / "Lemon AI.lnk"
+    _create_windows_shortcut(shortcut, target)
+
+    assert gu._read_windows_shortcut_target(shortcut) == str(target)
+
+
 @pytest.mark.windows_only
 def test_windows_packaged_gui_paths_include_legacy_for_explicit_migration(
     tmp_path, monkeypatch
@@ -383,3 +691,127 @@ def test_uninstall_args_namespace_mode_mapping():
 
     full = uninstall._UninstallArgs(mode="full")
     assert full.gui is False and full.full is True and full.yes is True
+
+
+def test_windows_uninstall_env_cleanup_keeps_lemon_aliases_for_ordinary_hermes(
+    monkeypatch,
+):
+    import hermes_cli.uninstall as uninstall
+
+    monkeypatch.delenv("HERMES_DESKTOP_HARNESS_CONFIG", raising=False)
+    fake = _FakeWinreg(
+        {
+            "HERMES_HOME": "C:\\Users\\me\\AppData\\Local\\hermes",
+            "HERMES_GIT_BASH_PATH": "C:\\Users\\me\\AppData\\Local\\hermes\\git\\cmd\\git.exe",
+            "LEMON_AI_HOME": "D:\\Lemon AI",
+            "LEMON_AI_INSTALL_RUNTIME_DIR_NAME": "lemon-agent",
+        }
+    )
+    monkeypatch.setitem(sys.modules, "winreg", fake)
+
+    removed = uninstall.remove_hermes_env_vars_windows()
+
+    assert removed == ["HERMES_HOME", "HERMES_GIT_BASH_PATH"]
+    assert "LEMON_AI_HOME" in fake.values
+    assert "LEMON_AI_INSTALL_RUNTIME_DIR_NAME" in fake.values
+
+
+def test_windows_uninstall_env_cleanup_removes_lemon_aliases_when_registry_home_matches(
+    monkeypatch,
+):
+    import hermes_cli.uninstall as uninstall
+
+    monkeypatch.delenv("HERMES_DESKTOP_HARNESS_CONFIG", raising=False)
+    monkeypatch.delenv("HERMES_DESKTOP_INTERNAL", raising=False)
+    fake = _FakeWinreg(
+        {
+            "HERMES_HOME": "D:\\Lemon AI",
+            "HERMES_GIT_BASH_PATH": "D:\\Lemon AI\\git\\cmd\\git.exe",
+            "LEMON_AI_HOME": "D:\\Lemon AI",
+            "LEMON_AI_INSTALL_RUNTIME_DIR_NAME": "lemon-agent",
+        }
+    )
+    monkeypatch.setitem(sys.modules, "winreg", fake)
+
+    removed = uninstall.remove_hermes_env_vars_windows()
+
+    assert removed == [
+        "HERMES_HOME",
+        "HERMES_GIT_BASH_PATH",
+        "LEMON_AI_HOME",
+        "LEMON_AI_INSTALL_RUNTIME_DIR_NAME",
+    ]
+    assert fake.values == {}
+
+
+def test_windows_lemon_uninstall_env_cleanup_preserves_separate_hermes_aliases(
+    monkeypatch,
+):
+    import hermes_cli.uninstall as uninstall
+
+    fake = _FakeWinreg(
+        {
+            "HERMES_HOME": "C:\\Users\\me\\AppData\\Local\\hermes",
+            "HERMES_GIT_BASH_PATH": "C:\\Users\\me\\AppData\\Local\\hermes\\git\\cmd\\git.exe",
+            "LEMON_AI_HOME": "D:\\Lemon AI",
+            "LEMON_AI_INSTALL_RUNTIME_DIR_NAME": "lemon-agent",
+        }
+    )
+    monkeypatch.setitem(sys.modules, "winreg", fake)
+
+    removed = uninstall.remove_hermes_env_vars_windows(Path("D:\\Lemon AI"))
+
+    assert removed == ["LEMON_AI_HOME", "LEMON_AI_INSTALL_RUNTIME_DIR_NAME"]
+    assert fake.values == {
+        "HERMES_HOME": "C:\\Users\\me\\AppData\\Local\\hermes",
+        "HERMES_GIT_BASH_PATH": "C:\\Users\\me\\AppData\\Local\\hermes\\git\\cmd\\git.exe",
+    }
+
+
+def test_windows_hermes_uninstall_env_cleanup_removes_system_git_alias(monkeypatch):
+    import hermes_cli.uninstall as uninstall
+
+    hermes_home = Path("C:\\Users\\me\\AppData\\Local\\hermes")
+    fake = _FakeWinreg(
+        {
+            "HERMES_HOME": str(hermes_home),
+            "HERMES_GIT_BASH_PATH": "C:\\Program Files\\Git\\cmd\\git.exe",
+        }
+    )
+    monkeypatch.setitem(sys.modules, "winreg", fake)
+
+    removed = uninstall.remove_hermes_env_vars_windows(hermes_home)
+
+    assert removed == ["HERMES_HOME", "HERMES_GIT_BASH_PATH"]
+    assert fake.values == {}
+
+
+class _FakeKey:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+class _FakeWinreg:
+    HKEY_CURRENT_USER = object()
+    KEY_READ = 1
+    KEY_WRITE = 2
+    REG_SZ = 1
+
+    def __init__(self, values: dict[str, str]):
+        self.values = dict(values)
+
+    def OpenKey(self, *args):
+        return _FakeKey()
+
+    def QueryValueEx(self, key, name):
+        if name not in self.values:
+            raise FileNotFoundError(name)
+        return self.values[name], self.REG_SZ
+
+    def DeleteValue(self, key, name):
+        if name not in self.values:
+            raise FileNotFoundError(name)
+        del self.values[name]

@@ -106,11 +106,36 @@ export function resolveDefaultDesktopHome({
 }
 
 export function shouldReadWindowsHermesHomeRegistry(identity: DesktopRuntimeIdentity): boolean {
-  return identity === HERMES_IDENTITY
+  return Boolean(resolveDesktopHomeRegistryEnvVarName(identity))
+}
+
+export function resolveDesktopHomeRegistryEnvVarName(identity: DesktopRuntimeIdentity): 'HERMES_HOME' | 'LEMON_AI_HOME' {
+  return identity === HERMES_IDENTITY ? 'HERMES_HOME' : 'LEMON_AI_HOME'
+}
+
+export function shouldPreferWindowsDesktopRegistry(identity: DesktopRuntimeIdentity): boolean {
+  return identity === LEMON_AI_IDENTITY
+}
+
+export function resolveDesktopRuntimeDirNameRegistryEnvVarName(
+  identity: DesktopRuntimeIdentity
+): 'HERMES_INSTALL_RUNTIME_DIR_NAME' | 'LEMON_AI_INSTALL_RUNTIME_DIR_NAME' {
+  return identity === HERMES_IDENTITY ? 'HERMES_INSTALL_RUNTIME_DIR_NAME' : 'LEMON_AI_INSTALL_RUNTIME_DIR_NAME'
 }
 
 function envValue(env: Record<string, string | undefined>, name: string): string {
   return (env[name] || '').trim()
+}
+
+function identityHomeEnvOverride(
+  env: Record<string, string | undefined>,
+  identity: DesktopRuntimeIdentity
+): string {
+  if (identity === HERMES_IDENTITY) {
+    return envValue(env, 'HERMES_HOME')
+  }
+
+  return envValue(env, 'LEMON_AI_HOME')
 }
 
 export function resolveDesktopHomeOverride(
@@ -123,11 +148,72 @@ export function resolveDesktopHomeOverride(
     return desktopOverride
   }
 
-  if (identity === HERMES_IDENTITY) {
-    return envValue(env, 'HERMES_HOME')
+  return identityHomeEnvOverride(env, identity)
+}
+
+export function resolveDesktopHomeOverrideWithRegistry({
+  env,
+  identity,
+  preferRegistry = false,
+  registryValue = ''
+}: {
+  env: Record<string, string | undefined>
+  identity: DesktopRuntimeIdentity
+  preferRegistry?: boolean
+  registryValue?: string | null
+}): string {
+  const desktopOverride = envValue(env, 'HERMES_DESKTOP_HOME_OVERRIDE')
+
+  if (desktopOverride) {
+    return desktopOverride
   }
 
-  return envValue(env, 'LEMON_AI_HOME')
+  const envOverride = identityHomeEnvOverride(env, identity)
+  const registryOverride = (registryValue || '').trim()
+
+  return preferRegistry ? registryOverride || envOverride : envOverride || registryOverride
+}
+
+export function resolveDesktopHomeOverrideFromWindowsRegistry({
+  env,
+  identity,
+  isWindows = false,
+  readRegistry = () => null
+}: {
+  env: Record<string, string | undefined>
+  identity: DesktopRuntimeIdentity
+  isWindows?: boolean
+  readRegistry?: (name: string) => string | null
+}): string {
+  const desktopOverride = envValue(env, 'HERMES_DESKTOP_HOME_OVERRIDE')
+  const envOverride = identityHomeEnvOverride(env, identity)
+  const preferRegistry = isWindows && shouldPreferWindowsDesktopRegistry(identity)
+
+  const registryValue =
+    isWindows &&
+    shouldReadWindowsHermesHomeRegistry(identity) &&
+    !desktopOverride &&
+    (preferRegistry || !envOverride)
+      ? readRegistry(resolveDesktopHomeRegistryEnvVarName(identity))
+      : ''
+
+  return resolveDesktopHomeOverrideWithRegistry({
+    env,
+    identity,
+    preferRegistry,
+    registryValue
+  })
+}
+
+function identityRuntimeDirNameEnvOverride(
+  env: Record<string, string | undefined>,
+  identity: DesktopRuntimeIdentity
+): string {
+  if (identity === HERMES_IDENTITY) {
+    return envValue(env, 'HERMES_INSTALL_RUNTIME_DIR_NAME')
+  }
+
+  return envValue(env, 'LEMON_AI_INSTALL_RUNTIME_DIR_NAME')
 }
 
 export function resolveDesktopRuntimeDirNameOverride(
@@ -140,11 +226,58 @@ export function resolveDesktopRuntimeDirNameOverride(
     return desktopOverride
   }
 
-  if (identity === HERMES_IDENTITY) {
-    return envValue(env, 'HERMES_INSTALL_RUNTIME_DIR_NAME')
+  return identityRuntimeDirNameEnvOverride(env, identity)
+}
+
+export function resolveDesktopRuntimeDirNameOverrideWithRegistry({
+  env,
+  identity,
+  preferRegistry = false,
+  registryValue = ''
+}: {
+  env: Record<string, string | undefined>
+  identity: DesktopRuntimeIdentity
+  preferRegistry?: boolean
+  registryValue?: string | null
+}): string {
+  const desktopOverride = envValue(env, 'HERMES_DESKTOP_RUNTIME_DIR_NAME')
+
+  if (desktopOverride) {
+    return desktopOverride
   }
 
-  return ''
+  const envOverride = identityRuntimeDirNameEnvOverride(env, identity)
+  const registryOverride = (registryValue || '').trim()
+
+  return preferRegistry ? registryOverride || envOverride : envOverride || registryOverride
+}
+
+export function resolveDesktopRuntimeDirNameOverrideFromWindowsRegistry({
+  env,
+  identity,
+  isWindows = false,
+  readRegistry = () => null
+}: {
+  env: Record<string, string | undefined>
+  identity: DesktopRuntimeIdentity
+  isWindows?: boolean
+  readRegistry?: (name: string) => string | null
+}): string {
+  const desktopOverride = envValue(env, 'HERMES_DESKTOP_RUNTIME_DIR_NAME')
+  const envOverride = identityRuntimeDirNameEnvOverride(env, identity)
+  const preferRegistry = isWindows && shouldPreferWindowsDesktopRegistry(identity)
+
+  const registryValue =
+    isWindows && !desktopOverride && (preferRegistry || !envOverride)
+      ? readRegistry(resolveDesktopRuntimeDirNameRegistryEnvVarName(identity))
+      : ''
+
+  return resolveDesktopRuntimeDirNameOverrideWithRegistry({
+    env,
+    identity,
+    preferRegistry,
+    registryValue
+  })
 }
 
 export function resolveDesktopRuntimeRoot(
@@ -178,7 +311,7 @@ export function buildDesktopRuntimeEnv({
 }): Record<string, string | undefined> {
   const runtimeDirName = path.basename(activeRuntimeRoot)
 
-  return {
+  const env: Record<string, string | undefined> = {
     HERMES_BOOTSTRAP_MARKER_NAME: identity.bootstrapMarkerName,
     HERMES_DESKTOP_HARNESS_CONFIG: harnessResourcePath || legacyHarnessConfigPath || undefined,
     HERMES_DESKTOP_HOME_OVERRIDE: hermesHome,
@@ -192,6 +325,14 @@ export function buildDesktopRuntimeEnv({
     HERMES_UPDATE_TEMP_PREFIX: identity.updateTempPrefix,
     HERMES_UPDATE_RESULT_NAME: identity.handoffResultName
   }
+
+  if (identity === LEMON_AI_IDENTITY) {
+    env.LEMON_AI_DESKTOP_INTERNAL = internalBuild ? '1' : undefined
+    env.LEMON_AI_HOME = hermesHome
+    env.LEMON_AI_INSTALL_RUNTIME_DIR_NAME = runtimeDirName
+  }
+
+  return env
 }
 
 export { HERMES_IDENTITY, LEMON_AI_IDENTITY }
