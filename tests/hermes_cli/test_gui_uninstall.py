@@ -8,6 +8,7 @@ userData) while leaving the Python agent + config/sessions/.env intact.
 
 import base64
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -404,7 +405,7 @@ def test_windows_shortcut_target_probe_reads_unicode_target(tmp_path):
     target_dir = tmp_path / "Ứng dụng Lemon"
     target_dir.mkdir()
     target = target_dir / "Lemon AI.exe"
-    target.write_bytes(b"")
+    shutil.copy2(sys.executable, target)
     shortcut = tmp_path / "Lemon AI.lnk"
     create_script = (
         "$ErrorActionPreference='Stop'; "
