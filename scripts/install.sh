@@ -88,8 +88,16 @@ PY
         && grep -Eq '"(agents|cron|messaging|terminal|webhooks)"[[:space:]]*:[[:space:]]*(true|false)' "$selected"
 }
 
+selected_internal_harness_config() {
+    if [ -n "${LEMON_AI_DESKTOP_HARNESS_CONFIG:-}" ]; then
+        printf '%s' "$LEMON_AI_DESKTOP_HARNESS_CONFIG"
+    else
+        printf '%s' "${HERMES_DESKTOP_HARNESS_CONFIG:-}"
+    fi
+}
+
 INTERNAL_DESKTOP_BUILD=false
-if [ "${HERMES_DESKTOP_INTERNAL:-}" = "1" ] || valid_internal_harness_config "${HERMES_DESKTOP_HARNESS_CONFIG:-}"; then
+if [ "${HERMES_DESKTOP_INTERNAL:-}" = "1" ] || valid_internal_harness_config "$(selected_internal_harness_config)"; then
     INTERNAL_DESKTOP_BUILD=true
 fi
 if [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
@@ -3394,7 +3402,10 @@ write_bootstrap_marker() {
         log_error "HERMES_BOOTSTRAP_MARKER_NAME must be a safe file name"
         return 1
     fi
-    case "$marker_name" in ""|*/*) marker_name=".hermes-bootstrap-complete" ;; esac
+    # Keep the safety fallback aligned with the selected product identity.
+    # Validation above normally rejects unsafe names; this guard also protects
+    # future callers that may pass an empty/path-like value here.
+    case "$marker_name" in ""|*/*) marker_name="$default_marker_name" ;; esac
     local marker_path="$INSTALL_DIR/$marker_name"
     local tmp_path="$marker_path.tmp"
 

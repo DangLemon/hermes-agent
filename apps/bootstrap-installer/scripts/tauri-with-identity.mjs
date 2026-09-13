@@ -21,6 +21,9 @@ const LEMON_TAURI_CONFIG = {
     longDescription: 'Installs Lemon AI on your machine. Drives scripts/install.ps1 (Windows) and scripts/install.sh (macOS/Linux).',
     publisher: 'Lemon Digital',
     copyright: 'Copyright © 2026 Lemon Digital',
+    macOS: {
+      signingIdentity: '-'
+    },
     icon: [
       'icons/lemon-32x32.png',
       'icons/lemon-128x128.png',

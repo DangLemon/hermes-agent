@@ -303,6 +303,69 @@ test('resolveBootstrapSourceRepository defaults an internal harness to the Lemon
   }
 })
 
+test('resolveBootstrapSourceRepository falls back to the legacy selector when the Lemon selector is blank', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lemon-source-repo-env-'))
+
+  try {
+    const legacyHarness = path.join(tempRoot, 'legacy-harness.json')
+    fs.writeFileSync(
+      legacyHarness,
+      JSON.stringify({ schemaVersion: 1, profile: 'internal', sourceRepository: 'ExampleOrg/legacy-agent' }),
+      'utf8'
+    )
+
+    assert.equal(
+      resolveBootstrapSourceRepository({
+        resourcesPath: null,
+        env: {
+          LEMON_AI_DESKTOP_HARNESS_CONFIG: ' \t ',
+          HERMES_DESKTOP_HARNESS_CONFIG: legacyHarness
+        }
+      }),
+      'ExampleOrg/legacy-agent'
+    )
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test('resolveBootstrapSourceRepository does not fall back when a nonblank Lemon selector is invalid', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lemon-source-repo-precedence-'))
+
+  try {
+    const lemonHarness = path.join(tempRoot, 'lemon-harness.json')
+    const legacyHarness = path.join(tempRoot, 'legacy-harness.json')
+    fs.writeFileSync(
+      lemonHarness,
+      JSON.stringify({
+        schemaVersion: 1,
+        profile: 'internal',
+        sourceRepository: 'https://github.com/DangLemon/hermes-agent'
+      }),
+      'utf8'
+    )
+    fs.writeFileSync(
+      legacyHarness,
+      JSON.stringify({ schemaVersion: 1, profile: 'internal', sourceRepository: 'ExampleOrg/legacy-agent' }),
+      'utf8'
+    )
+
+    assert.throws(
+      () =>
+        resolveBootstrapSourceRepository({
+          resourcesPath: null,
+          env: {
+            LEMON_AI_DESKTOP_HARNESS_CONFIG: lemonHarness,
+            HERMES_DESKTOP_HARNESS_CONFIG: legacyHarness
+          }
+        }),
+      /sourceRepository/
+    )
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
 test('resolveInstallScript prefers a cached script without touching the network', async () => {
   const home = mkTmpHome()
 

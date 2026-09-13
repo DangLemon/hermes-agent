@@ -32,6 +32,7 @@ function installDesktopMock(state: DesktopBootstrapState) {
       return () => bootstrapListeners.delete(listener)
     }),
     continueBootstrapLocal: vi.fn().mockResolvedValue({ ok: true }),
+    getRecentLogs: vi.fn().mockResolvedValue({ path: '/Users/me/.lemon-ai/logs/lemon-ai-desktop.log', lines: [] }),
     probeConnectionConfig: vi.fn(),
     testConnectionConfig: vi.fn(),
     applyConnectionConfig: vi.fn(),
@@ -104,6 +105,15 @@ describe('DesktopInstallOverlay first-run setup', () => {
     expect(screen.getByText('Install Hermes locally')).toBeTruthy()
     expect(screen.queryByText(/steps complete/i)).toBeNull()
     expect(screen.queryByText(/Fetching installer manifest/i)).toBeNull()
+  })
+
+  it('shows the runtime-provided Lemon log path after a bootstrap failure', async () => {
+    installDesktopMock(bootstrapState({ error: 'installer failed' }))
+
+    render(<DesktopInstallOverlay />)
+
+    expect(await screen.findByText('/Users/me/.lemon-ai/logs/lemon-ai-desktop.log')).toBeTruthy()
+    expect(screen.queryByText(/%LOCALAPPDATA%\\hermes\\logs/)).toBeNull()
   })
 
   it('continues local bootstrap only when Install Hermes locally is selected', async () => {

@@ -22,6 +22,19 @@ test('error page names the failure and carries a Reload button', () => {
   assert.match(html, /location\.reload\(\)/)
 })
 
+test('error page uses the packaged Lemon identity and actual runtime log path', () => {
+  const html = buildRendererLoadErrorPage({
+    appName: 'Lemon AI',
+    logPath: '/Users/test/.lemon-ai/logs/lemon-ai-desktop.log',
+    repairHint: 'hermes desktop --force-build'
+  })
+
+  assert.match(html, /Lemon AI couldn.t start the desktop UI/)
+  assert.match(html, /\/Users\/test\/\.lemon-ai\/logs\/lemon-ai-desktop\.log/)
+  assert.doesNotMatch(html, /Hermes couldn.t start/)
+  assert.doesNotMatch(html, /logs\/desktop\.log/)
+})
+
 test('error page reload button targets the real renderer URL when provided', () => {
   const html = buildRendererLoadErrorPage({
     errorDescription: 'load failed',

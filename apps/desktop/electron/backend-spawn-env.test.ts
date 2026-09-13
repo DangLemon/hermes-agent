@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict'
-import fs from 'node:fs'
-import path from 'node:path'
 
 import { test } from 'vitest'
 
@@ -84,14 +82,4 @@ test('Lemon desktop runtime identity reaches backend child env', () => {
   assert.equal(env.HERMES_INSTALL_RUNTIME_DIR_NAME, 'lemon-agent')
   assert.equal(env.HERMES_UPDATE_MARKER_NAME, '.lemon-ai-update-in-progress')
   assert.equal(env.HERMES_UPDATE_PRODUCT_NAME, 'Lemon AI')
-})
-
-test('main passes desktop runtime identity to pooled and primary backend children', () => {
-  const source = fs.readFileSync(path.join(import.meta.dirname, 'main.ts'), 'utf8')
-
-  const calls = source.match(
-    /buildHermesBackendSpawnEnv\(\{[\s\S]*?runtimeEnv: desktopRuntimeEnv\(\)[\s\S]*?\n\s+\}\)/g
-  )
-
-  assert.equal(calls?.length, 2)
 })

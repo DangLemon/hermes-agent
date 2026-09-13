@@ -161,6 +161,7 @@ import { loadOrCreateInstallationId, sshOwnershipId } from './desktop-installati
 import { formatDesktopLogLine } from './desktop-log-line'
 import { resolveDesktopRemoteRoute } from './desktop-remote-route'
 import {
+  buildDesktopRuntimeEnv,
   resolveDefaultDesktopHome,
   resolveDesktopHomeOverride,
   resolveDesktopRuntimeDirNameOverride,
@@ -470,6 +471,15 @@ import { readWslWindowsClipboardImage } from './wsl-clipboard-image'
 import { resolvePickerDefaultPath, setActiveGatewayProfile, setWslBridgeProfileState } from './wsl-path-bridge'
 
 const USER_DATA_OVERRIDE = process.env.HERMES_DESKTOP_USER_DATA_DIR
+// Electron derives its default `userData` directory from the app name. The
+// internal bundle identity must be applied before the first `app.getPath`
+// call below; otherwise a Lemon build would still create its profile under a
+// Hermes-named directory even though the runtime home is branded.
+const INTERNAL_DESKTOP_PACKAGE = process.env.HERMES_DESKTOP_INTERNAL_PACKAGE === '1'
+
+if (INTERNAL_DESKTOP_PACKAGE) {
+  app.setName('Lemon AI')
+}
 
 if (USER_DATA_OVERRIDE) {
   const resolvedUserData = path.resolve(USER_DATA_OVERRIDE)
@@ -778,8 +788,6 @@ const INTERNAL_DESKTOP_HARNESS = initializeInternalDesktopHarness({
     Boolean(process.env['LEMON_AI_DESKTOP_HARNESS_CONFIG'] || process.env['HERMES_DESKTOP_HARNESS_CONFIG'])
 })
 
-const INTERNAL_DESKTOP_PACKAGE = process.env.HERMES_DESKTOP_INTERNAL_PACKAGE === '1'
-
 const INTERNAL_DESKTOP_BUILD = resolveInternalDesktopBuild({
   internalPackage: INTERNAL_DESKTOP_PACKAGE,
   internalHarnessRequested: INTERNAL_DESKTOP_HARNESS.requested
@@ -884,23 +892,14 @@ const HANDOFF_RESULT_OPTIONS = Object.freeze({
 })
 
 function desktopRuntimeEnv() {
-  const runtimeDirName = path.basename(ACTIVE_HERMES_ROOT)
-
-  return {
-    HERMES_BOOTSTRAP_MARKER_NAME: DESKTOP_RUNTIME_IDENTITY.bootstrapMarkerName,
-    HERMES_DESKTOP_HARNESS_CONFIG:
-      INTERNAL_DESKTOP_HARNESS.resourcePath || process.env['HERMES_DESKTOP_HARNESS_CONFIG'] || undefined,
-    HERMES_DESKTOP_HOME_OVERRIDE: HERMES_HOME,
-    HERMES_DESKTOP_INTERNAL: INTERNAL_DESKTOP_BUILD ? '1' : undefined,
-    HERMES_DESKTOP_RUNTIME_DIR_NAME: runtimeDirName,
-    HERMES_HOME,
-    HERMES_INSTALL_RUNTIME_DIR_NAME: runtimeDirName,
-    HERMES_UPDATE_HANDOFF_LOG_NAME: DESKTOP_RUNTIME_IDENTITY.updateHandoffLogName,
-    HERMES_UPDATE_MARKER_NAME: DESKTOP_RUNTIME_IDENTITY.updateMarkerName,
-    HERMES_UPDATE_PRODUCT_NAME: DESKTOP_RUNTIME_IDENTITY.appName,
-    HERMES_UPDATE_TEMP_PREFIX: DESKTOP_RUNTIME_IDENTITY.updateTempPrefix,
-    HERMES_UPDATE_RESULT_NAME: DESKTOP_RUNTIME_IDENTITY.handoffResultName
-  }
+  return buildDesktopRuntimeEnv({
+    activeRuntimeRoot: ACTIVE_HERMES_ROOT,
+    harnessResourcePath: INTERNAL_DESKTOP_HARNESS.resourcePath,
+    hermesHome: HERMES_HOME,
+    identity: DESKTOP_RUNTIME_IDENTITY,
+    internalBuild: INTERNAL_DESKTOP_BUILD,
+    legacyHarnessConfigPath: process.env['HERMES_DESKTOP_HARNESS_CONFIG']
+  })
 }
 
 async function seedInternalDesktopInitialProvider(backend, profile) {
@@ -14805,9 +14804,11 @@ function createWindow() {
             `${details?.errorCode === undefined ? '' : ` code=${String(details.errorCode)}`}`
         )
         void loadRendererLoadErrorPage(mainWindow, {
+          appName: DESKTOP_RUNTIME_IDENTITY.appName,
           errorCode: details?.errorCode,
           url: details?.url,
           errorDescription: 'The desktop renderer failed to load repeatedly after the update.',
+          logPath: DESKTOP_LOG_PATH,
           repairHint: 'hermes desktop --force-build',
           reloadUrl: DEV_SERVER || pathToFileURL(resolveRendererIndex()).toString()
         })
@@ -14841,8 +14842,10 @@ function createWindow() {
         `(${tornAssets.length} missing asset(s)); loading visible repair page instead of a white screen`
     )
     void loadRendererLoadErrorPage(mainWindow, {
+      appName: DESKTOP_RUNTIME_IDENTITY.appName,
       errorCode: 'ERR_FILE_NOT_FOUND',
       errorDescription: `The desktop renderer bundle is incomplete after the last update (${tornAssets.length} missing file(s)).`,
+      logPath: DESKTOP_LOG_PATH,
       missingAssets: tornAssets,
       repairHint: 'hermes desktop --force-build',
       reloadUrl: pathToFileURL(rendererIndex).toString()

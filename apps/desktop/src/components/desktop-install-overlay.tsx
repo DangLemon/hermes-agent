@@ -278,6 +278,7 @@ export function DesktopInstallOverlay({ enabled = true }: DesktopInstallOverlayP
   const [cancelling, setCancelling] = useState(false)
   const [remoteOpen, setRemoteOpen] = useState(false)
   const [now, setNow] = useState(() => Date.now())
+  const [logPath, setLogPath] = useState<string | null>(null)
   const logEndRef = useRef<HTMLDivElement | null>(null)
 
   // Tick once a second while a bootstrap is in flight so running steps show a
@@ -342,6 +343,41 @@ export function DesktopInstallOverlay({ enabled = true }: DesktopInstallOverlayP
       setLogOpen(true)
     }
   }, [state.error])
+
+  // The runtime owns the log location because it varies by platform, profile,
+  // and packaged identity. Never display a guessed path here: an internal
+  // Lemon AI build must show the actual Lemon path returned by Electron.
+  useEffect(() => {
+    if (!enabled || !state.error) {
+      return
+    }
+
+    const getRecentLogs = window.hermesDesktop?.getRecentLogs
+
+    if (typeof getRecentLogs !== 'function') {
+      setLogPath(null)
+
+      return
+    }
+
+    let cancelled = false
+    setLogPath(null)
+
+    void getRecentLogs()
+      .then(result => {
+        if (!cancelled && result?.path) {
+          setLogPath(result.path)
+        }
+      })
+      .catch(() => {
+        // The failure UI remains usable when an older bridge cannot resolve
+        // its log path; it simply omits the path rather than guessing one.
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [enabled, state.error])
 
   // The choice remains mounted while main hands off to local bootstrap. Once
   // a manifest/failure takes ownership (or a later repair presents a fresh
@@ -669,8 +705,13 @@ export function DesktopInstallOverlay({ enabled = true }: DesktopInstallOverlayP
           <div className="flex-shrink-0 bg-card p-4">
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs text-muted-foreground">
-                {copy.transcriptSaved}{' '}
-                <code className="font-mono text-(--ui-text-secondary)">%LOCALAPPDATA%\hermes\logs\</code>
+                {copy.transcriptSaved}
+                {logPath ? (
+                  <>
+                    {' '}
+                    <code className="font-mono text-(--ui-text-secondary)">{logPath}</code>
+                  </>
+                ) : null}
               </span>
               <div className="flex gap-2">
                 <Button

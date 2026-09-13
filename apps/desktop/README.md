@@ -1,19 +1,18 @@
-# Hermes Desktop ☤
+# Lemon AI Desktop ☤
 
 <p align="center">
-  <a href="https://github.com/NousResearch/hermes-agent/releases"><img src="https://img.shields.io/badge/Download-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-FFD700?style=for-the-badge" alt="Download"></a>
-  <a href="https://hermes-agent.nousresearch.com/docs/"><img src="https://img.shields.io/badge/Docs-hermes--agent.nousresearch.com-FFD700?style=for-the-badge" alt="Documentation"></a>
-  <a href="https://discord.gg/NousResearch"><img src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://github.com/DangLemon/hermes-agent/actions/workflows/lemon-desktop-installers.yml"><img src="https://img.shields.io/badge/Lemon%20Installers-macOS%20%C2%B7%20Windows-FFD700?style=for-the-badge" alt="Lemon AI installers"></a>
+  <a href="https://github.com/DangLemon/hermes-agent/releases"><img src="https://img.shields.io/badge/Internal%20Releases-Lemon%20AI-FFD700?style=for-the-badge" alt="Internal Lemon AI releases"></a>
   <a href="https://github.com/NousResearch/hermes-agent/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
 </p>
 
-**The native desktop app for [Hermes Agent](../../README.md) — the self-improving AI agent from [Nous Research](https://nousresearch.com).** Same agent, same skills, same memory as the CLI and gateway, in a polished native window — chat with streaming tool output, side-by-side previews, a file browser, voice, and settings, no terminal required. Available for **macOS, Windows, and Linux**.
+**The native desktop app for Lemon AI**, the company build of [Hermes Agent](../../README.md). It keeps the same agent core, skills, memory, and gateway compatibility in a native window — with streaming tool output, previews, a file browser, voice, and settings, no terminal required. Available for **macOS, Windows, and Linux**.
 
 <table>
-<tr><td><b>Chat with the full agent</b></td><td>Streaming responses, live tool activity, structured tool summaries, and the same conversation history as every other Hermes surface.</td></tr>
+<tr><td><b>Chat with the full agent</b></td><td>Streaming responses, live tool activity, structured tool summaries, and the same conversation history as compatible Hermes surfaces.</td></tr>
 <tr><td><b>Side-by-side previews</b></td><td>Render web pages, files, and tool outputs in a right-hand pane while you keep chatting.</td></tr>
 <tr><td><b>File browser</b></td><td>Explore and preview the working directory without leaving the app.</td></tr>
-<tr><td><b>Voice</b></td><td>Talk to Hermes and hear it back.</td></tr>
+<tr><td><b>Voice</b></td><td>Talk to Lemon AI and hear it back.</td></tr>
 <tr><td><b>Settings & onboarding</b></td><td>Manage providers, models, tools, and credentials from a real UI. First-run setup gets you to your first message in seconds.</td></tr>
 <tr><td><b>Stays current</b></td><td>Built-in updates pull the latest agent and rebuild the app in place.</td></tr>
 </table>
@@ -22,19 +21,19 @@
 
 ## Install
 
-### Install with Hermes (recommended)
+### Install Lemon AI (recommended)
 
-Already have the Hermes CLI? Just run:
+Already have the compatible CLI installed? Run:
 
 ```bash
 hermes desktop
 ```
 
-It builds and launches the GUI against your existing install — same config, keys, sessions, and skills. If Desktop cannot find a usable runtime or saved remote connection, first launch lets you connect to an existing Hermes gateway or install Hermes locally. Local onboarding then walks you through choosing a provider and model.
+It builds and launches the GUI against your existing install — same config, keys, sessions, and skills. If Lemon AI cannot find a usable runtime or saved remote connection, first launch lets you connect to an existing gateway or install the local runtime. Local onboarding then walks you through choosing a provider and model.
 
-### Prebuilt installers
+### Lemon AI installers
 
-Prebuilt installers are built and distributed via [the Hermes Desktop website.](https://hermes-agent.nousresearch.com/).
+The Lemon AI installer workflow is [`.github/workflows/lemon-desktop-installers.yml`](../../.github/workflows/lemon-desktop-installers.yml). Pull requests that touch Desktop packaging build verified macOS arm64 DMG and Windows x64 NSIS artifacts. A `lemon-v<version>` tag on `main` publishes those verified artifacts to a Lemon AI prerelease.
 
 ---
 
@@ -67,7 +66,7 @@ npm run dev          # Vite renderer + Electron, which boots the Python backend
 Point the app at a specific source checkout, or sandbox it away from your real config:
 
 ```bash
-# throwaway HERMES_HOME, separate Electron userData, distinct app name to avoid the single-instance lock
+# throwaway Lemon runtime home, separate Electron userData, distinct app name to avoid the single-instance lock
 ../scripts/dev-sandbox.sh npm run dev
 HERMES_DESKTOP_HERMES_ROOT=/path/to/clone npm run dev
 HERMES_HOME=/tmp/throwaway npm run dev
@@ -83,22 +82,25 @@ npm run dist:linux   # AppImage + deb + rpm
 npm run pack         # unpacked app under release/ (no installer)
 ```
 
-Installers are built and uploaded to GitHub Releases manually. macOS/Windows signing & notarization happen automatically when the relevant credentials are present in the environment (`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_*` for macOS, `WIN_CSC_*` for Windows).
+Local installer builds write artifacts under `apps/desktop/release/`. GitHub builds run through [the Lemon Desktop Installers workflow](../../.github/workflows/lemon-desktop-installers.yml), upload the macOS and Windows installer artifacts for pull requests, and publish a prerelease when a `lemon-v<version>` tag is pushed from `main`. The current CI path uses ad-hoc macOS signing and unsigned Windows artifacts unless release signing credentials are configured (`CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_*` for macOS, `WIN_CSC_*` for Windows).
 
 ### Internal Desktop Harness
 
-Internal builds are selected with `HERMES_DESKTOP_HARNESS_CONFIG` and package the validated resource as `lemon-ai-harness.json`. The editable nonsecret template for the current internal build is [`lemon-ai-desktop.config.json`](./lemon-ai-desktop.config.json).
+Internal builds use [`lemon-ai-desktop.config.json`](./lemon-ai-desktop.config.json) by default for every desktop `dev`, `pack`, `dist`, and packaged smoke-test command. The validated resource is bundled as `lemon-ai-harness.json`; `LEMON_AI_DESKTOP_HARNESS_CONFIG` can still point to another approved resource for CI or a controlled build.
 
 That manifest pins the first-launch source repository to `DangLemon/hermes-agent`. The Desktop bootstrap runner downloads `scripts/install.sh` or `scripts/install.ps1` from that repository at the build stamp ref, then passes the same repository identity to every installer stage. Ordinary builds and direct installer runs still default to `NousResearch/hermes-agent`.
 
 Keep secrets outside the manifest. The provider key is represented only as `model.api_key: ${LEMON_AI_COMPANY_API_KEY}`, and Amazon Ads OAuth client credentials are represented only as `${AMAZON_ADS_CLIENT_ID}` and `${AMAZON_ADS_CLIENT_SECRET}`. The MCP OAuth runtime uses `oauth.redirect_port`, so the Amazon callback port is stored as `oauth.redirect_port: 8000` with `oauth.redirect_uri: http://localhost:8000/auth/callback`.
 
+Internal package identity is applied at build and early Electron startup. The packaged app is named `Lemon AI`, uses app id `com.lemondigital.lemonai`, writes Electron `userData` under the Lemon AI app name, and produces installer files named `Lemon-AI-${version}-${os}-${arch}.${ext}`. The upstream `Hermes` product name in `package.json` remains the ordinary build default and is rewritten only when the internal harness is active.
+
 ### How it works
 
 The packaged app ships the Electron shell and a native React chat surface. On
-first launch it can install the Hermes Agent runtime into `HERMES_HOME`
-(`~/.hermes`, or `%LOCALAPPDATA%\hermes` on Windows), using the same layout as a
-CLI install.
+first launch it installs the Lemon AI runtime into the Lemon home
+(`~/.lemon-ai`, or `%LOCALAPPDATA%\Lemon AI` on Windows). The backend still
+receives the compatibility variable `HERMES_HOME`, whose value is this Lemon
+path, so existing CLI modules and commands continue to work.
 
 The app has three boundaries:
 
@@ -115,7 +117,7 @@ Backend resolution is an ordered ladder:
 1. `HERMES_DESKTOP_HERMES_ROOT`
 2. the current source checkout during development
 3. a completed managed install
-4. `HERMES_DESKTOP_HERMES`, or `hermes` on `PATH`
+4. `HERMES_DESKTOP_HERMES`, or the compatible CLI on `PATH`
 5. a system Python that can import the Hermes runtime
 6. the first-launch bootstrap installer
 
@@ -143,7 +145,7 @@ Cloud connections. Remote and cloud modes use the same remote-capability path;
 authentication and discovery differ, not the renderer feature model.
 
 When no usable local runtime or saved remote connection exists, the first-run
-screen offers **Connect to existing Hermes** before starting the local installer.
+screen offers **Connect to existing gateway** before starting the local installer.
 Desktop probes the gateway to discover token or OAuth authentication, requires a
 successful HTTP and WebSocket connection test, and saves the connection using
 the same encrypted Desktop configuration used by Settings. A saved remote
@@ -211,37 +213,36 @@ release-path changes.
 
 ### Troubleshooting
 
-Boot logs land in `HERMES_HOME/logs/desktop.log` (includes backend output and recent Python tracebacks) — check it first if the app reports a boot failure.
+Boot logs land in `HERMES_HOME/logs/lemon-ai-desktop.log` for the internal build (includes backend output and recent Python tracebacks) — check it first if the app reports a boot failure.
 
 **macOS / Linux:**
 
 ```bash
 # Force a clean first-launch setup
-rm "$HOME/.hermes/hermes-agent/.hermes-bootstrap-complete"
+rm "$HOME/.lemon-ai/lemon-agent/.lemon-ai-bootstrap-complete"
 # Rebuild a broken Python venv
-rm -rf "$HOME/.hermes/hermes-agent/venv"
+rm -rf "$HOME/.lemon-ai/lemon-agent/venv"
 # Reset a stuck macOS microphone prompt (macOS only)
-tccutil reset Microphone com.nousresearch.hermes
+tccutil reset Microphone com.lemondigital.lemonai
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
 # Force a clean first-launch setup
-Remove-Item "$env:LOCALAPPDATA\hermes\hermes-agent\.hermes-bootstrap-complete"
+Remove-Item "$env:LOCALAPPDATA\Lemon AI\lemon-agent\.lemon-ai-bootstrap-complete"
 # Rebuild a broken Python venv
-Remove-Item -Recurse -Force "$env:LOCALAPPDATA\hermes\hermes-agent\venv"
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Lemon AI\lemon-agent\venv"
 ```
 
-> The default Hermes home on Windows is `%LOCALAPPDATA%\hermes`. Set the `HERMES_HOME` env var if you've relocated it.
+> The Lemon AI home on Windows is `%LOCALAPPDATA%\Lemon AI`. The backend compatibility variable is still named `HERMES_HOME`; set it only when you intentionally relocate the runtime.
 
 ---
 
-## Community
+## Upstream
 
-- 💬 [Discord](https://discord.gg/NousResearch)
-- 📖 [Documentation](https://hermes-agent.nousresearch.com/docs/)
-- 🐛 [Issues](https://github.com/NousResearch/hermes-agent/issues)
+- [Hermes Agent documentation](https://hermes-agent.nousresearch.com/docs/)
+- [Hermes Agent upstream repository](https://github.com/NousResearch/hermes-agent)
 
 ---
 
@@ -249,4 +250,4 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\hermes\hermes-agent\venv"
 
 MIT — see [LICENSE](../../LICENSE).
 
-Built by [Nous Research](https://nousresearch.com).
+Built for Lemon Digital on top of [Hermes Agent](https://github.com/NousResearch/hermes-agent).

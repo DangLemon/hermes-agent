@@ -161,4 +161,37 @@ export function resolveDesktopRuntimeRoot(
   return path.join(hermesHome, runtimeDirName)
 }
 
+export function buildDesktopRuntimeEnv({
+  activeRuntimeRoot,
+  harnessResourcePath,
+  hermesHome,
+  identity,
+  internalBuild = false,
+  legacyHarnessConfigPath
+}: {
+  activeRuntimeRoot: string
+  harnessResourcePath?: string | null
+  hermesHome: string
+  identity: DesktopRuntimeIdentity
+  internalBuild?: boolean
+  legacyHarnessConfigPath?: string
+}): Record<string, string | undefined> {
+  const runtimeDirName = path.basename(activeRuntimeRoot)
+
+  return {
+    HERMES_BOOTSTRAP_MARKER_NAME: identity.bootstrapMarkerName,
+    HERMES_DESKTOP_HARNESS_CONFIG: harnessResourcePath || legacyHarnessConfigPath || undefined,
+    HERMES_DESKTOP_HOME_OVERRIDE: hermesHome,
+    HERMES_DESKTOP_INTERNAL: internalBuild ? '1' : undefined,
+    HERMES_DESKTOP_RUNTIME_DIR_NAME: runtimeDirName,
+    HERMES_HOME: hermesHome,
+    HERMES_INSTALL_RUNTIME_DIR_NAME: runtimeDirName,
+    HERMES_UPDATE_HANDOFF_LOG_NAME: identity.updateHandoffLogName,
+    HERMES_UPDATE_MARKER_NAME: identity.updateMarkerName,
+    HERMES_UPDATE_PRODUCT_NAME: identity.appName,
+    HERMES_UPDATE_TEMP_PREFIX: identity.updateTempPrefix,
+    HERMES_UPDATE_RESULT_NAME: identity.handoffResultName
+  }
+}
+
 export { HERMES_IDENTITY, LEMON_AI_IDENTITY }

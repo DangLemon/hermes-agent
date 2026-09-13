@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict'
-import fs from 'node:fs'
-import path from 'node:path'
 
 import { test } from 'vitest'
 
@@ -70,12 +68,6 @@ test('terminalScriptEnv carries Lemon desktop runtime identity into the launcher
       HERMES_UPDATE_PRODUCT_NAME: 'Lemon AI'
     }
   )
-})
-
-test('main passes desktop runtime identity to external terminal launchers', () => {
-  const source = fs.readFileSync(path.join(import.meta.dirname, 'main.ts'), 'utf8')
-
-  assert.match(source, /terminalScriptEnv\(\s*backend\.env,\s*HERMES_HOME,\s*desktopRuntimeEnv\(\)\s*\)/)
 })
 
 test('buildTerminalScript execs the resolved runtime with its env', () => {

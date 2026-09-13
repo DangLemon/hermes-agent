@@ -25,6 +25,9 @@ use tracing_appender::non_blocking::WorkerGuard;
 pub fn internal_desktop_build() -> bool {
     internal_desktop_build_for(
         std::env::var("HERMES_DESKTOP_INTERNAL").ok().as_deref(),
+        std::env::var("LEMON_AI_DESKTOP_HARNESS_CONFIG")
+            .ok()
+            .as_deref(),
         std::env::var("HERMES_DESKTOP_HARNESS_CONFIG")
             .ok()
             .as_deref(),
@@ -45,12 +48,23 @@ fn installer_brand_is_internal(brand: Option<&str>) -> bool {
 
 fn internal_desktop_build_for(
     explicit_internal: Option<&str>,
-    harness_config: Option<&str>,
+    lemon_harness_config: Option<&str>,
+    hermes_harness_config: Option<&str>,
     compiled_brand: Option<&str>,
 ) -> bool {
     if truthy_env(explicit_internal) || installer_brand_is_internal(compiled_brand) {
         return true;
     }
+
+    let harness_config = lemon_harness_config
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            hermes_harness_config
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        });
+
     harness_config
         .map(|value| valid_internal_harness_config(Path::new(value.trim())))
         .unwrap_or(false)
@@ -569,7 +583,7 @@ mod tests {
 
     #[test]
     fn compiled_lemon_installer_brand_is_internal_identity_signal() {
-        assert!(internal_desktop_build_for(None, None, Some("lemon")));
+        assert!(internal_desktop_build_for(None, None, None, Some("lemon")));
         assert_eq!(default_runtime_dir_name(true), "lemon-agent");
         assert_eq!(fallback_home_dir_name(true), ".lemon-ai");
         assert_eq!(fallback_home_dir_name(false), ".hermes");
@@ -594,12 +608,22 @@ mod tests {
             default_update_marker_name(true),
             ".lemon-ai-update-in-progress"
         );
-        assert!(!internal_desktop_build_for(None, None, Some("hermes")));
-        assert!(!internal_desktop_build_for(Some("0"), None, Some("hermes")));
+        assert!(!internal_desktop_build_for(
+            None,
+            None,
+            None,
+            Some("hermes")
+        ));
+        assert!(!internal_desktop_build_for(
+            Some("0"),
+            None,
+            None,
+            Some("hermes")
+        ));
     }
 
     #[test]
-    fn child_env_carries_lemon_identity_when_internal() {
+    fn lemon_harness_selector_uses_internal_identity_before_legacy_selector() {
         let base = std::env::temp_dir().join(format!(
             "hermes-paths-harness-{}-{}.json",
             std::process::id(),
@@ -620,8 +644,53 @@ mod tests {
         assert!(internal_desktop_build_for(
             None,
             base.to_str(),
+            Some("/missing/legacy-harness.json"),
             Some("hermes")
         ));
+        assert_eq!(
+            runtime_dir_name_for(true, None, Some("hermes-agent")),
+            "lemon-agent"
+        );
+        assert_eq!(
+            home_override_for(true, None, Some("/legacy/hermes")),
+            None,
+            "internal identity must not adopt legacy HERMES_HOME by default"
+        );
+
+        let _ = std::fs::remove_file(&base);
+    }
+
+    #[test]
+    fn legacy_harness_selector_still_uses_internal_identity() {
+        let base = std::env::temp_dir().join(format!(
+            "hermes-paths-legacy-harness-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(
+            &base,
+            r#"{
+              "schemaVersion": 1,
+              "profile": "internal",
+              "ui": {"agents": true, "cron": true, "messaging": true, "terminal": true, "webhooks": true}
+            }"#,
+        )
+        .unwrap();
+        assert!(internal_desktop_build_for(
+            None,
+            None,
+            base.to_str(),
+            Some("hermes")
+        ));
+
+        let _ = std::fs::remove_file(&base);
+    }
+
+    #[test]
+    fn child_env_carries_lemon_identity_when_internal() {
         let envs = desktop_identity_child_env_for(
             true,
             "lemon-custom".to_string(),
@@ -629,8 +698,6 @@ mod tests {
             default_update_marker_name(true).to_string(),
             product_name_for(true),
         );
-
-        let _ = std::fs::remove_file(&base);
 
         let lookup = |name: &str| {
             envs.iter()

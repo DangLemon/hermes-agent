@@ -5,7 +5,7 @@ import path from 'node:path'
 
 import { test } from 'vitest'
 
-import { resolveElectronBundleDefines } from './electron-bundle-identity.mjs'
+import { prepareElectronBundleDefines, resolveElectronBundleDefines } from './electron-bundle-identity.mjs'
 
 const packagedKey = ['process', 'env', 'HERMES_DESKTOP_IS_PACKAGED'].join('.')
 const internalPackageKey = ['process', 'env', 'HERMES_DESKTOP_INTERNAL_PACKAGE'].join('.')
@@ -68,6 +68,38 @@ test('ordinary production bundle bakes an empty internal-package identity', () =
   })
 })
 
-test('development bundle leaves package identity to the runtime environment', () => {
+test('ordinary development bundle leaves package identity to the runtime environment', () => {
   assert.deepEqual(resolveElectronBundleDefines({ env: {}, isDev: true }), {})
+})
+
+test('internal development bundle bakes Lemon identity before Electron reads userData', () => {
+  withHarnessConfig(configPath => {
+    assert.deepEqual(resolveElectronBundleDefines({ env: { LEMON_AI_DESKTOP_HARNESS_CONFIG: configPath }, isDev: true }), {
+      [internalPackageKey]: JSON.stringify('1')
+    })
+  })
+})
+
+test('clean development bundle materializes the Lemon harness for the Electron runtime', () => {
+  withHarnessConfig(configPath => {
+    const buildDir = fs.mkdtempSync(path.join(os.tmpdir(), 'electron-bundle-build-'))
+
+    try {
+      assert.deepEqual(
+        prepareElectronBundleDefines({
+          env: { LEMON_AI_DESKTOP_HARNESS_CONFIG: configPath },
+          isDev: true,
+          buildDir
+        }),
+        { [internalPackageKey]: JSON.stringify('1') }
+      )
+      assert.deepEqual(
+        JSON.parse(fs.readFileSync(path.join(buildDir, 'lemon-ai-harness.json'), 'utf8')),
+        validResource
+      )
+      assert.equal(fs.existsSync(path.join(buildDir, 'lemon-ai-harness-seed.py')), true)
+    } finally {
+      fs.rmSync(buildDir, { recursive: true, force: true })
+    }
+  })
 })

@@ -137,12 +137,16 @@ function resolveBootstrapSourceRepository({
     return packaged
   }
 
-  const selected =
+  const lemonSelected =
     typeof environ.LEMON_AI_DESKTOP_HARNESS_CONFIG === 'string'
       ? environ.LEMON_AI_DESKTOP_HARNESS_CONFIG.trim()
-      : typeof environ.HERMES_DESKTOP_HARNESS_CONFIG === 'string'
-        ? environ.HERMES_DESKTOP_HARNESS_CONFIG.trim()
-        : ''
+      : ''
+
+  const selected =
+    lemonSelected ||
+    (typeof environ.HERMES_DESKTOP_HARNESS_CONFIG === 'string'
+      ? environ.HERMES_DESKTOP_HARNESS_CONFIG.trim()
+      : '')
 
   return (selected ? readHarnessSourceRepository(path.resolve(selected)) : null) || DEFAULT_SOURCE_REPOSITORY
 }

@@ -95,7 +95,10 @@ test('electron-builder uses a schema-valid static harness resource without index
 
 test('package build script generates harness resource before Vite reads harness flags', () => {
   const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
-  assert.match(pkg.scripts.build, /write-build-stamp\.mjs && node scripts\/internal-desktop-harness\.mjs && vite build/)
+  assert.match(
+    pkg.scripts.build,
+    /write-build-stamp\.mjs && cross-env LEMON_AI_DESKTOP_HARNESS_CONFIG=\.\/lemon-ai-desktop\.config\.json node scripts\/internal-desktop-harness\.mjs && cross-env LEMON_AI_DESKTOP_HARNESS_CONFIG=\.\/lemon-ai-desktop\.config\.json vite build/
+  )
 })
 
 test('ordinary package config keeps Hermes installer metadata and assets without a selector', async () => {

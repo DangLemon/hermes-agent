@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { test } from 'vitest'
 
 import {
+  buildDesktopRuntimeEnv,
   HERMES_IDENTITY,
   LEMON_AI_IDENTITY,
   resolveDefaultDesktopHome,
@@ -13,6 +14,33 @@ import {
   resolveInternalDesktopBuild,
   shouldReadWindowsHermesHomeRegistry
 } from './desktop-runtime-identity'
+
+test('desktop runtime child env carries Lemon identity and compatibility variables', () => {
+  assert.deepEqual(
+    buildDesktopRuntimeEnv({
+      activeRuntimeRoot: '/Users/test/.lemon-ai/lemon-agent',
+      harnessResourcePath: '/Applications/Lemon AI.app/Contents/Resources/lemon-ai-harness.json',
+      hermesHome: '/Users/test/.lemon-ai',
+      identity: LEMON_AI_IDENTITY,
+      internalBuild: true,
+      legacyHarnessConfigPath: '/tmp/legacy-harness.json'
+    }),
+    {
+      HERMES_BOOTSTRAP_MARKER_NAME: '.lemon-ai-bootstrap-complete',
+      HERMES_DESKTOP_HARNESS_CONFIG: '/Applications/Lemon AI.app/Contents/Resources/lemon-ai-harness.json',
+      HERMES_DESKTOP_HOME_OVERRIDE: '/Users/test/.lemon-ai',
+      HERMES_DESKTOP_INTERNAL: '1',
+      HERMES_DESKTOP_RUNTIME_DIR_NAME: 'lemon-agent',
+      HERMES_HOME: '/Users/test/.lemon-ai',
+      HERMES_INSTALL_RUNTIME_DIR_NAME: 'lemon-agent',
+      HERMES_UPDATE_HANDOFF_LOG_NAME: 'lemon-ai-desktop-update-handoff.log',
+      HERMES_UPDATE_MARKER_NAME: '.lemon-ai-update-in-progress',
+      HERMES_UPDATE_PRODUCT_NAME: 'Lemon AI',
+      HERMES_UPDATE_TEMP_PREFIX: 'lemon-ai-update',
+      HERMES_UPDATE_RESULT_NAME: '.lemon-ai-update-result.json'
+    }
+  )
+})
 
 test('ordinary desktop runtime identity keeps the Hermes filesystem contract', () => {
   const identity = resolveDesktopRuntimeIdentity()

@@ -12,6 +12,7 @@ assert.equal(lemon.identifier, 'com.lemondigital.lemonai.setup')
 assert.equal(lemon.mainBinaryName, 'Lemon AI Setup')
 assert.equal(lemon.app.windows[0].title, 'Lemon AI Setup')
 assert.equal(lemon.bundle.publisher, 'Lemon Digital')
+assert.equal(lemon.bundle.macOS.signingIdentity, '-')
 assert.deepEqual(lemon.bundle.icon, [
   'icons/lemon-32x32.png',
   'icons/lemon-128x128.png',
@@ -25,8 +26,10 @@ assert.match(hermesManifest, /NousResearch\.Hermes\.Setup/)
 assert.match(lemonManifest, /LemonDigital\.LemonAI\.Setup/)
 assert.match(lemonManifest, /<description>Lemon AI Setup<\/description>/)
 const buildScript = readText('../src-tauri/build.rs')
+const tauriIdentity = readText('./tauri-with-identity.mjs')
 assert.match(buildScript, /HERMES_INSTALLER_BRAND/)
 assert.match(buildScript, /lemon-ai-setup\.manifest/)
+assert.match(tauriIdentity, /signingIdentity: '-'/)
 const store = readText('../src/store.ts')
 const update = readText('../src-tauri/src/update.rs')
 const posixUpdate = readText('../../../scripts/desktop-update/posix.sh')

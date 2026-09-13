@@ -374,13 +374,7 @@ fn write_bootstrap_complete_marker(install_root: &Path, pin: &Pin) -> Result<ser
     // Atomic publish (temp sibling + flush + rename), matching Electron's
     // writeFileAtomic(). hermes_is_installed() only checks existence, so a
     // partial direct write would incorrectly enable the launcher fast path.
-    let tmp_path = marker_path.with_file_name(format!(
-        "{}.tmp",
-        marker_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or(".hermes-bootstrap-complete")
-    ));
+    let tmp_path = bootstrap_marker_tmp_path(&marker_path);
     {
         let mut file = std::fs::File::create(&tmp_path).with_context(|| {
             format!(
@@ -424,6 +418,15 @@ fn write_bootstrap_complete_marker(install_root: &Path, pin: &Pin) -> Result<ser
 
     tracing::info!(path = %marker_path.display(), "bootstrap marker written");
     Ok(marker)
+}
+
+fn bootstrap_marker_tmp_path(marker_path: &Path) -> PathBuf {
+    let marker_name = marker_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_owned)
+        .unwrap_or_else(crate::paths::bootstrap_marker_name);
+    marker_path.with_file_name(format!("{marker_name}.tmp"))
 }
 
 /// Spawn the already-built desktop app, detached. Returns Err if no built app
@@ -1251,13 +1254,7 @@ mod tests {
         write_bootstrap_complete_marker(&root, &pin).expect("marker write should succeed");
 
         let marker_path = crate::paths::likely_bootstrap_marker(&root);
-        let tmp_path = marker_path.with_file_name(format!(
-            "{}.tmp",
-            marker_path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or(".hermes-bootstrap-complete")
-        ));
+        let tmp_path = bootstrap_marker_tmp_path(&marker_path);
         assert!(
             marker_path.is_file(),
             "final marker must exist after atomic publish"
@@ -1313,15 +1310,7 @@ mod tests {
             "failed write must not leave a final marker that enables the fast path"
         );
         assert!(
-            !crate::paths::likely_bootstrap_marker(&not_a_dir)
-                .with_file_name(format!(
-                    "{}.tmp",
-                    crate::paths::likely_bootstrap_marker(&not_a_dir)
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .unwrap_or(".hermes-bootstrap-complete")
-                ))
-                .exists(),
+            !bootstrap_marker_tmp_path(&crate::paths::likely_bootstrap_marker(&not_a_dir)).exists(),
             "failed write must not leave a temp marker sibling either"
         );
         let _ = std::fs::remove_dir_all(&base);
