@@ -122,11 +122,46 @@ public interface IPersistFile
     void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string pszFileName);
     void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string ppszFileName);
 }
+
+public static class ShellLinkCom
+{
+    public static IShellLinkW AsShellLinkW(object comObject)
+    {
+        return QueryInterface<IShellLinkW>(comObject);
+    }
+
+    public static IPersistFile AsPersistFile(object comObject)
+    {
+        return QueryInterface<IPersistFile>(comObject);
+    }
+
+    private static T QueryInterface<T>(object comObject)
+    {
+        IntPtr unknown = Marshal.GetIUnknownForObject(comObject);
+        IntPtr typed = IntPtr.Zero;
+        try
+        {
+            Guid iid = typeof(T).GUID;
+            Marshal.ThrowExceptionForHR(Marshal.QueryInterface(unknown, ref iid, out typed));
+            return (T)Marshal.GetTypedObjectForIUnknown(typed, typeof(T));
+        }
+        finally
+        {
+            if (typed != IntPtr.Zero)
+            {
+                Marshal.Release(typed);
+            }
+            Marshal.Release(unknown);
+        }
+    }
+}
 "@
 Add-Type -TypeDefinition $source
 $link = [Activator]::CreateInstance([ShellLink])
-([IShellLinkW]$link).SetPath($env:TEST_SHORTCUT_TARGET)
-([IPersistFile]$link).Save($env:TEST_SHORTCUT_PATH, $true)
+$shellLink = [ShellLinkCom]::AsShellLinkW($link)
+$persistFile = [ShellLinkCom]::AsPersistFile($link)
+$shellLink.SetPath($env:TEST_SHORTCUT_TARGET)
+$persistFile.Save($env:TEST_SHORTCUT_PATH, $true)
 '''
     encoded_create_script = base64.b64encode(create_script.encode("utf-16le")).decode(
         "ascii"
