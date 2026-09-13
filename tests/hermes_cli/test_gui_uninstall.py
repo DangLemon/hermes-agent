@@ -50,6 +50,114 @@ def _make_user_data(hermes_home: Path) -> None:
     (hermes_home / "sessions").mkdir()
 
 
+def _create_windows_shortcut(shortcut: Path, target: Path) -> None:
+    create_script = r'''
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new()
+$source = @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+[ComImport]
+[Guid("00021401-0000-0000-C000-000000000046")]
+public class ShellLink
+{
+}
+
+[ComImport]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+[Guid("000214F9-0000-0000-C000-000000000046")]
+public interface IShellLinkW
+{
+    void GetPath(
+        [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile,
+        int cchMaxPath,
+        IntPtr pfd,
+        uint fFlags);
+    void GetIDList(out IntPtr ppidl);
+    void SetIDList(IntPtr pidl);
+    void GetDescription(
+        [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszName,
+        int cchMaxName);
+    void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+    void GetWorkingDirectory(
+        [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszDir,
+        int cchMaxPath);
+    void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+    void GetArguments(
+        [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszArgs,
+        int cchMaxPath);
+    void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+    void GetHotkey(out short pwHotkey);
+    void SetHotkey(short wHotkey);
+    void GetShowCmd(out int piShowCmd);
+    void SetShowCmd(int iShowCmd);
+    void GetIconLocation(
+        [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszIconPath,
+        int cchIconPath,
+        out int piIcon);
+    void SetIconLocation(
+        [MarshalAs(UnmanagedType.LPWStr)] string pszIconPath,
+        int iIcon);
+    void SetRelativePath(
+        [MarshalAs(UnmanagedType.LPWStr)] string pszPathRel,
+        uint dwReserved);
+    void Resolve(IntPtr hwnd, uint fFlags);
+    void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
+}
+
+[ComImport]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+[Guid("0000010B-0000-0000-C000-000000000046")]
+public interface IPersistFile
+{
+    void GetClassID(out Guid pClassID);
+    [PreserveSig]
+    int IsDirty();
+    void Load([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, uint dwMode);
+    void Save(
+        [MarshalAs(UnmanagedType.LPWStr)] string pszFileName,
+        [MarshalAs(UnmanagedType.Bool)] bool fRemember);
+    void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string pszFileName);
+    void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string ppszFileName);
+}
+"@
+Add-Type -TypeDefinition $source
+$link = [Activator]::CreateInstance([ShellLink])
+([IShellLinkW]$link).SetPath($env:TEST_SHORTCUT_TARGET)
+([IPersistFile]$link).Save($env:TEST_SHORTCUT_PATH, $true)
+'''
+    encoded_create_script = base64.b64encode(create_script.encode("utf-16le")).decode(
+        "ascii"
+    )
+    env = {
+        **os.environ,
+        "TEST_SHORTCUT_PATH": str(shortcut),
+        "TEST_SHORTCUT_TARGET": str(target),
+    }
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-EncodedCommand",
+            encoded_create_script,
+        ],
+        check=False,
+        capture_output=True,
+        encoding="utf-8",
+        env=env,
+        timeout=20,
+    )
+    assert result.returncode == 0, (
+        "failed to create Windows shortcut with IShellLinkW fixture\n"
+        f"stdout: {result.stdout}\n"
+        f"stderr: {result.stderr}"
+    )
+
+
 def test_gui_install_summary_shape(tmp_path, monkeypatch):
     hermes_home = tmp_path / ".hermes"
     _make_agent(hermes_home)
@@ -407,42 +515,7 @@ def test_windows_shortcut_target_probe_reads_unicode_target(tmp_path):
     target = target_dir / "Lemon AI.exe"
     shutil.copy2(sys.executable, target)
     shortcut = tmp_path / "Lemon AI.lnk"
-    create_script = (
-        "$ErrorActionPreference='Stop'; "
-        "[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); "
-        "$s=New-Object -ComObject WScript.Shell; "
-        "$l=$s.CreateShortcut($env:TEST_SHORTCUT_PATH); "
-        "$l.TargetPath=$env:TEST_SHORTCUT_TARGET; "
-        "$l.Save()"
-    )
-    encoded_create_script = base64.b64encode(create_script.encode("utf-16le")).decode(
-        "ascii"
-    )
-    env = {
-        **os.environ,
-        "TEST_SHORTCUT_PATH": str(shortcut),
-        "TEST_SHORTCUT_TARGET": str(target),
-    }
-    result = subprocess.run(
-        [
-            "powershell.exe",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-EncodedCommand",
-            encoded_create_script,
-        ],
-        check=False,
-        capture_output=True,
-        encoding="utf-8",
-        env=env,
-        timeout=10,
-    )
-    assert result.returncode == 0, (
-        "failed to create Windows shortcut for COM target-probe test\n"
-        f"stdout: {result.stdout}\n"
-        f"stderr: {result.stderr}"
-    )
+    _create_windows_shortcut(shortcut, target)
 
     assert gu._read_windows_shortcut_target(shortcut) == str(target)
 
