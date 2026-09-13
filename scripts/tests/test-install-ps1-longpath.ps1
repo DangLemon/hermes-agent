@@ -263,7 +263,10 @@ Write-Host ""
 Write-Host "-- normalization is a no-op for ordinary paths --"
 
 # A profile name with a space is NOT itself a short path; nothing to expand.
-$result = Invoke-Normalization -ExtraArgs @('-Repository', 'NousResearch/hermes-agent')
+# Force the public profile here so this normalization assertion stays
+# independent of the Lemon manifest present in the fork checkout.
+$result = Invoke-Normalization -Environment @{ HERMES_INSTALLER_BRAND = 'hermes' } `
+    -ExtraArgs @('-Repository', 'NousResearch/hermes-agent')
 Assert-Equal -Expected 0 -Actual $result.ExitCode -Label "long paths: install.ps1 still reaches its early exit"
 Assert-Equal -Expected 0 -Actual $result.Rewrites.Count -Label "long paths: nothing rewritten"
 Assert-Equal -Expected $false -Actual ($result.InstallDir -match '~\d') -Label "long paths: InstallDir passes through clean"
@@ -372,6 +375,7 @@ $result = Invoke-Normalization @{
     LOCALAPPDATA = (Join-Parts @($shortProfile, 'AppData', 'Local'))
     APPDATA      = (Join-Parts @($shortProfile, 'AppData', 'Roaming'))
     USERPROFILE  = $shortProfile
+    HERMES_INSTALLER_BRAND = 'hermes'
 }
 foreach ($name in @('TEMP', 'TMP', 'LOCALAPPDATA', 'APPDATA', 'USERPROFILE')) {
     $value = Get-Rewrite $result $name
