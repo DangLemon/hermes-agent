@@ -1,8 +1,9 @@
 """Hermes Desktop (Chat GUI) uninstaller: removes only GUI state — built Electron artifacts, the packaged
 app, and the desktop's own ``userData`` — never agent source, venv, config, sessions or .env."""
 
-import os
 import base64
+import binascii
+import os
 import shutil
 import subprocess
 import sys
@@ -235,7 +236,7 @@ def _read_windows_shortcut_target(path: Path) -> "str | None":
         "if ([string]::IsNullOrWhiteSpace($p)) { exit 1 }; "
         "$s=New-Object -ComObject WScript.Shell; "
         "$l=$s.CreateShortcut($p); "
-        "[Console]::Out.Write($l.TargetPath)"
+        "[Console]::Out.Write([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($l.TargetPath)))"
     )
     encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
     env = {**os.environ, "LEMON_AI_SHORTCUT_PATH": str(path)}
@@ -262,7 +263,13 @@ def _read_windows_shortcut_target(path: Path) -> "str | None":
     if result.returncode != 0:
         return None
 
-    target = result.stdout.strip()
+    encoded_target = result.stdout.strip()
+    if not encoded_target:
+        return None
+    try:
+        target = base64.b64decode(encoded_target, validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
+        return None
     return target or None
 
 

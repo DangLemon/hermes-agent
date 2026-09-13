@@ -472,11 +472,14 @@ def test_windows_shortcut_target_probe_uses_encoded_script_and_env_path(
     tmp_path, monkeypatch
 ):
     shortcut = tmp_path / "Lemon AI $(hostile) Đặc biệt.lnk"
+    expected_target = "C:\\Program Files\\Lemon AI\\Ứng dụng Lemon\\Lemon AI.exe"
+    encoded_target = base64.b64encode(expected_target.encode("utf-8")).decode("ascii")
     calls = []
 
     class Result:
-        returncode = 0
-        stdout = "C:\\Program Files\\Lemon AI\\Lemon AI.exe\n"
+        def __init__(self) -> None:
+            self.returncode = 0
+            self.stdout = f"{encoded_target}\n"
 
     def fake_run(args, **kwargs):
         calls.append((args, kwargs))
@@ -485,9 +488,7 @@ def test_windows_shortcut_target_probe_uses_encoded_script_and_env_path(
     monkeypatch.setattr(gu.sys, "platform", "win32")
     monkeypatch.setattr(gu.subprocess, "run", fake_run)
 
-    assert gu._read_windows_shortcut_target(shortcut) == (
-        "C:\\Program Files\\Lemon AI\\Lemon AI.exe"
-    )
+    assert gu._read_windows_shortcut_target(shortcut) == expected_target
     args, kwargs = calls[0]
     assert args[:5] == [
         "powershell.exe",
@@ -499,10 +500,30 @@ def test_windows_shortcut_target_probe_uses_encoded_script_and_env_path(
     decoded = gu.base64.b64decode(args[5]).decode("utf-16le")
     assert "$env:LEMON_AI_SHORTCUT_PATH" in decoded
     assert "OutputEncoding" in decoded
+    assert (
+        "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($l.TargetPath))"
+        in decoded
+    )
     assert str(shortcut) not in args
     assert kwargs["env"]["LEMON_AI_SHORTCUT_PATH"] == str(shortcut)
     assert kwargs["encoding"] == "utf-8"
     assert kwargs["timeout"] == 5
+
+
+@pytest.mark.parametrize("stdout", ["", "not base64"])
+def test_windows_shortcut_target_probe_returns_none_for_malformed_stdout(
+    tmp_path, monkeypatch, stdout
+):
+    class Result:
+        returncode = 0
+
+        def __init__(self) -> None:
+            self.stdout = stdout
+
+    monkeypatch.setattr(gu.sys, "platform", "win32")
+    monkeypatch.setattr(gu.subprocess, "run", lambda *args, **kwargs: Result())
+
+    assert gu._read_windows_shortcut_target(tmp_path / "Lemon AI.lnk") is None
 
 
 @pytest.mark.windows_only
