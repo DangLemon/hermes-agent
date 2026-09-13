@@ -64,7 +64,12 @@ export const lemonAppBrand: AppBrand = {
   ring: '#806b00',
   sidebarForeground: '#322b29',
   urls: {
-    installer: 'https://github.com/DangLemon/hermes-agent/releases/latest',
+    // Lemon CI publishes signed/notarized-ready artifacts as prereleases
+    // (`lemon-v*`). GitHub's `/releases/latest` endpoint ignores prereleases
+    // and returns 404 until a stable release exists, which would make the
+    // bundle recovery action unusable. The releases index always resolves and
+    // exposes the current Lemon AI prerelease installer when one is available.
+    installer: 'https://github.com/DangLemon/hermes-agent/releases',
     releaseNotes: 'https://github.com/DangLemon/hermes-agent/releases'
   },
   wordmark: 'Lemon AI'

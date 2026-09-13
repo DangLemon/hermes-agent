@@ -35,7 +35,7 @@ describe('appBrandForEnv', () => {
     expect(upstreamAppBrand.urls.releaseNotes).toBe('https://github.com/NousResearch/hermes-agent/releases')
     expect(upstreamAppBrand.urls.installer).toBe('https://hermes-agent.nousresearch.com/')
     expect(lemonAppBrand.urls.releaseNotes).toBe('https://github.com/DangLemon/hermes-agent/releases')
-    expect(lemonAppBrand.urls.installer).toBe('https://github.com/DangLemon/hermes-agent/releases/latest')
+    expect(lemonAppBrand.urls.installer).toBe('https://github.com/DangLemon/hermes-agent/releases')
   })
 
   it('replaces brand tokens without changing Hermes defaults', () => {

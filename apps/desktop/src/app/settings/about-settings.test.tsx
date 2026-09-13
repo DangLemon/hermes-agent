@@ -14,7 +14,7 @@ describe('aboutSettingsLinksForBrand', () => {
 
   it('uses Lemon AI URLs for internal harness branding', () => {
     expect(aboutSettingsLinksForBrand(lemonAppBrand)).toEqual({
-      installer: 'https://github.com/DangLemon/hermes-agent/releases/latest',
+      installer: 'https://github.com/DangLemon/hermes-agent/releases',
       releaseNotes: 'https://github.com/DangLemon/hermes-agent/releases'
     })
   })
