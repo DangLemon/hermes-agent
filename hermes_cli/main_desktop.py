@@ -49,6 +49,28 @@ def _internal_desktop_build() -> bool:
     return internal_desktop_build()
 
 
+def _select_checkout_desktop_identity(desktop_dir: Path) -> None:
+    """Select this checkout's canonical Lemon harness when no selector was given.
+
+    Upstream checkouts do not carry the canonical config and keep the ordinary
+    Hermes identity.  An explicit new or legacy selector always wins, including
+    an intentionally blank or invalid value that must remain fail-closed.
+    """
+
+    selector_keys = (
+        "LEMON_AI_DESKTOP_HARNESS_CONFIG",
+        "HERMES_DESKTOP_HARNESS_CONFIG",
+    )
+    if any(key in os.environ for key in selector_keys):
+        return
+
+    canonical = desktop_dir / "lemon-ai-desktop.config.json"
+    from hermes_cli.desktop_identity import is_valid_internal_harness_path
+
+    if is_valid_internal_harness_path(canonical):
+        os.environ["LEMON_AI_DESKTOP_HARNESS_CONFIG"] = str(canonical)
+
+
 def _desktop_product_name() -> str:
     return "Lemon AI" if _internal_desktop_build() else "Hermes"
 
@@ -1831,6 +1853,8 @@ def cmd_gui(args: argparse.Namespace):
     if not (desktop_dir / "package.json").exists():
         print(f"Desktop GUI source not found at: {desktop_dir}")
         sys.exit(1)
+
+    _select_checkout_desktop_identity(desktop_dir)
 
     with contextlib.suppress(Exception):
         from hermes_logging import setup_logging as _setup_logging_gui

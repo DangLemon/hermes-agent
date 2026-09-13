@@ -19,6 +19,7 @@ import {
   modeRemovesAgent,
   modeRemovesUserData,
   resolveRemovableAppPath,
+  safeRuntimeEnvEntries,
   shouldRemoveAppBundle,
   UNINSTALL_MODES,
   uninstallArgsForMode
@@ -145,6 +146,7 @@ test('buildPosixCleanupScript waits for the PID, runs the uninstall module, remo
   assert.match(script, /seq 1 60/)
   assert.match(script, /'-m' 'hermes_cli\.uninstall' '--mode' 'gui'/)
   assert.match(script, /rm -rf '\/opt\/hermes\/linux-unpacked'/)
+  assert.match(script, /export LEMON_AI_HOME='\/home\/x\/\.hermes'/)
   assert.match(script, /export HERMES_HOME='\/home\/x\/\.hermes'/)
 })
 
@@ -175,6 +177,8 @@ test('buildPosixCleanupScript carries validated Lemon identity into detached cle
     appPath: '/Applications/Lemon AI.app',
     hermesHome: '/home/x/.lemon-ai',
     runtimeEnv: {
+      LEMON_AI_DESKTOP_INTERNAL: '1',
+      LEMON_AI_UPDATE_PRODUCT_NAME: 'Lemon AI',
       HERMES_DESKTOP_INTERNAL: '1',
       HERMES_UPDATE_PRODUCT_NAME: 'Lemon AI',
       HERMES_HOME: '/should/not/override',
@@ -182,10 +186,25 @@ test('buildPosixCleanupScript carries validated Lemon identity into detached cle
     }
   })
 
+  assert.match(script, /export LEMON_AI_DESKTOP_INTERNAL='1'/)
+  assert.match(script, /export LEMON_AI_UPDATE_PRODUCT_NAME='Lemon AI'/)
   assert.match(script, /export HERMES_DESKTOP_INTERNAL='1'/)
   assert.match(script, /export HERMES_UPDATE_PRODUCT_NAME='Lemon AI'/)
   assert.doesNotMatch(script, /should\/not\/override/)
   assert.doesNotMatch(script, /BAD-NAME/)
+})
+
+test('safeRuntimeEnvEntries preserves Lemon home and runtime overrides', () => {
+  const entries = safeRuntimeEnvEntries({
+    HERMES_DESKTOP_HOME_OVERRIDE: '/Users/dang/.lemon-ai',
+    HERMES_DESKTOP_RUNTIME_DIR_NAME: 'lemon-agent',
+    HERMES_HOME: '/should/not/be duplicated'
+  })
+
+  assert.deepEqual(entries, [
+    ['HERMES_DESKTOP_HOME_OVERRIDE', '/Users/dang/.lemon-ai'],
+    ['HERMES_DESKTOP_RUNTIME_DIR_NAME', 'lemon-agent']
+  ])
 })
 
 test('buildPosixCleanupScript omits PYTHONPATH when pythonPath is null (gui)', () => {
@@ -287,6 +306,8 @@ test('buildWindowsCleanupScript carries validated Lemon identity into detached c
     appPath: null,
     hermesHome: 'C:\\Lemon AI',
     runtimeEnv: {
+      LEMON_AI_DESKTOP_INTERNAL: '1',
+      LEMON_AI_UPDATE_PRODUCT_NAME: 'Lemon AI',
       HERMES_DESKTOP_INTERNAL: '1',
       HERMES_UPDATE_PRODUCT_NAME: 'Lemon AI',
       PYTHONPATH: 'ignored',
@@ -294,6 +315,8 @@ test('buildWindowsCleanupScript carries validated Lemon identity into detached c
     }
   })
 
+  assert.match(script, /set "LEMON_AI_DESKTOP_INTERNAL=1"/)
+  assert.match(script, /set "LEMON_AI_UPDATE_PRODUCT_NAME=Lemon AI"/)
   assert.match(script, /set "HERMES_DESKTOP_INTERNAL=1"/)
   assert.match(script, /set "HERMES_UPDATE_PRODUCT_NAME=Lemon AI"/)
   assert.doesNotMatch(script, /PYTHONPATH=ignored/)

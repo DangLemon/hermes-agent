@@ -43,3 +43,50 @@ def test_internal_desktop_build_accepts_explicit_desktop_child_signal(monkeypatc
     monkeypatch.setenv("HERMES_DESKTOP_INTERNAL", "1")
 
     assert internal_desktop_build() is True
+
+
+def test_internal_desktop_build_prefers_nonblank_lemon_selector(tmp_path):
+    valid = tmp_path / "lemon-internal.json"
+    valid.write_text(VALID, encoding="utf-8")
+
+    assert (
+        internal_desktop_build(
+            {
+                "LEMON_AI_DESKTOP_HARNESS_CONFIG": str(valid),
+                "HERMES_DESKTOP_HARNESS_CONFIG": str(tmp_path / "missing.json"),
+            }
+        )
+        is True
+    )
+
+
+def test_internal_desktop_build_blank_lemon_selector_falls_back_to_legacy(tmp_path):
+    valid = tmp_path / "legacy-internal.json"
+    valid.write_text(VALID, encoding="utf-8")
+
+    assert (
+        internal_desktop_build(
+            {
+                "LEMON_AI_DESKTOP_HARNESS_CONFIG": "  \t ",
+                "HERMES_DESKTOP_HARNESS_CONFIG": str(valid),
+            }
+        )
+        is True
+    )
+
+
+def test_internal_desktop_build_invalid_nonblank_lemon_selector_fails_closed(
+    tmp_path,
+):
+    valid_legacy = tmp_path / "legacy-internal.json"
+    valid_legacy.write_text(VALID, encoding="utf-8")
+
+    assert (
+        internal_desktop_build(
+            {
+                "LEMON_AI_DESKTOP_HARNESS_CONFIG": str(tmp_path / "missing.json"),
+                "HERMES_DESKTOP_HARNESS_CONFIG": str(valid_legacy),
+            }
+        )
+        is False
+    )

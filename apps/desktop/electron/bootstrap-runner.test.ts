@@ -11,6 +11,7 @@ import {
   cachedScriptPath,
   hasExistingGitCheckout,
   installedAgentInstallScript,
+  installerRuntimeEnv,
   installRefForStamp,
   isPinnedCommit,
   resolveBootstrapSourceRepository,
@@ -262,7 +263,7 @@ test('resolveBootstrapSourceRepository reads packaged harness sourceRepository a
     const resourcesPath = path.join(tempRoot, 'resources')
     fs.mkdirSync(resourcesPath, { recursive: true })
     fs.writeFileSync(
-      path.join(resourcesPath, 'internal-desktop-harness.json'),
+      path.join(resourcesPath, 'lemon-ai-harness.json'),
       JSON.stringify({ schemaVersion: 1, profile: 'internal', sourceRepository: 'DangLemon/hermes-agent', ui: { agents: false, cron: true, messaging: false, terminal: true, webhooks: false } }),
       'utf8'
     )
@@ -270,7 +271,7 @@ test('resolveBootstrapSourceRepository reads packaged harness sourceRepository a
     assert.equal(resolveBootstrapSourceRepository({ resourcesPath, env: {} }), 'DangLemon/hermes-agent')
 
     fs.writeFileSync(
-      path.join(resourcesPath, 'internal-desktop-harness.json'),
+      path.join(resourcesPath, 'lemon-ai-harness.json'),
       JSON.stringify({ schemaVersion: 1, profile: 'internal', sourceRepository: 'https://github.com/DangLemon/hermes-agent', ui: { agents: false, cron: true, messaging: false, terminal: true, webhooks: false } }),
       'utf8'
     )
@@ -287,7 +288,7 @@ test('resolveBootstrapSourceRepository defaults an internal harness to the Lemon
     const resourcesPath = path.join(tempRoot, 'resources')
     fs.mkdirSync(resourcesPath, { recursive: true })
     fs.writeFileSync(
-      path.join(resourcesPath, 'internal-desktop-harness.json'),
+      path.join(resourcesPath, 'lemon-ai-harness.json'),
       JSON.stringify({
         schemaVersion: 1,
         profile: 'internal',
@@ -297,6 +298,69 @@ test('resolveBootstrapSourceRepository defaults an internal harness to the Lemon
     )
 
     assert.equal(resolveBootstrapSourceRepository({ resourcesPath, env: {} }), 'DangLemon/hermes-agent')
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test('resolveBootstrapSourceRepository falls back to the legacy selector when the Lemon selector is blank', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lemon-source-repo-env-'))
+
+  try {
+    const legacyHarness = path.join(tempRoot, 'legacy-harness.json')
+    fs.writeFileSync(
+      legacyHarness,
+      JSON.stringify({ schemaVersion: 1, profile: 'internal', sourceRepository: 'ExampleOrg/legacy-agent' }),
+      'utf8'
+    )
+
+    assert.equal(
+      resolveBootstrapSourceRepository({
+        resourcesPath: null,
+        env: {
+          LEMON_AI_DESKTOP_HARNESS_CONFIG: ' \t ',
+          HERMES_DESKTOP_HARNESS_CONFIG: legacyHarness
+        }
+      }),
+      'ExampleOrg/legacy-agent'
+    )
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test('resolveBootstrapSourceRepository does not fall back when a nonblank Lemon selector is invalid', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lemon-source-repo-precedence-'))
+
+  try {
+    const lemonHarness = path.join(tempRoot, 'lemon-harness.json')
+    const legacyHarness = path.join(tempRoot, 'legacy-harness.json')
+    fs.writeFileSync(
+      lemonHarness,
+      JSON.stringify({
+        schemaVersion: 1,
+        profile: 'internal',
+        sourceRepository: 'https://github.com/DangLemon/hermes-agent'
+      }),
+      'utf8'
+    )
+    fs.writeFileSync(
+      legacyHarness,
+      JSON.stringify({ schemaVersion: 1, profile: 'internal', sourceRepository: 'ExampleOrg/legacy-agent' }),
+      'utf8'
+    )
+
+    assert.throws(
+      () =>
+        resolveBootstrapSourceRepository({
+          resourcesPath: null,
+          env: {
+            LEMON_AI_DESKTOP_HARNESS_CONFIG: lemonHarness,
+            HERMES_DESKTOP_HARNESS_CONFIG: legacyHarness
+          }
+        }),
+      /sourceRepository/
+    )
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true })
   }
@@ -385,4 +449,20 @@ test('resolveInstallScript rethrows when the 404 fallback is unavailable', async
   } finally {
     fs.rmSync(home, { recursive: true, force: true })
   }
+})
+
+test('installerRuntimeEnv carries Lemon home and runtime overrides to child scripts', () => {
+  const env = installerRuntimeEnv({
+    hermesHome: '/Users/dang/.lemon-ai',
+    desktopHarnessConfigPath: '/app/resources/internal-desktop-harness.json',
+    bootstrapMarkerName: '.lemon-ai-bootstrap-complete',
+    desktopInternal: true,
+    runtimeDirName: 'lemon-agent'
+  })
+
+  assert.equal(env.HERMES_HOME, '/Users/dang/.lemon-ai')
+  assert.equal(env.HERMES_DESKTOP_HOME_OVERRIDE, '/Users/dang/.lemon-ai')
+  assert.equal(env.HERMES_DESKTOP_RUNTIME_DIR_NAME, 'lemon-agent')
+  assert.equal(env.HERMES_DESKTOP_INTERNAL, '1')
+  assert.equal(env.HERMES_DESKTOP_HARNESS_CONFIG, '/app/resources/internal-desktop-harness.json')
 })

@@ -48,7 +48,7 @@ test('resolveExeIdentity uses Lemon resources only for a validated internal sele
     assert.deepEqual(
       resolveExeIdentity({
         desktopRoot,
-        env: { HERMES_DESKTOP_HARNESS_CONFIG: config }
+        env: { LEMON_AI_DESKTOP_HARNESS_CONFIG: config }
       }),
       {
         icon: path.join(desktopRoot, 'assets', 'lemon-icon.ico'),
@@ -67,7 +67,7 @@ test('stampExeIdentity passes the selected identity to rcedit', async () => {
 
     await stampExeIdentity(exe, {
       desktopRoot,
-      env: { HERMES_DESKTOP_HARNESS_CONFIG: config },
+      env: { LEMON_AI_DESKTOP_HARNESS_CONFIG: config },
       rcedit: async (...args) => {
         calls.push(args)
       }

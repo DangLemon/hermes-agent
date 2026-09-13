@@ -48,7 +48,7 @@ test('internal desktop HTML uses the Lemon AI title', () => {
         ui: { agents: false, cron: true, messaging: false, terminal: true, webhooks: false }
       })
     )
-    const env = { HERMES_DESKTOP_HARNESS_CONFIG: config }
+    const env = { LEMON_AI_DESKTOP_HARNESS_CONFIG: config }
 
     assert.equal(desktopHtmlTitleForEnv(env), 'Lemon AI')
     const html = transformHtml(desktopHtmlTitlePlugin(env), source)
@@ -61,7 +61,7 @@ test('internal desktop HTML uses the Lemon AI title', () => {
 })
 
 test('invalid internal harness input fails closed to the Hermes title', () => {
-  const env = { HERMES_DESKTOP_HARNESS_CONFIG: '/missing/internal.json' }
+  const env = { LEMON_AI_DESKTOP_HARNESS_CONFIG: '/missing/internal.json' }
 
   assert.equal(desktopHtmlTitleForEnv(env), 'Hermes')
   assert.doesNotMatch(transformHtml(desktopHtmlTitlePlugin(env), source), /Lemon AI/)

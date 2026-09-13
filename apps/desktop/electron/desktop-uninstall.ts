@@ -162,6 +162,7 @@ function buildPosixCleanupScript({
     '    sleep 0.5',
     '  done',
     'fi',
+    `export LEMON_AI_HOME=${q(hermesHome)}`,
     `export HERMES_HOME=${q(hermesHome)}`
   ]
 
@@ -223,6 +224,7 @@ function buildWindowsCleanupScript({
   const lines = [
     '@echo off',
     'setlocal enableextensions',
+    `set "LEMON_AI_HOME=${String(hermesHome).replace(/"/g, '')}"`,
     `set "HERMES_HOME=${String(hermesHome).replace(/"/g, '')}"`,
     `set "PID=${pid}"`
   ]
@@ -276,9 +278,21 @@ function buildWindowsCleanupScript({
 
 function safeRuntimeEnvEntries(runtimeEnv) {
   const allowedKeys = new Set([
+    'LEMON_AI_BOOTSTRAP_MARKER_NAME',
+    'LEMON_AI_DESKTOP_HARNESS_CONFIG',
+    'LEMON_AI_DESKTOP_INTERNAL',
+    'LEMON_AI_INSTALL_RUNTIME_DIR_NAME',
+    'LEMON_AI_STAGED_UPDATER_NAME',
+    'LEMON_AI_UPDATE_HANDOFF_LOG_NAME',
+    'LEMON_AI_UPDATE_MARKER_NAME',
+    'LEMON_AI_UPDATE_PRODUCT_NAME',
+    'LEMON_AI_UPDATE_RESULT_NAME',
+    'LEMON_AI_UPDATE_TEMP_PREFIX',
     'HERMES_BOOTSTRAP_MARKER_NAME',
     'HERMES_DESKTOP_HARNESS_CONFIG',
     'HERMES_DESKTOP_INTERNAL',
+    'HERMES_DESKTOP_HOME_OVERRIDE',
+    'HERMES_DESKTOP_RUNTIME_DIR_NAME',
     'HERMES_INSTALL_RUNTIME_DIR_NAME',
     'HERMES_STAGED_UPDATER_NAME',
     'HERMES_UPDATE_HANDOFF_LOG_NAME',

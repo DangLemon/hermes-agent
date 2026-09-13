@@ -161,9 +161,14 @@ import { loadOrCreateInstallationId, sshOwnershipId } from './desktop-installati
 import { formatDesktopLogLine } from './desktop-log-line'
 import { resolveDesktopRemoteRoute } from './desktop-remote-route'
 import {
+  buildDesktopRuntimeEnv,
   resolveDefaultDesktopHome,
+  resolveDesktopHomeOverride,
+  resolveDesktopRuntimeDirNameOverride,
   resolveDesktopRuntimeIdentity,
-  resolveDesktopRuntimeRoot
+  resolveDesktopRuntimeRoot,
+  resolveInternalDesktopBuild,
+  shouldReadWindowsHermesHomeRegistry
 } from './desktop-runtime-identity'
 import {
   buildPosixCleanupScript,
@@ -466,6 +471,15 @@ import { readWslWindowsClipboardImage } from './wsl-clipboard-image'
 import { resolvePickerDefaultPath, setActiveGatewayProfile, setWslBridgeProfileState } from './wsl-path-bridge'
 
 const USER_DATA_OVERRIDE = process.env.HERMES_DESKTOP_USER_DATA_DIR
+// Electron derives its default `userData` directory from the app name. The
+// internal bundle identity must be applied before the first `app.getPath`
+// call below; otherwise a Lemon build would still create its profile under a
+// Hermes-named directory even though the runtime home is branded.
+const INTERNAL_DESKTOP_PACKAGE = process.env.HERMES_DESKTOP_INTERNAL_PACKAGE === '1'
+
+if (INTERNAL_DESKTOP_PACKAGE) {
+  app.setName('Lemon AI')
+}
 
 if (USER_DATA_OVERRIDE) {
   const resolvedUserData = path.resolve(USER_DATA_OVERRIDE)
@@ -769,11 +783,18 @@ const INTERNAL_DESKTOP_HARNESS = initializeInternalDesktopHarness({
   appRoot: APP_ROOT,
   userDataPath: app.getPath('userData'),
   isWsl: IS_WSL,
-  allowBuildResource: !IS_PACKAGED && Boolean(process.env['HERMES_DESKTOP_HARNESS_CONFIG'])
+  allowBuildResource:
+    !IS_PACKAGED &&
+    Boolean(process.env['LEMON_AI_DESKTOP_HARNESS_CONFIG'] || process.env['HERMES_DESKTOP_HARNESS_CONFIG'])
+})
+
+const INTERNAL_DESKTOP_BUILD = resolveInternalDesktopBuild({
+  internalPackage: INTERNAL_DESKTOP_PACKAGE,
+  internalHarnessRequested: INTERNAL_DESKTOP_HARNESS.requested
 })
 
 const DESKTOP_RUNTIME_IDENTITY = resolveDesktopRuntimeIdentity({
-  internalHarnessRequested: INTERNAL_DESKTOP_HARNESS.active
+  internalHarnessRequested: INTERNAL_DESKTOP_BUILD
 })
 
 // HERMES_HOME — the user-facing root for desktop runtime data. The env var
@@ -804,15 +825,17 @@ function pathExists(filePath) {
 }
 
 function resolveHermesHome() {
-  if (process.env.HERMES_HOME) {
-    return normalizeHermesHomeRoot(process.env.HERMES_HOME)
+  const homeOverride = resolveDesktopHomeOverride(process['env'], DESKTOP_RUNTIME_IDENTITY)
+
+  if (homeOverride) {
+    return normalizeHermesHomeRoot(homeOverride)
   }
 
   if (USER_DATA_OVERRIDE) {
     return path.join(path.resolve(USER_DATA_OVERRIDE), DESKTOP_RUNTIME_IDENTITY.userDataHomeDirName)
   }
 
-  if (IS_WINDOWS) {
+  if (IS_WINDOWS && shouldReadWindowsHermesHomeRegistry(DESKTOP_RUNTIME_IDENTITY)) {
     // A GUI app launched from Explorer inherits the environment block captured
     // at login, so a HERMES_HOME set via `setx` AFTER login is invisible in
     // process.env even though the CLI (a fresh shell) sees it. Without this the
@@ -869,18 +892,14 @@ const HANDOFF_RESULT_OPTIONS = Object.freeze({
 })
 
 function desktopRuntimeEnv() {
-  return {
-    HERMES_BOOTSTRAP_MARKER_NAME: DESKTOP_RUNTIME_IDENTITY.bootstrapMarkerName,
-    HERMES_DESKTOP_HARNESS_CONFIG:
-      INTERNAL_DESKTOP_HARNESS.resourcePath || process.env['HERMES_DESKTOP_HARNESS_CONFIG'] || undefined,
-    HERMES_DESKTOP_INTERNAL: INTERNAL_DESKTOP_HARNESS.active ? '1' : undefined,
-    HERMES_INSTALL_RUNTIME_DIR_NAME: path.basename(ACTIVE_HERMES_ROOT),
-    HERMES_UPDATE_HANDOFF_LOG_NAME: DESKTOP_RUNTIME_IDENTITY.updateHandoffLogName,
-    HERMES_UPDATE_MARKER_NAME: DESKTOP_RUNTIME_IDENTITY.updateMarkerName,
-    HERMES_UPDATE_PRODUCT_NAME: DESKTOP_RUNTIME_IDENTITY.appName,
-    HERMES_UPDATE_TEMP_PREFIX: DESKTOP_RUNTIME_IDENTITY.updateTempPrefix,
-    HERMES_UPDATE_RESULT_NAME: DESKTOP_RUNTIME_IDENTITY.handoffResultName
-  }
+  return buildDesktopRuntimeEnv({
+    activeRuntimeRoot: ACTIVE_HERMES_ROOT,
+    harnessResourcePath: INTERNAL_DESKTOP_HARNESS.resourcePath,
+    hermesHome: HERMES_HOME,
+    identity: DESKTOP_RUNTIME_IDENTITY,
+    internalBuild: INTERNAL_DESKTOP_BUILD,
+    legacyHarnessConfigPath: process.env['HERMES_DESKTOP_HARNESS_CONFIG']
+  })
 }
 
 async function seedInternalDesktopInitialProvider(backend, profile) {
@@ -897,7 +916,9 @@ async function seedInternalDesktopInitialProvider(backend, profile) {
       seedScriptPath: INTERNAL_DESKTOP_HARNESS.seedScriptPath
     })
   } catch (error) {
-    throw new Error(`Could not seed editable Lemon AI provider: ${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(
+      `Could not seed editable Lemon AI provider: ${error instanceof Error ? error.message : String(error)}`
+    )
   }
 }
 
@@ -914,7 +935,7 @@ function resolveActiveHermesRoot(hermesHome) {
   return resolveDesktopRuntimeRoot(
     hermesHome,
     DESKTOP_RUNTIME_IDENTITY,
-    process['env'].HERMES_INSTALL_RUNTIME_DIR_NAME || ''
+    resolveDesktopRuntimeDirNameOverride(process['env'], DESKTOP_RUNTIME_IDENTITY)
   )
 }
 
@@ -1004,7 +1025,7 @@ const BOOT_FAKE_STEP_MS = (() => {
 
 const APP_NAME = process.env['HERMES_DESKTOP_APP_NAME'] || DESKTOP_RUNTIME_IDENTITY.appName
 
-const APP_COPYRIGHT = INTERNAL_DESKTOP_HARNESS.requested
+const APP_COPYRIGHT = INTERNAL_DESKTOP_BUILD
   ? 'Copyright © 2026 Lemon Digital'
   : 'Copyright © 2026 Nous Research'
 
@@ -1030,7 +1051,7 @@ const WINDOW_BUTTON_POSITION = {
 // resolveAppIcon (decoding probe): existence alone is not proof the bytes
 // decode, and an undecodable icon must never take the main process down.
 const APP_ICON_PATHS = appIconCandidates({
-  internalHarness: INTERNAL_DESKTOP_HARNESS.requested,
+  internalHarness: INTERNAL_DESKTOP_BUILD,
   isWindows: IS_WINDOWS,
   appRoot: APP_ROOT,
   resourcesPath: process.resourcesPath,
@@ -2473,7 +2494,11 @@ async function waitForUpdateToFinish() {
   if (outcome === 'timeout') {
     rememberLog('[updates] update still in progress after wait timeout; starting backend anyway')
   } else if (relaunchIntoSwappedBundle()) {
-    await advanceBootProgress('backend.update-restart', `Restarting ${DESKTOP_RUNTIME_IDENTITY.appName} to load the updated app…`, 14)
+    await advanceBootProgress(
+      'backend.update-restart',
+      `Restarting ${DESKTOP_RUNTIME_IDENTITY.appName} to load the updated app…`,
+      14
+    )
     // Park while the scheduled exit lands so this stale build never starts a
     // backend; the failsafe below only runs if the exit somehow does not.
     await new Promise(resolve => setTimeout(resolve, BUNDLE_SWAP_RELAUNCH_FAILSAFE_MS))
@@ -3424,7 +3449,11 @@ let quitConfirmedWithActiveWork = false
 // see resolveStagedUpdaterBinary for the policy and for #74836. Returns null
 // whenever no hand-off applies; callers degrade gracefully.
 function resolveUpdaterBinary() {
-  return resolveStagedUpdaterBinary(HERMES_HOME, { fileExists, isWindows: IS_WINDOWS, stagedUpdaterNames: DESKTOP_RUNTIME_IDENTITY.stagedUpdaterNames })
+  return resolveStagedUpdaterBinary(HERMES_HOME, {
+    fileExists,
+    isWindows: IS_WINDOWS,
+    stagedUpdaterNames: DESKTOP_RUNTIME_IDENTITY.stagedUpdaterNames
+  })
 }
 
 function repairMacUpdaterHelper(updater) {
@@ -4064,8 +4093,7 @@ async function applyUpdates(opts: { stopSafeBlockers?: boolean } = {}) {
 
     emitUpdateProgress({
       stage: 'restart',
-      message:
-        `Updating ${DESKTOP_RUNTIME_IDENTITY.appName} — this window will close and the updater will open. Don’t reopen ${DESKTOP_RUNTIME_IDENTITY.appName} yourself; it restarts automatically when the update finishes.`,
+      message: `Updating ${DESKTOP_RUNTIME_IDENTITY.appName} — this window will close and the updater will open. Don’t reopen ${DESKTOP_RUNTIME_IDENTITY.appName} yourself; it restarts automatically when the update finishes.`,
       percent: 100
     })
     repairMacUpdaterHelper(updater)
@@ -4376,7 +4404,8 @@ async function handOffWindowsBootstrapRecovery(reason) {
   // gentle update path. Partial or missing runtimes go through full repair.
   const updaterArgs = chooseUpdaterArgs(
     {
-      hasBootstrapMarker: fileExists(path.join(updateRoot, DESKTOP_RUNTIME_IDENTITY.bootstrapMarkerName)) ||
+      hasBootstrapMarker:
+        fileExists(path.join(updateRoot, DESKTOP_RUNTIME_IDENTITY.bootstrapMarkerName)) ||
         DESKTOP_RUNTIME_IDENTITY.legacyBootstrapMarkerNames.some(name => fileExists(path.join(updateRoot, name))),
       hasVenvHermes: fileExists(venvHermes),
       hasVenvPython: fileExists(venvPython)
@@ -4639,8 +4668,7 @@ async function applyUpdatesPosixHandoff(opts: any) {
   rememberLog(`[updates] launched posix hand-off: ${handoff.scriptPath} (branch ${branch}); quitting to hand off`)
   emitUpdateProgress({
     stage: 'restart',
-    message:
-      `Updating ${DESKTOP_RUNTIME_IDENTITY.appName} — this window will close. Don’t reopen ${DESKTOP_RUNTIME_IDENTITY.appName} yourself; it restarts automatically when the update finishes.`,
+    message: `Updating ${DESKTOP_RUNTIME_IDENTITY.appName} — this window will close. Don’t reopen ${DESKTOP_RUNTIME_IDENTITY.appName} yourself; it restarts automatically when the update finishes.`,
     percent: 100
   })
 
@@ -5288,7 +5316,10 @@ async function ensureRuntime(backend) {
       writeMarker: writeBootstrapMarker,
       desktopHarnessConfigPath: INTERNAL_DESKTOP_HARNESS.resourcePath,
       bootstrapMarkerName: DESKTOP_RUNTIME_IDENTITY.bootstrapMarkerName,
+      desktopInternal: INTERNAL_DESKTOP_BUILD,
+      desktopHomeOverride: HERMES_HOME,
       legacyBootstrapMarkerNames: DESKTOP_RUNTIME_IDENTITY.legacyBootstrapMarkerNames,
+      runtimeDirName: path.basename(ACTIVE_HERMES_ROOT),
       runtimeRootDirNames: [path.basename(ACTIVE_HERMES_ROOT)]
     })
 
@@ -10715,6 +10746,7 @@ async function bootstrapSshConnectionInner(profile, sshConfig, reuseToken, sourc
     ssh = new SshConnection(
       { host: sshConfig.host, user: sshConfig.user, port: sshConfig.port, keyPath: sshConfig.keyPath },
       {
+        controlDir: path.join(HERMES_HOME, 'desktop-ssh'),
         rememberLog: sshRememberLog,
         ownershipId: sshOwnershipKey(profile),
         scope,
@@ -14772,9 +14804,11 @@ function createWindow() {
             `${details?.errorCode === undefined ? '' : ` code=${String(details.errorCode)}`}`
         )
         void loadRendererLoadErrorPage(mainWindow, {
+          appName: DESKTOP_RUNTIME_IDENTITY.appName,
           errorCode: details?.errorCode,
           url: details?.url,
           errorDescription: 'The desktop renderer failed to load repeatedly after the update.',
+          logPath: DESKTOP_LOG_PATH,
           repairHint: 'hermes desktop --force-build',
           reloadUrl: DEV_SERVER || pathToFileURL(resolveRendererIndex()).toString()
         })
@@ -14808,8 +14842,10 @@ function createWindow() {
         `(${tornAssets.length} missing asset(s)); loading visible repair page instead of a white screen`
     )
     void loadRendererLoadErrorPage(mainWindow, {
+      appName: DESKTOP_RUNTIME_IDENTITY.appName,
       errorCode: 'ERR_FILE_NOT_FOUND',
       errorDescription: `The desktop renderer bundle is incomplete after the last update (${tornAssets.length} missing file(s)).`,
+      logPath: DESKTOP_LOG_PATH,
       missingAssets: tornAssets,
       repairHint: 'hermes desktop --force-build',
       reloadUrl: pathToFileURL(rendererIndex).toString()

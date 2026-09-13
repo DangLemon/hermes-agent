@@ -410,7 +410,7 @@ mac_swap() {
         DONE_NOTE="Update complete, but the new app could not be installed; the previous version was restored. Run the update again."
         log "WARNING: bundle install failed; rolled back to the previous app"
       else
-        FINAL_CODE=7 FINAL_MSG="The update finished but installing the new app failed and the previous app could not be restored. Reinstall Hermes (the rebuilt app is at $rebuilt)."
+        FINAL_CODE=7 FINAL_MSG="The update finished but installing the new app failed and the previous app could not be restored. Reinstall $PRODUCT_NAME (the rebuilt app is at $rebuilt)."
         log "ERROR: bundle install failed AND rollback failed"
       fi
     else

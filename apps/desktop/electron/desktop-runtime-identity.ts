@@ -77,6 +77,16 @@ export function resolveDesktopRuntimeIdentity({
   return internalHarnessRequested ? LEMON_AI_IDENTITY : HERMES_IDENTITY
 }
 
+export function resolveInternalDesktopBuild({
+  internalPackage = false,
+  internalHarnessRequested = false
+}: {
+  internalPackage?: boolean
+  internalHarnessRequested?: boolean
+} = {}): boolean {
+  return internalPackage || internalHarnessRequested
+}
+
 export function resolveDefaultDesktopHome({
   homeDir,
   identity,
@@ -95,6 +105,48 @@ export function resolveDefaultDesktopHome({
   return path.join(homeDir, identity.posixHomeDirName)
 }
 
+export function shouldReadWindowsHermesHomeRegistry(identity: DesktopRuntimeIdentity): boolean {
+  return identity === HERMES_IDENTITY
+}
+
+function envValue(env: Record<string, string | undefined>, name: string): string {
+  return (env[name] || '').trim()
+}
+
+export function resolveDesktopHomeOverride(
+  env: Record<string, string | undefined>,
+  identity: DesktopRuntimeIdentity
+): string {
+  const desktopOverride = envValue(env, 'HERMES_DESKTOP_HOME_OVERRIDE')
+
+  if (desktopOverride) {
+    return desktopOverride
+  }
+
+  if (identity === HERMES_IDENTITY) {
+    return envValue(env, 'HERMES_HOME')
+  }
+
+  return envValue(env, 'LEMON_AI_HOME')
+}
+
+export function resolveDesktopRuntimeDirNameOverride(
+  env: Record<string, string | undefined>,
+  identity: DesktopRuntimeIdentity
+): string {
+  const desktopOverride = envValue(env, 'HERMES_DESKTOP_RUNTIME_DIR_NAME')
+
+  if (desktopOverride) {
+    return desktopOverride
+  }
+
+  if (identity === HERMES_IDENTITY) {
+    return envValue(env, 'HERMES_INSTALL_RUNTIME_DIR_NAME')
+  }
+
+  return ''
+}
+
 export function resolveDesktopRuntimeRoot(
   hermesHome: string,
   identity: DesktopRuntimeIdentity,
@@ -103,10 +155,43 @@ export function resolveDesktopRuntimeRoot(
   const runtimeDirName = runtimeDirNameOverride.trim() || identity.runtimeRootDirName
 
   if (runtimeDirName === '.' || runtimeDirName === '..' || runtimeDirName.includes('/') || runtimeDirName.includes('\\')) {
-    throw new Error('HERMES_INSTALL_RUNTIME_DIR_NAME must be a directory name')
+    throw new Error('runtime directory override must be a directory name')
   }
 
   return path.join(hermesHome, runtimeDirName)
+}
+
+export function buildDesktopRuntimeEnv({
+  activeRuntimeRoot,
+  harnessResourcePath,
+  hermesHome,
+  identity,
+  internalBuild = false,
+  legacyHarnessConfigPath
+}: {
+  activeRuntimeRoot: string
+  harnessResourcePath?: string | null
+  hermesHome: string
+  identity: DesktopRuntimeIdentity
+  internalBuild?: boolean
+  legacyHarnessConfigPath?: string
+}): Record<string, string | undefined> {
+  const runtimeDirName = path.basename(activeRuntimeRoot)
+
+  return {
+    HERMES_BOOTSTRAP_MARKER_NAME: identity.bootstrapMarkerName,
+    HERMES_DESKTOP_HARNESS_CONFIG: harnessResourcePath || legacyHarnessConfigPath || undefined,
+    HERMES_DESKTOP_HOME_OVERRIDE: hermesHome,
+    HERMES_DESKTOP_INTERNAL: internalBuild ? '1' : undefined,
+    HERMES_DESKTOP_RUNTIME_DIR_NAME: runtimeDirName,
+    HERMES_HOME: hermesHome,
+    HERMES_INSTALL_RUNTIME_DIR_NAME: runtimeDirName,
+    HERMES_UPDATE_HANDOFF_LOG_NAME: identity.updateHandoffLogName,
+    HERMES_UPDATE_MARKER_NAME: identity.updateMarkerName,
+    HERMES_UPDATE_PRODUCT_NAME: identity.appName,
+    HERMES_UPDATE_TEMP_PREFIX: identity.updateTempPrefix,
+    HERMES_UPDATE_RESULT_NAME: identity.handoffResultName
+  }
 }
 
 export { HERMES_IDENTITY, LEMON_AI_IDENTITY }

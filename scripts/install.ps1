@@ -171,7 +171,11 @@ function Test-InternalHarnessConfig {
     # packaged resource; direct script invocations can use the same frozen
     # schema as a fallback.  Invalid or unrelated files stay ordinary Hermes.
     if ($env:HERMES_DESKTOP_INTERNAL -eq "1") { return $true }
-    $selected = [string]$env:HERMES_DESKTOP_HARNESS_CONFIG
+    $selected = if (-not [string]::IsNullOrWhiteSpace([string]$env:LEMON_AI_DESKTOP_HARNESS_CONFIG)) {
+        [string]$env:LEMON_AI_DESKTOP_HARNESS_CONFIG
+    } else {
+        [string]$env:HERMES_DESKTOP_HARNESS_CONFIG
+    }
     if ([string]::IsNullOrWhiteSpace($selected) -or -not (Test-Path -LiteralPath $selected -PathType Leaf)) {
         return $false
     }
@@ -386,7 +390,15 @@ $Repository = if ($Repository) {
 } else {
     "NousResearch/hermes-agent"
 }
-$RuntimeDirName = if ($env:HERMES_INSTALL_RUNTIME_DIR_NAME) { $env:HERMES_INSTALL_RUNTIME_DIR_NAME } elseif ($InternalDesktopBuild) { "lemon-agent" } else { "hermes-agent" }
+$RuntimeDirName = if ($InternalDesktopBuild -and $env:HERMES_DESKTOP_RUNTIME_DIR_NAME) {
+    $env:HERMES_DESKTOP_RUNTIME_DIR_NAME
+} elseif ((-not $InternalDesktopBuild) -and $env:HERMES_INSTALL_RUNTIME_DIR_NAME) {
+    $env:HERMES_INSTALL_RUNTIME_DIR_NAME
+} elseif ($InternalDesktopBuild) {
+    "lemon-agent"
+} else {
+    "hermes-agent"
+}
 if (-not (Test-SafeFileName $RuntimeDirName)) {
     throw "HERMES_INSTALL_RUNTIME_DIR_NAME must be a safe directory name"
 }
@@ -394,7 +406,9 @@ if ($PSBoundParameters.ContainsKey('HermesHome')) {
     $HermesHome = ConvertTo-LongPath $HermesHome
 } else {
     $HermesHome = ConvertTo-LongPath $(
-        if ($env:HERMES_HOME) {
+        if ($env:HERMES_DESKTOP_HOME_OVERRIDE) {
+            $env:HERMES_DESKTOP_HOME_OVERRIDE
+        } elseif ((-not $InternalDesktopBuild) -and $env:HERMES_HOME) {
             $env:HERMES_HOME
         } elseif ($InternalDesktopBuild) {
             "$env:LOCALAPPDATA\Lemon AI"
@@ -428,6 +442,9 @@ $script:ResolvedPathReport = @{
     normalized        = $script:NormalizedPathRewrites
     resolver          = $script:LastResolver
     temp              = $env:TEMP
+    repository        = $Repository
+    runtime_dir_name  = $RuntimeDirName
+    bootstrap_marker  = if ($InternalDesktopBuild) { ".lemon-ai-bootstrap-complete" } else { ".hermes-bootstrap-complete" }
     hermes_home       = $HermesHome
     install_dir       = $InstallDir
 }
@@ -3445,7 +3462,10 @@ function Write-BootstrapMarker {
     if (-not (Test-SafeFileName $markerName)) {
         throw "HERMES_BOOTSTRAP_MARKER_NAME must be a safe file name"
     }
-    if ([string]::IsNullOrWhiteSpace($markerName) -or $markerName.IndexOfAny([char[]]@('/', '\')) -ge 0) { $markerName = ".hermes-bootstrap-complete" }
+    # Keep the safety fallback aligned with the selected product identity.
+    # Test-SafeFileName normally rejects unsafe names; this guard also protects
+    # future callers that may pass an empty/path-like value here.
+    if ([string]::IsNullOrWhiteSpace($markerName) -or $markerName.IndexOfAny([char[]]@('/', '\')) -ge 0) { $markerName = $defaultMarkerName }
     $markerPath = Join-Path $InstallDir $markerName
     $marker = [ordered]@{
         schemaVersion = 1

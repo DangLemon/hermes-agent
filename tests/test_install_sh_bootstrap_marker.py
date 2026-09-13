@@ -11,6 +11,7 @@ asserting on the text of install.sh.
 """
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -20,7 +21,60 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 INSTALL_SH = REPO_ROOT / "scripts" / "install.sh"
 
 
-def run_write_marker(install_dir, *, commit="", branch="main"):
+def write_internal_harness_config(path):
+    path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "profile": "internal",
+                "ui": {
+                    "agents": True,
+                    "cron": True,
+                    "messaging": True,
+                    "terminal": True,
+                    "webhooks": True,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def run_manifest_trace(tmp_path, env_updates):
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path / "home")
+    env.pop("HERMES_DESKTOP_INTERNAL", None)
+    env.pop("LEMON_AI_DESKTOP_HARNESS_CONFIG", None)
+    env.pop("HERMES_DESKTOP_HARNESS_CONFIG", None)
+    env.update(env_updates)
+
+    result = subprocess.run(
+        ["bash", "-x", str(INSTALL_SH), "--manifest"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=env,
+    )
+    assignments = {}
+    for line in result.stderr.splitlines():
+        if not line.startswith("+ "):
+            continue
+        body = line[2:]
+        for name in (
+            "INTERNAL_DESKTOP_BUILD",
+            "DEFAULT_REPOSITORY",
+            "REPOSITORY",
+            "RUNTIME_DIR_NAME",
+            "DEFAULT_HERMES_HOME",
+            "HERMES_HOME",
+        ):
+            prefix = f"{name}="
+            if body.startswith(prefix):
+                assignments[name] = body[len(prefix) :]
+    return result, assignments
+
+
+def run_write_marker(install_dir, *, commit="", branch="main", internal=False):
     """Source install.sh and invoke write_bootstrap_marker in isolation.
 
     install.sh guards its own entrypoint behind MANIFEST_MODE/STAGE_NAME/main,
@@ -32,7 +86,10 @@ set -e
 INSTALL_DIR={install_dir!s}
 INSTALL_COMMIT={commit!r}
 BRANCH={branch!r}
+INTERNAL_DESKTOP_BUILD={'true' if internal else 'false'}
 # Pull in the function definitions without triggering an install.
+eval "$(sed -n '/^is_safe_file_name()/,/^}}/p' {INSTALL_SH!s})"
+eval "$(sed -n '/^log_error()/,/^}}/p' {INSTALL_SH!s})"
 eval "$(sed -n '/^write_bootstrap_marker()/,/^}}/p' {INSTALL_SH!s})"
 log_warn() {{ echo "WARN: $*" >&2; }}
 write_bootstrap_marker
@@ -90,6 +147,51 @@ def test_explicit_commit_pin_wins_over_head(tmp_path):
 
     payload = json.loads((install_dir / ".hermes-bootstrap-complete").read_text())
     assert payload["pinnedCommit"] == pinned
+
+
+def test_internal_install_uses_lemon_bootstrap_marker(tmp_path):
+    install_dir = make_checkout(tmp_path)
+
+    result = run_write_marker(install_dir, internal=True)
+
+    assert result.returncode == 0, result.stderr
+    assert (install_dir / ".lemon-ai-bootstrap-complete").is_file()
+    assert not (install_dir / ".hermes-bootstrap-complete").exists()
+
+
+def test_lemon_harness_selector_uses_lemon_install_defaults(tmp_path):
+    harness = tmp_path / "lemon-ai-desktop.config.json"
+    write_internal_harness_config(harness)
+
+    result, assignments = run_manifest_trace(
+        tmp_path,
+        {"LEMON_AI_DESKTOP_HARNESS_CONFIG": str(harness)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["protocol_version"] == 1
+    assert assignments["INTERNAL_DESKTOP_BUILD"] == "true"
+    assert assignments["DEFAULT_REPOSITORY"] == "DangLemon/hermes-agent"
+    assert assignments["REPOSITORY"] == "DangLemon/hermes-agent"
+    assert assignments["RUNTIME_DIR_NAME"] == "lemon-agent"
+    assert assignments["DEFAULT_HERMES_HOME"].endswith("/.lemon-ai")
+    assert assignments["HERMES_HOME"].endswith("/.lemon-ai")
+
+
+def test_legacy_harness_selector_still_uses_lemon_install_defaults(tmp_path):
+    harness = tmp_path / "legacy-internal-desktop.config.json"
+    write_internal_harness_config(harness)
+
+    result, assignments = run_manifest_trace(
+        tmp_path,
+        {"HERMES_DESKTOP_HARNESS_CONFIG": str(harness)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert assignments["INTERNAL_DESKTOP_BUILD"] == "true"
+    assert assignments["DEFAULT_REPOSITORY"] == "DangLemon/hermes-agent"
+    assert assignments["RUNTIME_DIR_NAME"] == "lemon-agent"
+    assert assignments["HERMES_HOME"].endswith("/.lemon-ai")
 
 
 def test_no_marker_written_when_head_cannot_be_resolved(tmp_path):

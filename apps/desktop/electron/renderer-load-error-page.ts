@@ -23,6 +23,8 @@
  */
 
 export interface RendererLoadErrorDetails {
+  /** Product identity shown in the recovery UI. */
+  appName?: string
   /** Chromium error code, e.g. -6 (ERR_FILE_NOT_FOUND) or its name. */
   errorCode?: number | string | undefined
   /** Human description of the failure, e.g. the renderer bundle is torn. */
@@ -33,6 +35,8 @@ export interface RendererLoadErrorDetails {
   missingAssets?: string[]
   /** Repair command hint, e.g. `hermes desktop --force-build`. */
   repairHint?: string
+  /** Exact runtime log path for this packaged identity. */
+  logPath?: string
   /**
    * URL to navigate to when the user clicks Reload. On a data: page
    * `location.reload()` would just re-render the error page, so recovery
@@ -102,10 +106,13 @@ export function buildRendererLoadErrorPage(details: RendererLoadErrorDetails = {
   const code =
     details.errorCode === undefined || details.errorCode === null ? '' : ` (${escapeHtml(details.errorCode)})`
 
-  const title = 'Hermes couldn\u2019t start the desktop UI'
+  const appName = escapeHtml(details.appName || 'Hermes')
+  const title = `${appName} couldn\u2019t start the desktop UI`
   const description = escapeHtml(details.errorDescription || 'The desktop renderer failed to load.')
   const url = details.url ? `<p><code>${escapeHtml(details.url)}</code></p>` : ''
-  const repair = details.repairHint ? `<p>Repair with: <code>hermes desktop --force-build</code></p>` : ''
+  const repairHint = escapeHtml(details.repairHint || 'hermes desktop --force-build')
+  const repair = details.repairHint ? `<p>Repair with: <code>${repairHint}</code></p>` : ''
+  const logPath = escapeHtml(details.logPath || 'logs/desktop.log')
 
   return `<!doctype html>
 <html lang="en">
@@ -163,8 +170,8 @@ export function buildRendererLoadErrorPage(details: RendererLoadErrorDetails = {
   ${url}
   ${missingAssetsList(details.missingAssets)}
   ${repair}
-  <p>If this keeps happening, check <code>logs/desktop.log</code> and try
-  <code>hermes desktop --force-build</code>, then restart the app.</p>
+  <p>If this keeps happening, check <code>${logPath}</code> and try
+  <code>${repairHint}</code>, then restart the app.</p>
   ${reloadButtonJs(details)}
 </main>
 </body>

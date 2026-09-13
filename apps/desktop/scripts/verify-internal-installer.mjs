@@ -12,9 +12,9 @@ import PACKAGE_JSON from '../package.json' with { type: 'json' }
 const DESKTOP_ROOT = path.resolve(import.meta.dirname, '..')
 const REPO_ROOT = path.resolve(DESKTOP_ROOT, '..', '..')
 const DEFAULT_RELEASE_ROOT = path.join(DESKTOP_ROOT, 'release')
-const DEFAULT_CANONICAL_MANIFEST = path.join(DESKTOP_ROOT, 'internal-desktop-harness.config.json')
+const DEFAULT_CANONICAL_MANIFEST = path.join(DESKTOP_ROOT, 'lemon-ai-desktop.config.json')
 const DEFAULT_GENERATED_CONFIG = path.join(DESKTOP_ROOT, 'build', 'electron-builder.generated.json')
-const DEFAULT_SEED_HELPER = path.join(DESKTOP_ROOT, 'electron', 'internal-desktop-harness-seed.py')
+const DEFAULT_SEED_HELPER = path.join(DESKTOP_ROOT, 'electron', 'lemon-ai-harness-seed.py')
 const RECEIPT_FILENAME = 'installer-receipt.json'
 
 const EXPECTED_REPOSITORY = 'DangLemon/hermes-agent'
@@ -141,8 +141,8 @@ export function resolveLayout({
     installerPath: resolvedInstallerPath,
     resourcesPath,
     binaryPath,
-    packagedManifestPath: path.join(resourcesPath, 'internal-desktop-harness.json'),
-    packagedSeedHelperPath: path.join(resourcesPath, 'internal-desktop-harness-seed.py'),
+    packagedManifestPath: path.join(resourcesPath, 'lemon-ai-harness.json'),
+    packagedSeedHelperPath: path.join(resourcesPath, 'lemon-ai-harness-seed.py'),
     stampPath: path.join(resourcesPath, 'install-stamp.json'),
     unpackedDistIndex: path.join(resourcesPath, 'app.asar.unpacked', 'dist', 'index.html'),
     nodePtyRoot: path.join(resourcesPath, 'app.asar.unpacked', 'dist', 'node_modules', 'node-pty'),
@@ -200,6 +200,11 @@ export function validateGeneratedConfig(config) {
   assertEqual(config.productName, 'Lemon AI', 'electron-builder productName')
   assertEqual(config.executableName, 'Lemon AI', 'electron-builder executableName')
   assertEqual(config.mac?.executableName, 'Lemon AI', 'electron-builder mac.executableName')
+  assertEqual(
+    config.mac?.extendInfo?.CFBundleExecutable,
+    'Lemon AI',
+    'electron-builder mac.extendInfo.CFBundleExecutable'
+  )
   assertEqual(config.appId, 'com.lemondigital.lemonai', 'electron-builder appId')
 }
 
@@ -642,7 +647,7 @@ function usage() {
     --ref <branch-or-tag> \\
     --app <release/mac-arm64/Lemon AI.app|release/win-unpacked> \\
     --installer <Lemon-AI-version-platform-arch.dmg|exe> \\
-    --canonical <internal-desktop-harness.config.json> \\
+    --canonical <lemon-ai-desktop.config.json> \\
     --builder-config <build/electron-builder.generated.json> \\
     --out <clean-output-dir>
 `

@@ -35,6 +35,7 @@
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))
 $installScript = Join-Path $repoRoot "scripts/install.ps1"
+$script:HarnessConfigPaths = @()
 
 if (-not (Test-Path $installScript)) {
     throw "Could not locate install.ps1 at $installScript"
@@ -189,10 +190,33 @@ function Invoke-Normalization {
         ExitCode   = $exitCode
         Stdout     = $stdout
         Rewrites   = $rewrites
+        Repository = $(if ($paths) { $paths.repository } else { $null })
+        RuntimeDirName = $(if ($paths) { $paths.runtime_dir_name } else { $null })
+        BootstrapMarker = $(if ($paths) { $paths.bootstrap_marker } else { $null })
         InstallDir = $(if ($paths) { $paths.install_dir } else { $null })
         HermesHome = $(if ($paths) { $paths.hermes_home } else { $null })
         LongRoot   = $(if ($paths) { $paths.long_profile_root } else { $null })
     }
+}
+
+function New-InternalHarnessConfig {
+    param([string]$Name)
+    $path = Join-Path ([System.IO.Path]::GetTempPath()) $Name
+    @'
+{
+  "schemaVersion": 1,
+  "profile": "internal",
+  "ui": {
+    "agents": true,
+    "cron": true,
+    "messaging": true,
+    "terminal": true,
+    "webhooks": true
+  }
+}
+'@ | Set-Content -LiteralPath $path -Encoding utf8
+    $script:HarnessConfigPaths += $path
+    return $path
 }
 
 function Get-Rewrite {
@@ -242,6 +266,28 @@ $result = Invoke-Normalization
 Assert-Equal -Expected 0 -Actual $result.ExitCode -Label "long paths: install.ps1 still reaches its early exit"
 Assert-Equal -Expected 0 -Actual $result.Rewrites.Count -Label "long paths: nothing rewritten"
 Assert-Equal -Expected $false -Actual ($result.InstallDir -match '~\d') -Label "long paths: InstallDir passes through clean"
+
+Write-Host ""
+Write-Host "-- Lemon harness selector uses Lemon install defaults --"
+
+$lemonHarness = New-InternalHarnessConfig "lemon-ai-harness-selector-$PID.json"
+$result = Invoke-Normalization @{ LEMON_AI_DESKTOP_HARNESS_CONFIG = $lemonHarness }
+$expectedLemonHome = "$($longRoot)${sep}AppData${sep}Local" + '\Lemon AI'
+$expectedLemonInstallDir = "$expectedLemonHome\lemon-agent"
+Assert-Equal -Expected 0 -Actual $result.ExitCode -Label "Lemon selector: install.ps1 still reaches its early exit"
+Assert-Equal -Expected "DangLemon/hermes-agent" -Actual $result.Repository -Label "Lemon selector chooses the Lemon repository"
+Assert-Equal -Expected "lemon-agent" -Actual $result.RuntimeDirName -Label "Lemon selector chooses the Lemon runtime directory"
+Assert-Equal -Expected ".lemon-ai-bootstrap-complete" -Actual $result.BootstrapMarker -Label "Lemon selector chooses the Lemon bootstrap marker"
+Assert-Equal -Expected $expectedLemonHome -Actual $result.HermesHome -Label "Lemon selector chooses the Lemon home"
+Assert-Equal -Expected $expectedLemonInstallDir -Actual $result.InstallDir -Label "Lemon selector chooses the Lemon install dir"
+
+$legacyHarness = New-InternalHarnessConfig "legacy-harness-selector-$PID.json"
+$result = Invoke-Normalization @{ HERMES_DESKTOP_HARNESS_CONFIG = $legacyHarness }
+Assert-Equal -Expected 0 -Actual $result.ExitCode -Label "legacy selector: install.ps1 still reaches its early exit"
+Assert-Equal -Expected "DangLemon/hermes-agent" -Actual $result.Repository -Label "legacy selector still chooses the Lemon repository"
+Assert-Equal -Expected "lemon-agent" -Actual $result.RuntimeDirName -Label "legacy selector still chooses the Lemon runtime directory"
+Assert-Equal -Expected ".lemon-ai-bootstrap-complete" -Actual $result.BootstrapMarker -Label "legacy selector still chooses the Lemon bootstrap marker"
+Assert-Equal -Expected $expectedLemonHome -Actual $result.HermesHome -Label "legacy selector still chooses the Lemon home"
 
 Write-Host ""
 Write-Host "-- an unresolvable profile alias is rebuilt on the long profile root --"
@@ -314,6 +360,9 @@ Assert-Equal -Expected (Join-Path $longRoot 'custom-hermes') -Actual $result.Ins
 
 # --- Summary ---------------------------------------------------------------
 Write-Host ""
+foreach ($path in $script:HarnessConfigPaths) {
+    Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+}
 if ($failures -gt 0) {
     Write-Host "FAILED: $failures assertion(s) failed" -ForegroundColor Red
     exit 1

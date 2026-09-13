@@ -157,6 +157,86 @@ def _packaged_exe_rel() -> Path:
 
 
 @pytest.mark.macos_only
+def test_default_lemon_selector_recognizes_packaged_mac_release(
+    tmp_path, monkeypatch
+):
+    config = tmp_path / "internal.json"
+    _write_internal_harness(config)
+    monkeypatch.setenv("LEMON_AI_DESKTOP_HARNESS_CONFIG", str(config))
+    monkeypatch.delenv("HERMES_DESKTOP_HARNESS_CONFIG", raising=False)
+    monkeypatch.delenv("HERMES_DESKTOP_INTERNAL", raising=False)
+    release = tmp_path / "release"
+    branded = release / "mac-arm64" / "Lemon AI.app" / "Contents" / "MacOS" / "Lemon AI"
+    _write_executable(branded)
+
+    assert main_desktop._desktop_product_name() == "Lemon AI"
+    assert main_desktop._desktop_packaged_executable_in(release) == branded
+
+
+@pytest.mark.macos_only
+def test_gui_without_selector_uses_checkout_lemon_packaging_contract(
+    tmp_path, monkeypatch
+):
+    root = _make_desktop_tree(tmp_path)
+    desktop_dir = root / "apps" / "desktop"
+    config = desktop_dir / "lemon-ai-desktop.config.json"
+    _write_internal_harness(config)
+    monkeypatch.delenv("LEMON_AI_DESKTOP_HARNESS_CONFIG", raising=False)
+    monkeypatch.delenv("HERMES_DESKTOP_HARNESS_CONFIG", raising=False)
+    monkeypatch.delenv("HERMES_DESKTOP_INTERNAL", raising=False)
+    monkeypatch.setattr(cli_main, "PROJECT_ROOT", root)
+    branded = (
+        desktop_dir
+        / "release"
+        / "mac-arm64"
+        / "Lemon AI.app"
+        / "Contents"
+        / "MacOS"
+        / "Lemon AI"
+    )
+    _write_executable(branded)
+
+    try:
+        with (
+            patch("hermes_cli.main_desktop._register_linux_desktop_entry"),
+            patch(
+                "hermes_cli.main.subprocess.run",
+                return_value=subprocess.CompletedProcess([str(branded)], 0),
+            ) as mock_run,
+            pytest.raises(SystemExit) as exc,
+        ):
+            cli_main.cmd_gui(_ns(skip_build=True))
+
+        selected = os.environ["LEMON_AI_DESKTOP_HARNESS_CONFIG"]
+        product_name = main_desktop._desktop_product_name()
+    finally:
+        os.environ.pop("LEMON_AI_DESKTOP_HARNESS_CONFIG", None)
+
+    assert exc.value.code == 0
+    assert selected == str(config)
+    assert product_name == "Lemon AI"
+    assert mock_run.call_args.args[0] == [str(branded)]
+
+
+def test_invalid_checkout_lemon_config_preserves_ordinary_identity(
+    tmp_path, monkeypatch
+):
+    desktop_dir = tmp_path / "apps" / "desktop"
+    desktop_dir.mkdir(parents=True)
+    (desktop_dir / "lemon-ai-desktop.config.json").write_text(
+        "{}", encoding="utf-8"
+    )
+    monkeypatch.delenv("LEMON_AI_DESKTOP_HARNESS_CONFIG", raising=False)
+    monkeypatch.delenv("HERMES_DESKTOP_HARNESS_CONFIG", raising=False)
+    monkeypatch.delenv("HERMES_DESKTOP_INTERNAL", raising=False)
+
+    main_desktop._select_checkout_desktop_identity(desktop_dir)
+
+    assert "LEMON_AI_DESKTOP_HARNESS_CONFIG" not in os.environ
+    assert main_desktop._desktop_product_name() == "Hermes"
+
+
+@pytest.mark.macos_only
 def test_desktop_packaged_executable_prefers_newer_lemon_ai_mac_bundle(
     tmp_path, monkeypatch
 ):

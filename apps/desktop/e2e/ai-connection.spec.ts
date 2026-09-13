@@ -9,7 +9,7 @@ import { buildAppEnv, createSandbox, launchDesktop, waitForAppReady } from './fi
 import { startMockServer } from './mock-server'
 
 const EVIDENCE_DIR = path.resolve(import.meta.dirname, '..', '..', '..', '..', 'plans', 'reports', 'ai-connection-evidence')
-const HARNESS_RESOURCE = path.resolve(import.meta.dirname, '..', 'build', 'internal-desktop-harness.json')
+const HARNESS_RESOURCE = path.resolve(import.meta.dirname, '..', 'build', 'lemon-ai-harness.json')
 const FIRST_PROMPT = 'E2E AI connection first launch'
 const RELAUNCH_PROMPT = 'E2E AI connection after relaunch'
 
@@ -116,8 +116,8 @@ test('Vietnamese AI connection routes new chats and survives relaunch', async ()
 
   writeInitialConfig(sandbox.hermesHome, initialMock.url)
   const launchValues = buildAppEnv(sandbox, {
-    HERMES_COMPANY_API_KEY: 'synthetic-company-key',
-    HERMES_DESKTOP_HARNESS_CONFIG: path.resolve(import.meta.dirname, '..', 'internal-desktop-harness.config.json')
+    LEMON_AI_COMPANY_API_KEY: 'synthetic-company-key',
+    HERMES_DESKTOP_HARNESS_CONFIG: path.resolve(import.meta.dirname, '..', 'lemon-ai-desktop.config.json')
   })
 
   try {
@@ -142,7 +142,7 @@ test('Vietnamese AI connection routes new chats and survives relaunch', async ()
     await closeBeforeRelaunch(app)
     app = null
     const relaunchValues = { ...launchValues }
-    delete relaunchValues.HERMES_COMPANY_API_KEY
+    delete relaunchValues.LEMON_AI_COMPANY_API_KEY
     ;({ app, page } = await launchDesktop(relaunchValues))
     await waitForAppReady({ app, page, sandbox, cleanup: async () => undefined }, 120_000)
     await openConnectionSettings(page)
@@ -170,7 +170,7 @@ test('unresolved upgraded profile can still open AI connection settings', async 
   writeUnresolvedConfig(sandbox.hermesHome)
 
   const launchValues = buildAppEnv(sandbox, {
-    HERMES_DESKTOP_HARNESS_CONFIG: path.resolve(import.meta.dirname, '..', 'internal-desktop-harness.config.json')
+    HERMES_DESKTOP_HARNESS_CONFIG: path.resolve(import.meta.dirname, '..', 'lemon-ai-desktop.config.json')
   })
 
   try {

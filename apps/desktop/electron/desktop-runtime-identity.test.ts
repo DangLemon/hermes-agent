@@ -3,12 +3,44 @@ import assert from 'node:assert/strict'
 import { test } from 'vitest'
 
 import {
+  buildDesktopRuntimeEnv,
   HERMES_IDENTITY,
   LEMON_AI_IDENTITY,
   resolveDefaultDesktopHome,
+  resolveDesktopHomeOverride,
+  resolveDesktopRuntimeDirNameOverride,
   resolveDesktopRuntimeIdentity,
-  resolveDesktopRuntimeRoot
+  resolveDesktopRuntimeRoot,
+  resolveInternalDesktopBuild,
+  shouldReadWindowsHermesHomeRegistry
 } from './desktop-runtime-identity'
+
+test('desktop runtime child env carries Lemon identity and compatibility variables', () => {
+  assert.deepEqual(
+    buildDesktopRuntimeEnv({
+      activeRuntimeRoot: '/Users/test/.lemon-ai/lemon-agent',
+      harnessResourcePath: '/Applications/Lemon AI.app/Contents/Resources/lemon-ai-harness.json',
+      hermesHome: '/Users/test/.lemon-ai',
+      identity: LEMON_AI_IDENTITY,
+      internalBuild: true,
+      legacyHarnessConfigPath: '/tmp/legacy-harness.json'
+    }),
+    {
+      HERMES_BOOTSTRAP_MARKER_NAME: '.lemon-ai-bootstrap-complete',
+      HERMES_DESKTOP_HARNESS_CONFIG: '/Applications/Lemon AI.app/Contents/Resources/lemon-ai-harness.json',
+      HERMES_DESKTOP_HOME_OVERRIDE: '/Users/test/.lemon-ai',
+      HERMES_DESKTOP_INTERNAL: '1',
+      HERMES_DESKTOP_RUNTIME_DIR_NAME: 'lemon-agent',
+      HERMES_HOME: '/Users/test/.lemon-ai',
+      HERMES_INSTALL_RUNTIME_DIR_NAME: 'lemon-agent',
+      HERMES_UPDATE_HANDOFF_LOG_NAME: 'lemon-ai-desktop-update-handoff.log',
+      HERMES_UPDATE_MARKER_NAME: '.lemon-ai-update-in-progress',
+      HERMES_UPDATE_PRODUCT_NAME: 'Lemon AI',
+      HERMES_UPDATE_TEMP_PREFIX: 'lemon-ai-update',
+      HERMES_UPDATE_RESULT_NAME: '.lemon-ai-update-result.json'
+    }
+  )
+})
 
 test('ordinary desktop runtime identity keeps the Hermes filesystem contract', () => {
   const identity = resolveDesktopRuntimeIdentity()
@@ -50,6 +82,16 @@ test('internal desktop runtime identity uses Lemon AI primary names with Hermes 
   assert.deepEqual(identity.legacyHandoffResultNames, ['.hermes-update-result.json'])
 })
 
+test('baked internal package selects Lemon identity independently of harness activation', () => {
+  const internalBuild = resolveInternalDesktopBuild({
+    internalPackage: true,
+    internalHarnessRequested: false
+  })
+
+  assert.equal(internalBuild, true)
+  assert.equal(resolveDesktopRuntimeIdentity({ internalHarnessRequested: internalBuild }), LEMON_AI_IDENTITY)
+})
+
 test('internal desktop defaults never adopt legacy Hermes filesystem paths implicitly', () => {
   assert.equal(
     resolveDefaultDesktopHome({ homeDir: '/Users/test', identity: LEMON_AI_IDENTITY }),
@@ -64,7 +106,29 @@ test('internal desktop defaults never adopt legacy Hermes filesystem paths impli
     }),
     'C:\\Users\\test\\AppData\\Local/Lemon AI'
   )
-  assert.equal(resolveDesktopRuntimeRoot('/Users/test/.lemon-ai', LEMON_AI_IDENTITY), '/Users/test/.lemon-ai/lemon-agent')
+  assert.equal(
+    resolveDesktopRuntimeRoot('/Users/test/.lemon-ai', LEMON_AI_IDENTITY),
+    '/Users/test/.lemon-ai/lemon-agent'
+  )
+  assert.equal(shouldReadWindowsHermesHomeRegistry(LEMON_AI_IDENTITY), false)
+  assert.equal(shouldReadWindowsHermesHomeRegistry(HERMES_IDENTITY), true)
+  assert.equal(resolveDesktopHomeOverride({ HERMES_HOME: '/Users/test/.hermes' }, LEMON_AI_IDENTITY), '')
+  assert.equal(
+    resolveDesktopHomeOverride({ LEMON_AI_HOME: '/Users/test/.lemon-ai-custom' }, LEMON_AI_IDENTITY),
+    '/Users/test/.lemon-ai-custom'
+  )
+  assert.equal(
+    resolveDesktopRuntimeDirNameOverride({ HERMES_INSTALL_RUNTIME_DIR_NAME: 'hermes-agent' }, LEMON_AI_IDENTITY),
+    ''
+  )
+  assert.equal(
+    resolveDesktopHomeOverride({ HERMES_DESKTOP_HOME_OVERRIDE: '/Users/test/lemon' }, LEMON_AI_IDENTITY),
+    '/Users/test/lemon'
+  )
+  assert.equal(
+    resolveDesktopRuntimeDirNameOverride({ HERMES_DESKTOP_RUNTIME_DIR_NAME: 'lemon-custom' }, LEMON_AI_IDENTITY),
+    'lemon-custom'
+  )
 })
 
 test('legacy runtime use requires the explicit compatibility override', () => {

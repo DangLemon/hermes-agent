@@ -243,19 +243,52 @@ fn desktop_exe_candidates(internal: bool) -> &'static [(&'static str, &'static s
             ]
         }
     } else {
-        &[("linux-unpacked", "hermes")]
+        linux_desktop_exe_candidates(internal)
     }
 }
 
-pub(crate) fn resolve_hermes_desktop_exe(install_root: &std::path::Path) -> Option<PathBuf> {
+fn linux_desktop_exe_candidates(internal: bool) -> &'static [(&'static str, &'static str)] {
+    if internal {
+        &[
+            ("linux-unpacked", "Lemon AI"),
+            ("linux-arm64-unpacked", "Lemon AI"),
+            ("linux-unpacked", "lemon-ai"),
+            ("linux-arm64-unpacked", "lemon-ai"),
+            ("linux-unpacked", "hermes"),
+            ("linux-arm64-unpacked", "hermes"),
+            ("linux-unpacked", "Hermes"),
+            ("linux-arm64-unpacked", "Hermes"),
+        ]
+    } else {
+        &[
+            ("linux-unpacked", "hermes"),
+            ("linux-arm64-unpacked", "hermes"),
+            ("linux-unpacked", "Hermes"),
+            ("linux-arm64-unpacked", "Hermes"),
+        ]
+    }
+}
+
+fn resolve_desktop_exe_from_candidates(
+    install_root: &std::path::Path,
+    candidates: &[(&str, &str)],
+) -> Option<PathBuf> {
     let release_dir = install_root.join("apps").join("desktop").join("release");
-    for (subdir, exe) in desktop_exe_candidates(crate::paths::internal_desktop_build()) {
+    for (subdir, exe) in candidates {
         let p = release_dir.join(subdir).join(exe);
         if p.exists() {
             return Some(p);
         }
     }
     None
+}
+
+fn resolve_desktop_exe_for(install_root: &std::path::Path, internal: bool) -> Option<PathBuf> {
+    resolve_desktop_exe_from_candidates(install_root, desktop_exe_candidates(internal))
+}
+
+pub(crate) fn resolve_hermes_desktop_exe(install_root: &std::path::Path) -> Option<PathBuf> {
+    resolve_desktop_exe_for(install_root, crate::paths::internal_desktop_build())
 }
 
 pub(crate) fn resolve_hermes_desktop_app(install_root: &std::path::Path) -> Option<PathBuf> {
@@ -341,13 +374,7 @@ fn write_bootstrap_complete_marker(install_root: &Path, pin: &Pin) -> Result<ser
     // Atomic publish (temp sibling + flush + rename), matching Electron's
     // writeFileAtomic(). hermes_is_installed() only checks existence, so a
     // partial direct write would incorrectly enable the launcher fast path.
-    let tmp_path = marker_path.with_file_name(format!(
-        "{}.tmp",
-        marker_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or(".hermes-bootstrap-complete")
-    ));
+    let tmp_path = bootstrap_marker_tmp_path(&marker_path);
     {
         let mut file = std::fs::File::create(&tmp_path).with_context(|| {
             format!(
@@ -391,6 +418,15 @@ fn write_bootstrap_complete_marker(install_root: &Path, pin: &Pin) -> Result<ser
 
     tracing::info!(path = %marker_path.display(), "bootstrap marker written");
     Ok(marker)
+}
+
+fn bootstrap_marker_tmp_path(marker_path: &Path) -> PathBuf {
+    let marker_name = marker_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_owned)
+        .unwrap_or_else(crate::paths::bootstrap_marker_name);
+    marker_path.with_file_name(format!("{marker_name}.tmp"))
 }
 
 /// Spawn the already-built desktop app, detached. Returns Err if no built app
@@ -1097,9 +1133,43 @@ mod tests {
             assert_eq!(internal[0], ("mac/Lemon AI.app/Contents/MacOS", "Lemon AI"));
             assert!(internal.contains(&("mac/Hermes.app/Contents/MacOS", "Hermes")));
         } else {
-            assert_eq!(ordinary, internal);
             assert_eq!(ordinary[0], ("linux-unpacked", "hermes"));
+            assert_eq!(internal[0], ("linux-unpacked", "Lemon AI"));
+            assert!(internal.contains(&("linux-unpacked", "hermes")));
         }
+    }
+
+    #[test]
+    fn linux_internal_desktop_candidates_prefer_lemon_and_keep_hermes_fallbacks() {
+        let ordinary = linux_desktop_exe_candidates(false);
+        let internal = linux_desktop_exe_candidates(true);
+
+        assert_eq!(ordinary[0], ("linux-unpacked", "hermes"));
+        assert_eq!(internal[0], ("linux-unpacked", "Lemon AI"));
+        assert!(internal.contains(&("linux-unpacked", "lemon-ai")));
+        assert!(internal.contains(&("linux-unpacked", "hermes")));
+        assert!(internal.contains(&("linux-unpacked", "Hermes")));
+    }
+
+    #[test]
+    fn linux_internal_desktop_resolver_prefers_lemon_executable() {
+        let root = unique_tmp_dir("linux-lemon-resolver");
+        let release = root.join("apps").join("desktop").join("release");
+        let lemon = release.join("linux-unpacked").join("Lemon AI");
+        let legacy = release.join("linux-unpacked").join("hermes");
+        std::fs::create_dir_all(lemon.parent().unwrap()).unwrap();
+        std::fs::write(&lemon, b"stub").unwrap();
+        std::fs::write(&legacy, b"stub").unwrap();
+
+        assert_eq!(
+            resolve_desktop_exe_from_candidates(&root, linux_desktop_exe_candidates(true)),
+            Some(lemon)
+        );
+        assert_eq!(
+            resolve_desktop_exe_from_candidates(&root, linux_desktop_exe_candidates(false)),
+            Some(legacy)
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -1184,13 +1254,7 @@ mod tests {
         write_bootstrap_complete_marker(&root, &pin).expect("marker write should succeed");
 
         let marker_path = crate::paths::likely_bootstrap_marker(&root);
-        let tmp_path = marker_path.with_file_name(format!(
-            "{}.tmp",
-            marker_path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or(".hermes-bootstrap-complete")
-        ));
+        let tmp_path = bootstrap_marker_tmp_path(&marker_path);
         assert!(
             marker_path.is_file(),
             "final marker must exist after atomic publish"
@@ -1246,15 +1310,7 @@ mod tests {
             "failed write must not leave a final marker that enables the fast path"
         );
         assert!(
-            !crate::paths::likely_bootstrap_marker(&not_a_dir)
-                .with_file_name(format!(
-                    "{}.tmp",
-                    crate::paths::likely_bootstrap_marker(&not_a_dir)
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .unwrap_or(".hermes-bootstrap-complete")
-                ))
-                .exists(),
+            !bootstrap_marker_tmp_path(&crate::paths::likely_bootstrap_marker(&not_a_dir)).exists(),
             "failed write must not leave a temp marker sibling either"
         );
         let _ = std::fs::remove_dir_all(&base);

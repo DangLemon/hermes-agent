@@ -1,11 +1,11 @@
 """Runtime identity helpers shared by desktop-facing Python entry points.
 
-The internal Lemon AI build carries a validated harness resource.  The selector
-is an implementation detail and remains named ``HERMES_DESKTOP_HARNESS_CONFIG``
-for compatibility with the Electron build scripts, but an arbitrary path must
-never change the installed product identity.  Keep this validation intentionally
-small and dependency-free so it is safe to use from the installer/uninstaller
-before the full agent configuration is available.
+The internal Lemon AI build carries a validated harness resource.  New builds
+select it with ``LEMON_AI_DESKTOP_HARNESS_CONFIG``; the legacy
+``HERMES_DESKTOP_HARNESS_CONFIG`` spelling remains a fallback for compatibility.
+An arbitrary path must never change the installed product identity.  Keep this
+validation intentionally small and dependency-free so it is safe to use from
+the installer/uninstaller before the full agent configuration is available.
 """
 
 from __future__ import annotations
@@ -63,7 +63,14 @@ def internal_desktop_build(env: Mapping[str, str] | None = None) -> bool:
     environ = os.environ if env is None else env
     if str(environ.get("HERMES_DESKTOP_INTERNAL", "")).strip() == "1":
         return True
-    return is_valid_internal_harness_path(environ.get("HERMES_DESKTOP_HARNESS_CONFIG"))
+
+    lemon_selected = environ.get("LEMON_AI_DESKTOP_HARNESS_CONFIG")
+    selected = (
+        lemon_selected
+        if str(lemon_selected or "").strip()
+        else environ.get("HERMES_DESKTOP_HARNESS_CONFIG")
+    )
+    return is_valid_internal_harness_path(selected)
 
 
 def valid_internal_harness_config(path: str | os.PathLike[str] | None) -> bool:

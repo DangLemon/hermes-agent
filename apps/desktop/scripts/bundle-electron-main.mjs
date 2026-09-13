@@ -14,6 +14,8 @@ import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mkdirSync } from 'node:fs'
 
+import { prepareElectronBundleDefines } from './electron-bundle-identity.mjs'
+
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..')
 const distDir = resolve(root, 'dist')
@@ -26,12 +28,11 @@ const preloadOut = resolve(distDir, 'electron-preload.js')
 
 const external = ['electron', 'node-pty', 'get-windows', 'fs']
 // Production bundles bake packaged=true so unpackaged `electron .` still
-// behaves like a packaged build. Dev bundles (`--dev`) leave the env alone
-// so HERMES_DESKTOP_DEV_SERVER / source-tree resolution keep working.
+// behaves like a packaged build. Dev bundles keep the dev-server environment,
+// while an internal selector still bakes the Lemon identity into the main
+// process so Electron derives its userData path from the branded app name.
 const isDev = process.argv.includes('--dev')
-const define = isDev
-  ? {}
-  : { 'process.env.HERMES_DESKTOP_IS_PACKAGED': JSON.stringify(true) }
+const define = prepareElectronBundleDefines({ env: process.env, isDev })
 
 // Bundle main.ts → dist/electron-main.mjs
 await build({

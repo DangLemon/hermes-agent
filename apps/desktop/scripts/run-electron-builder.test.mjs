@@ -80,7 +80,7 @@ test('electron-builder uses a schema-valid static harness resource without index
 
   const ordinary = buildElectronBuilderArgs({ dist: null, argv: ['--dir'] })
   assert.equal(
-    ordinary.some(arg => String(arg).includes('internal-desktop-harness.json')),
+    ordinary.some(arg => String(arg).includes('lemon-ai-harness.json')),
     false
   )
 
@@ -88,14 +88,17 @@ test('electron-builder uses a schema-valid static harness resource without index
   assert.deepEqual(pkg.build.extraResources.at(-1), {
     from: 'build',
     to: '.',
-    filter: ['internal-desktop-harness.json', 'internal-desktop-harness-seed.py']
+    filter: ['lemon-ai-harness.json', 'lemon-ai-harness-seed.py']
   })
   await validateConfiguration(structuredClone(pkg.build))
 })
 
 test('package build script generates harness resource before Vite reads harness flags', () => {
   const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
-  assert.match(pkg.scripts.build, /write-build-stamp\.mjs && node scripts\/internal-desktop-harness\.mjs && vite build/)
+  assert.match(
+    pkg.scripts.build,
+    /write-build-stamp\.mjs && cross-env LEMON_AI_DESKTOP_HARNESS_CONFIG=\.\/lemon-ai-desktop\.config\.json node scripts\/internal-desktop-harness\.mjs && cross-env LEMON_AI_DESKTOP_HARNESS_CONFIG=\.\/lemon-ai-desktop\.config\.json vite build/
+  )
 })
 
 test('ordinary package config keeps Hermes installer metadata and assets without a selector', async () => {
@@ -156,6 +159,7 @@ test('validated internal package config applies Lemon physical identity while pr
     assert.equal(config.artifactName, 'Lemon-AI-${version}-${os}-${arch}.${ext}')
     assert.equal(config.icon, 'assets/lemon-icon')
     assert.equal(config.mac.extendInfo.CFBundleDisplayName, 'Lemon AI')
+    assert.equal(config.mac.extendInfo.CFBundleExecutable, 'Lemon AI')
     assert.equal(config.mac.extendInfo.CFBundleName, 'Lemon AI')
     assert.equal(
       config.mac.extendInfo.NSMicrophoneUsageDescription,
@@ -182,7 +186,7 @@ test('validated internal package config applies Lemon physical identity while pr
     assert.deepEqual(config.extraResources.at(-1), {
       from: 'build',
       to: '.',
-      filter: ['internal-desktop-harness.json', 'internal-desktop-harness-seed.py']
+      filter: ['lemon-ai-harness.json', 'lemon-ai-harness-seed.py']
     })
     await validateConfiguration(structuredClone(config))
   })

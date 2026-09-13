@@ -4,7 +4,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { promisify } from 'node:util'
 
-export const HARNESS_RESOURCE_FILENAME = 'internal-desktop-harness.json'
+export const HARNESS_RESOURCE_FILENAME = 'lemon-ai-harness.json'
+const LEGACY_HARNESS_RESOURCE_FILENAME = 'internal-desktop-harness.json'
+const HARNESS_SEED_FILENAME = 'lemon-ai-harness-seed.py'
+const LEGACY_HARNESS_SEED_FILENAME = 'internal-desktop-harness-seed.py'
 const HARNESS_SCHEMA_VERSION = 1
 const UI_KEYS = ['agents', 'cron', 'messaging', 'terminal', 'webhooks'] as const
 const SOURCE_REPOSITORY_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/
@@ -256,7 +259,9 @@ export function loadInternalDesktopHarnessResource({
 }): InternalDesktopHarnessLoadResult {
   const candidates = [
     resourcesPath ? path.join(resourcesPath, HARNESS_RESOURCE_FILENAME) : null,
-    allowBuildResource ? path.join(appRoot, 'build', HARNESS_RESOURCE_FILENAME) : null
+    resourcesPath ? path.join(resourcesPath, LEGACY_HARNESS_RESOURCE_FILENAME) : null,
+    allowBuildResource ? path.join(appRoot, 'build', HARNESS_RESOURCE_FILENAME) : null,
+    allowBuildResource ? path.join(appRoot, 'build', LEGACY_HARNESS_RESOURCE_FILENAME) : null
   ].filter(Boolean) as string[]
 
   for (const candidate of candidates) {
@@ -288,7 +293,7 @@ export function materializeInternalDesktopManagedConfig(
     nonce = () => crypto.randomBytes(6).toString('hex')
   }: { userDataPath: string; pid?: number; nonce?: () => string }
 ): string {
-  const managedDir = path.join(userDataPath, 'internal-desktop-harness', `${pid}-${nonce()}`)
+  const managedDir = path.join(userDataPath, 'lemon-ai-managed-config', `${pid}-${nonce()}`)
   fs.mkdirSync(managedDir, { recursive: true })
   fs.writeFileSync(path.join(managedDir, 'config.yaml'), `${JSON.stringify(resource.managedConfig || {}, null, 2)}\n`, 'utf8')
 
@@ -297,9 +302,12 @@ export function materializeInternalDesktopManagedConfig(
 
 export function resolveInternalDesktopSeedScriptPath(resourcePath: string | null, appRoot: string): string | null {
   const candidates = [
-    resourcePath ? path.join(path.dirname(resourcePath), 'internal-desktop-harness-seed.py') : null,
-    path.join(appRoot, 'build', 'internal-desktop-harness-seed.py'),
-    path.join(appRoot, 'electron', 'internal-desktop-harness-seed.py')
+    resourcePath ? path.join(path.dirname(resourcePath), HARNESS_SEED_FILENAME) : null,
+    resourcePath ? path.join(path.dirname(resourcePath), LEGACY_HARNESS_SEED_FILENAME) : null,
+    path.join(appRoot, 'build', HARNESS_SEED_FILENAME),
+    path.join(appRoot, 'build', LEGACY_HARNESS_SEED_FILENAME),
+    path.join(appRoot, 'electron', HARNESS_SEED_FILENAME),
+    path.join(appRoot, 'electron', LEGACY_HARNESS_SEED_FILENAME)
   ].filter(Boolean) as string[]
 
   return candidates.find(candidate => fs.existsSync(candidate)) ?? null
@@ -377,7 +385,9 @@ function pythonFromBackendRoot(root: string | undefined): string | null {
 }
 
 function seedArgs(seedScriptPath: string, { hermesHome, profile, resourcePath }: { hermesHome: string; profile?: null | string; resourcePath: string }): string[] {
-  return [seedScriptPath, '--resource', resourcePath, '--hermes-home', hermesHome, '--profile', String(profile || '')]
+  const homeFlag = path.basename(seedScriptPath) === LEGACY_HARNESS_SEED_FILENAME ? '--hermes-home' : '--lemon-home'
+
+  return [seedScriptPath, '--resource', resourcePath, homeFlag, hermesHome, '--profile', String(profile || '')]
 }
 
 export function buildInternalDesktopInitialProviderSeedInvocation(
@@ -460,6 +470,7 @@ export async function runInternalDesktopInitialProviderSeed(
     env: {
       ...environment,
       ...(backend['env'] || {}),
+      LEMON_AI_HOME: hermesHome,
       HERMES_HOME: hermesHome
     },
     shell: invocation.shell,
