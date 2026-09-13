@@ -125,43 +125,16 @@ public interface IPersistFile
 
 public static class ShellLinkCom
 {
-    public static IShellLinkW AsShellLinkW(object comObject)
+    public static void Create(string shortcutPath, string targetPath)
     {
-        return QueryInterface<IShellLinkW>(comObject);
-    }
-
-    public static IPersistFile AsPersistFile(object comObject)
-    {
-        return QueryInterface<IPersistFile>(comObject);
-    }
-
-    private static T QueryInterface<T>(object comObject)
-    {
-        IntPtr unknown = Marshal.GetIUnknownForObject(comObject);
-        IntPtr typed = IntPtr.Zero;
-        try
-        {
-            Guid iid = typeof(T).GUID;
-            Marshal.ThrowExceptionForHR(Marshal.QueryInterface(unknown, ref iid, out typed));
-            return (T)Marshal.GetTypedObjectForIUnknown(typed, typeof(T));
-        }
-        finally
-        {
-            if (typed != IntPtr.Zero)
-            {
-                Marshal.Release(typed);
-            }
-            Marshal.Release(unknown);
-        }
+        IShellLinkW shellLink = (IShellLinkW)new ShellLink();
+        shellLink.SetPath(targetPath);
+        ((IPersistFile)shellLink).Save(shortcutPath, true);
     }
 }
 "@
 Add-Type -TypeDefinition $source
-$link = [Activator]::CreateInstance([ShellLink])
-$shellLink = [ShellLinkCom]::AsShellLinkW($link)
-$persistFile = [ShellLinkCom]::AsPersistFile($link)
-$shellLink.SetPath($env:TEST_SHORTCUT_TARGET)
-$persistFile.Save($env:TEST_SHORTCUT_PATH, $true)
+[ShellLinkCom]::Create($env:TEST_SHORTCUT_PATH, $env:TEST_SHORTCUT_TARGET)
 '''
     encoded_create_script = base64.b64encode(create_script.encode("utf-16le")).decode(
         "ascii"
