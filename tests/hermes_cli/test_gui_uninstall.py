@@ -500,8 +500,11 @@ def test_windows_shortcut_target_probe_uses_encoded_script_and_env_path(
     decoded = gu.base64.b64decode(args[5]).decode("utf-16le")
     assert "$env:LEMON_AI_SHORTCUT_PATH" in decoded
     assert "OutputEncoding" in decoded
+    assert "ShellLinkCom" in decoded
+    assert "ReadTarget($p)" in decoded
+    assert "WScript.Shell" not in decoded
     assert (
-        "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($l.TargetPath))"
+        "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([ShellLinkCom]::ReadTarget($p)))"
         in decoded
     )
     assert str(shortcut) not in args
