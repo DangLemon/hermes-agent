@@ -3339,7 +3339,8 @@ print(','.join(scripts))
 function Install-HermesCommandLaunchers {
     param(
         [Parameter(Mandatory=$true)] [string]$Root,
-        [Parameter(Mandatory=$true)] [string]$Destination
+        [Parameter(Mandatory=$true)] [string]$Destination,
+        [Parameter(Mandatory=$true)] [string]$Repository
     )
 
     # Expose ONLY the hermes launchers on PATH -- never the whole
@@ -3355,36 +3356,30 @@ function Install-HermesCommandLaunchers {
 
     New-Item -ItemType Directory -Force -Path $Destination | Out-Null
 
-    # Launcher form depends on the venv (keep in lockstep with
-    # hermes_cli/_install_repair.py): a normal venv's exe trampoline
-    # embeds an absolute interpreter path and survives copying; a
-    # relocatable venv's trampoline (managed_uv rebuilds use
-    # --relocatable) resolves relative to its own location, and a copy
-    # dies with 'uv trampoline failed to canonicalize script path' --
-    # those get a .cmd delegator invoking the in-venv exe instead.
-    $pyvenvCfg = Join-Path $Root "venv\pyvenv.cfg"
-    $venvRelocatable = $false
-    if (Test-Path -LiteralPath $pyvenvCfg) {
-        $venvRelocatable = [bool](Select-String -Path $pyvenvCfg -Pattern '^\s*relocatable\s*=\s*true\s*$' -Quiet)
-    }
+    # Each installation owns its update source. A command wrapper sets the
+    # existing HERMES_UPDATE_REPOSITORY contract only for the child process;
+    # setlocal prevents one installation from mutating another via HKCU or
+    # the caller's shell. Delegating to the in-venv executable works for
+    # both normal and relocatable uv trampolines.
     foreach ($launcher in @("hermes", "hermes-acp")) {
         $src = Join-Path $scriptsDir "$launcher.exe"
         if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { continue }
-        if ($venvRelocatable) {
-            Remove-Item (Join-Path $Destination "$launcher.exe") -Force -ErrorAction SilentlyContinue
-            Set-Content -Path (Join-Path $Destination "$launcher.cmd") -Value "@echo off`r`n`"$src`" %*" -Encoding Ascii
-        } else {
-            Remove-Item (Join-Path $Destination "$launcher.cmd") -Force -ErrorAction SilentlyContinue
-            Copy-Item -Force -LiteralPath $src -Destination (Join-Path $Destination "$launcher.exe")
-        }
+        $cmd = Join-Path $Destination "$launcher.cmd"
+        $body = @(
+            "@echo off"
+            "setlocal"
+            "set `"HERMES_UPDATE_REPOSITORY=$Repository`""
+            "`"$src`" %*"
+            "exit /b %ERRORLEVEL%"
+        ) -join "`r`n"
+        Set-Content -Path $cmd -Value $body -Encoding Ascii
+        Remove-Item (Join-Path $Destination "$launcher.exe") -Force -ErrorAction SilentlyContinue
     }
 
-    # Verify either staged form before the caller mutates PATH.
-    $requiredExe = Join-Path $Destination "hermes.exe"
+    # Verify the repository-aware form before the caller mutates PATH.
     $requiredCmd = Join-Path $Destination "hermes.cmd"
-    if (-not ((Test-Path -LiteralPath $requiredExe -PathType Leaf) -or
-              (Test-Path -LiteralPath $requiredCmd -PathType Leaf))) {
-        throw "Cannot set up the hermes command: launcher was not installed: $requiredExe"
+    if (-not (Test-Path -LiteralPath $requiredCmd -PathType Leaf)) {
+        throw "Cannot set up the hermes command: launcher was not installed: $requiredCmd"
     }
     return $Destination
 }
@@ -3418,7 +3413,7 @@ function Set-PathVariable {
         # Install-HermesCommandLaunchers, which throws BEFORE any PATH
         # mutation when the launchers cannot be staged.
         $hermesBin = "$HermesHome\bin"
-        Install-HermesCommandLaunchers -Root $InstallDir -Destination $hermesBin | Out-Null
+        Install-HermesCommandLaunchers -Root $InstallDir -Destination $hermesBin -Repository $Repository | Out-Null
     }
     
     $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -3456,9 +3451,6 @@ function Set-PathVariable {
     # and Lemon Desktop can read its branded aliases from HKCU after Explorer
     # launches with a stale environment block.
     Set-UserEnvironmentVariableIfChanged -Name "HERMES_HOME" -Value $HermesHome
-    # Keep direct `hermes update` invocations on the same source selected by
-    # the installer. Desktop handoffs also pass this through their child env.
-    Set-UserEnvironmentVariableIfChanged -Name "HERMES_UPDATE_REPOSITORY" -Value $Repository
     if ($InternalDesktopBuild) {
         Set-UserEnvironmentVariableIfChanged -Name "LEMON_AI_HOME" -Value $HermesHome
         Set-UserEnvironmentVariableIfChanged -Name "LEMON_AI_INSTALL_RUNTIME_DIR_NAME" -Value $RuntimeDirName

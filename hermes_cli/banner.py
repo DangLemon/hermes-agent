@@ -386,6 +386,7 @@ def check_for_updates() -> Optional[int]:
     """
     cache_file = get_hermes_home() / ".update_check"
     embedded_rev = os.environ.get("HERMES_REVISION") or None
+    configured_repository = _configured_update_repository()
     # Docker images have no working tree (the image excludes `.git`) and set no HERMES_REVISION.
     # None makes both the Rich banner and the Ink badge show nothing, mirroring the dashboard's
     # `/api/hermes/update/check` short-circuit so the surfaces agree.
@@ -395,10 +396,13 @@ def check_for_updates() -> Optional[int]:
 
     if _quiet(_install_method) in {"docker", "apt"}:
         return None
-    # Cache is invalidated when the embedded rev OR installed version changed since the last check.
+    # Cache is invalidated when the source repository, embedded rev, or installed version changed.
+    # Old cache entries intentionally miss because they have no repository identity.
     now = time.time()
     cached = _read_json(cache_file)
-    if (cached is not None and now - cached.get("ts", 0) < _UPDATE_CHECK_CACHE_SECONDS
+    if (configured_repository is not None and cached is not None
+            and now - cached.get("ts", 0) < _UPDATE_CHECK_CACHE_SECONDS
+            and cached.get("repo") == configured_repository
             and cached.get("rev") == embedded_rev and cached.get("ver") == VERSION):
         return cached.get("behind")
     if embedded_rev:
@@ -411,7 +415,13 @@ def check_for_updates() -> Optional[int]:
     # fetch), and caching it would suppress retries for the full 6-hour window (#82166).
     if behind is not None:
         _quiet(lambda: cache_file.write_text(
-            json.dumps({"ts": now, "behind": behind, "rev": embedded_rev, "ver": VERSION}), encoding="utf-8"))
+            json.dumps({
+                "ts": now,
+                "behind": behind,
+                "rev": embedded_rev,
+                "ver": VERSION,
+                "repo": configured_repository,
+            }), encoding="utf-8"))
     return behind
 
 

@@ -1,7 +1,7 @@
 """``hermes`` must survive git operations on the checkout (launcher layout).
 
-The Windows ``hermes`` command is a launcher derived from the venv console
-script. Its canonical home is the managed binary dir ``HERMES_HOME\\bin`` —
+The Windows ``hermes`` command is a wrapper around the venv console script.
+Its canonical home is the managed binary dir ``HERMES_HOME\\bin`` —
 OUTSIDE the git checkout — because the earlier in-checkout home
 (``hermes-agent\\bin``) was swept by ``hermes update``'s autostash
 (``git stash push --include-untracked``) and, with the desktop updater's
@@ -11,9 +11,8 @@ user's ``python``, #83797).
 
 ``ensure_windows_bin_launchers`` re-stages missing launchers (canonical dir
 always for the managed clone; legacy dir only while the user PATH still
-points at it), choosing the form by venv kind: exe copy for normal venvs,
-``.cmd`` delegator for relocatable venvs whose exe trampolines die when
-copied out of ``venv\\Scripts``. ``migrate_windows_bin_path`` moves an
+points at it) as ``.cmd`` wrappers that bind update-source identity to this
+installation. ``migrate_windows_bin_path`` moves an
 existing install's PATH to the canonical layout from the ``hermes update``
 tail. Platform verdict, PATH values, and registry I/O are injected
 parameters (same pattern as ``hermes_constants.venv_bin_dir``), so these
@@ -53,22 +52,26 @@ def managed_install(tmp_path, monkeypatch):
     return _make_managed(tmp_path, monkeypatch)
 
 
-def test_managed_clone_heals_canonical_home_bin(managed_install):
+def test_managed_clone_heals_canonical_home_bin(managed_install, monkeypatch):
     home, root = managed_install
+    monkeypatch.setenv("HERMES_UPDATE_REPOSITORY", "DangLemon/hermes-agent")
 
     restored = ensure_windows_bin_launchers(root, windows=True, user_path_entries=[])
 
     assert len(restored) == len(_WINDOWS_BIN_LAUNCHERS)
     for name in _WINDOWS_BIN_LAUNCHERS:
-        assert (home / "bin" / f"{name}.exe").read_bytes() == (
-            root / "venv" / "Scripts" / f"{name}.exe"
-        ).read_bytes()
+        body = (home / "bin" / f"{name}.cmd").read_text(encoding="ascii")
+        assert 'set "HERMES_UPDATE_REPOSITORY=DangLemon/hermes-agent"' in body
+        assert str(root / "venv" / "Scripts" / f"{name}.exe") in body
+        assert "%*" in body
+        assert not (home / "bin" / f"{name}.exe").exists()
 
 
 def test_relocatable_venv_gets_cmd_delegators_not_exe_copies(tmp_path, monkeypatch):
     """A copied relocatable-venv trampoline dies ('uv trampoline failed to
     canonicalize script path') — the heal must emit .cmd delegators."""
     home, root = _make_managed(tmp_path, monkeypatch, relocatable=True)
+    monkeypatch.setenv("HERMES_UPDATE_REPOSITORY", "DangLemon/hermes-agent")
 
     restored = ensure_windows_bin_launchers(root, windows=True, user_path_entries=[])
 
@@ -76,30 +79,42 @@ def test_relocatable_venv_gets_cmd_delegators_not_exe_copies(tmp_path, monkeypat
     for name in _WINDOWS_BIN_LAUNCHERS:
         body = (home / "bin" / f"{name}.cmd").read_text(encoding="ascii")
         # Delegates to the in-venv exe by absolute path, forwarding args.
+        assert 'set "HERMES_UPDATE_REPOSITORY=DangLemon/hermes-agent"' in body
         assert str(root / "venv" / "Scripts" / f"{name}.exe") in body
         assert "%*" in body
         assert not (home / "bin" / f"{name}.exe").exists()
 
 
-def test_existing_exe_counts_as_present_for_relocatable_venv(tmp_path, monkeypatch):
-    """Exe copies staged before a venv rebuild embed the swapped-in-place
-    venv's absolute path and keep working — never replaced with .cmd."""
+def test_existing_exe_is_migrated_to_repository_wrapper(tmp_path, monkeypatch):
+    """Old global-env launchers are replaced so updates remain installation-scoped."""
     home, root = _make_managed(tmp_path, monkeypatch, relocatable=True)
+    monkeypatch.setenv("HERMES_UPDATE_REPOSITORY", "DangLemon/hermes-agent")
     (home / "bin").mkdir()
     for name in _WINDOWS_BIN_LAUNCHERS:
         (home / "bin" / f"{name}.exe").write_bytes(b"pre-rebuild copy")
 
-    assert ensure_windows_bin_launchers(root, windows=True, user_path_entries=[]) == []
+    restored = ensure_windows_bin_launchers(root, windows=True, user_path_entries=[])
+
+    assert len(restored) == len(_WINDOWS_BIN_LAUNCHERS)
     for name in _WINDOWS_BIN_LAUNCHERS:
-        assert (home / "bin" / f"{name}.exe").read_bytes() == b"pre-rebuild copy"
-        assert not (home / "bin" / f"{name}.cmd").exists()
+        body = (home / "bin" / f"{name}.cmd").read_text(encoding="ascii")
+        assert 'set "HERMES_UPDATE_REPOSITORY=DangLemon/hermes-agent"' in body
+        assert not (home / "bin" / f"{name}.exe").exists()
 
 
 def test_healthy_canonical_layout_is_a_noop(managed_install):
     home, root = managed_install
     (home / "bin").mkdir()
     for name in _WINDOWS_BIN_LAUNCHERS:
-        (home / "bin" / f"{name}.exe").write_bytes(b"present")
+        source = root / "venv" / "Scripts" / f"{name}.exe"
+        (home / "bin" / f"{name}.cmd").write_text(
+            "@echo off\r\n"
+            "setlocal\r\n"
+            'set "HERMES_UPDATE_REPOSITORY=NousResearch/hermes-agent"\r\n'
+            f'"{source}" %*\r\n'
+            "exit /b %ERRORLEVEL%\r\n",
+            encoding="ascii",
+        )
 
     assert ensure_windows_bin_launchers(root, windows=True, user_path_entries=[]) == []
 
@@ -115,8 +130,8 @@ def test_legacy_bin_restaged_only_while_on_user_path(managed_install):
     stems = {Path(p).stem for p in restored}
     assert set(_WINDOWS_BIN_LAUNCHERS) <= stems
     for name in _WINDOWS_BIN_LAUNCHERS:
-        assert (legacy / f"{name}.exe").is_file()        # legacy consent honored
-        assert (home / "bin" / f"{name}.exe").is_file()  # canonical healed too
+        assert (legacy / f"{name}.cmd").is_file()        # legacy consent honored
+        assert (home / "bin" / f"{name}.cmd").is_file()  # canonical healed too
 
 
 def test_legacy_bin_not_restaged_without_path_consent(managed_install):
@@ -167,7 +182,7 @@ def test_profile_session_still_heals_the_shared_bin(tmp_path, monkeypatch):
 
     assert len(restored) == len(_WINDOWS_BIN_LAUNCHERS)
     for name in _WINDOWS_BIN_LAUNCHERS:
-        assert (home / "bin" / f"{name}.exe").is_file()
+        assert (home / "bin" / f"{name}.cmd").is_file()
     assert not (home / "profiles" / "work" / "bin").exists()
 
 
@@ -231,7 +246,7 @@ def test_migration_moves_path_to_home_bin_and_strips_legacy(managed_install):
     assert _normalize_windows_path(legacy_scripts) not in keys
     assert _normalize_windows_path(r"C:\Windows\system32") in keys  # untouched
     for name in _WINDOWS_BIN_LAUNCHERS:
-        assert (home / "bin" / f"{name}.exe").is_file()
+        assert (home / "bin" / f"{name}.cmd").is_file()
     # Legacy FILES stay: editor/ACP configs holding absolute launcher paths
     # keep working. Only the PATH entry (the sweepable resolution route) goes.
     assert (root / "bin" / "hermes.exe").read_bytes() == b"legacy copy"

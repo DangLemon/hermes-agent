@@ -12,7 +12,6 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -96,12 +95,29 @@ def _venv_scripts_dir(root: Path) -> Path | None:
 _WINDOWS_BIN_LAUNCHERS = ("hermes", "hermes-acp")
 
 
-def _launcher_present(target: Path, name: str) -> bool:
-    return (target / f"{name}.exe").exists() or (target / f"{name}.cmd").exists()
-
-
 def _launchers_missing(target: Path) -> bool:
-    return any(not _launcher_present(target, name) for name in _WINDOWS_BIN_LAUNCHERS)
+    return any(not (target / f"{name}.cmd").is_file() for name in _WINDOWS_BIN_LAUNCHERS)
+
+
+def _configured_windows_update_repository() -> str | None:
+    """Validated update source inherited from this installation's launcher."""
+    try:
+        from hermes_cli.update_cmd_git import _configured_update_repository
+
+        return _configured_update_repository()
+    except Exception:
+        return None
+
+
+def _windows_launcher_body(source: Path, repository: str) -> str:
+    """Per-install command wrapper; ``setlocal`` prevents shell-wide identity leaks."""
+    return (
+        "@echo off\r\n"
+        "setlocal\r\n"
+        f'set "HERMES_UPDATE_REPOSITORY={repository}"\r\n'
+        f'"{source}" %*\r\n'
+        "exit /b %ERRORLEVEL%\r\n"
+    )
 
 
 def _default_hermes_root() -> Path | None:
@@ -114,23 +130,6 @@ def _default_hermes_root() -> Path | None:
         return Path(get_default_hermes_root())
     except Exception:
         return None
-
-
-def _venv_is_relocatable(venv_dir: Path) -> bool:
-    r"""True when the venv's pyvenv.cfg declares ``relocatable = true``.
-
-    A relocatable venv's console-script trampolines embed a RELATIVE interpreter reference, so a
-    copy placed outside ``venv\Scripts`` fails (``uv trampoline failed to canonicalize script
-    path``); non-relocatable venvs survive copying. Decides which launcher form a PATH dir gets.
-    """
-    try:
-        cfg = (Path(venv_dir) / "pyvenv.cfg").read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return False
-    return any(
-        key.strip().lower() == "relocatable" and value.strip().lower() == "true"
-        for key, _, value in (line.partition("=") for line in cfg.splitlines())
-    )
 
 
 def _normalize_windows_path(value) -> str:
@@ -210,7 +209,9 @@ def ensure_windows_bin_launchers(
                if (scripts_dir / f"{name}.exe").is_file()]
     if not sources:
         return []
-    relocatable = _venv_is_relocatable(venv_dir)
+    repository = _configured_windows_update_repository()
+    if repository is None:
+        return []
 
     restored: list[str] = []
     for target in targets:
@@ -219,20 +220,25 @@ def ensure_windows_bin_launchers(
         except OSError:
             continue
         for name, source in sources:
-            if _launcher_present(target, name):
-                continue
-            final = target / (f"{name}.cmd" if relocatable else f"{name}.exe")
+            final = target / f"{name}.cmd"
+            expected = _windows_launcher_body(source, repository)
+            expected_bytes = expected.encode("ascii")
+            try:
+                if final.is_file() and final.read_bytes() == expected_bytes:
+                    continue
+            except OSError:
+                pass
             staging = target / f"{final.name}.heal.{os.getpid()}"
             try:
-                if relocatable:
-                    staging.write_text("@echo off\r\n" f'"{source}" %*\r\n', encoding="ascii")
-                else:
-                    shutil.copy2(source, staging)
+                staging.write_bytes(expected_bytes)
                 os.replace(staging, final)
+                with contextlib.suppress(OSError):
+                    (target / f"{name}.exe").unlink()
                 restored.append(str(final))
             except OSError:
                 with contextlib.suppress(OSError):
                     staging.unlink()
+                continue
     if restored:
         # A closed/broken stderr must not turn a successful heal into a crash.
         with contextlib.suppress(OSError, ValueError):
@@ -292,8 +298,7 @@ def migrate_windows_bin_path(
 
     ensure_windows_bin_launchers(root, windows=windows, user_path_entries=[])
     home_bin = home / "bin"
-    if any(not ((home_bin / f"{name}.exe").is_file() or (home_bin / f"{name}.cmd").is_file())
-           for name in _WINDOWS_BIN_LAUNCHERS):
+    if any(not (home_bin / f"{name}.cmd").is_file() for name in _WINDOWS_BIN_LAUNCHERS):
         return False  # staging incomplete — leave the PATH alone
 
     if read_user_path is None:

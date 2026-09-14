@@ -632,3 +632,6 @@ def test_install_ps1_source_repository_contracts_are_bounded_and_repo_aware() ->
     assert 'https://github.com/$Repository/archive/refs/heads/$Branch.zip' in source
     assert '$Value -match "^(https?:|git@)"' in source
     assert '$Value -like "*.git"' in source
+    assert '[Parameter(Mandatory=$true)] [string]$Repository' in source
+    assert 'set `"HERMES_UPDATE_REPOSITORY=$Repository`"' in source
+    assert 'Set-UserEnvironmentVariableIfChanged -Name "HERMES_UPDATE_REPOSITORY"' not in source
