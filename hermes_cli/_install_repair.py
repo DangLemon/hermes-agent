@@ -128,10 +128,14 @@ def _checkout_update_repository(root: Path) -> str | None:
 
 
 def _configured_windows_update_repository(root: Path) -> str | None:
-    """Per-install source, preferring checkout truth over collided legacy env."""
-    repository = _checkout_update_repository(root)
-    if repository is not None:
-        return repository
+    """Per-install source for launcher repair, without public fallback.
+
+    The checkout origin is not always the source of truth during Lemon upgrades:
+    the desktop can launch early repair before it has healed an older
+    ``NousResearch`` origin.  Internal package markers and installer-scoped
+    repository values are therefore trusted before checkout state.  The legacy
+    update env var is last because old HKCU values can leak across installs.
+    """
     try:
         from hermes_cli.update_cmd_git import (
             INSTALL_REPOSITORY_ENV,
@@ -141,16 +145,28 @@ def _configured_windows_update_repository(root: Path) -> str | None:
             _validate_update_repository,
         )
 
-        # The normal configured-repository helper intentionally defaults to the public
-        # project.  A launcher repair cannot make that assumption: if a custom checkout's
-        # origin is unavailable, silently writing a public wrapper would redirect its next
-        # update.  Only an explicit per-install value or an explicit internal-build marker
-        # is safe when checkout identity cannot be read.
-        explicit = os.environ.get(UPDATE_REPOSITORY_ENV) or os.environ.get(INSTALL_REPOSITORY_ENV)
-        if explicit:
-            return _validate_update_repository(explicit)
         if any(str(os.environ.get(name, "")).strip() == "1" for name in INTERNAL_UPDATE_ENV_VARS):
             return _validate_update_repository(INTERNAL_UPDATE_REPOSITORY)
+
+        install_repository = os.environ.get(INSTALL_REPOSITORY_ENV)
+        if install_repository:
+            return _validate_update_repository(install_repository)
+    except Exception:
+        pass
+
+    repository = _checkout_update_repository(root)
+    if repository is not None:
+        return repository
+
+    try:
+        from hermes_cli.update_cmd_git import (
+            UPDATE_REPOSITORY_ENV,
+            _validate_update_repository,
+        )
+
+        update_repository = os.environ.get(UPDATE_REPOSITORY_ENV)
+        if update_repository:
+            return _validate_update_repository(update_repository)
     except Exception:
         pass
     return None

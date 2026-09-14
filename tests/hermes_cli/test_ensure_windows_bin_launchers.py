@@ -154,6 +154,36 @@ def test_existing_exe_migration_prefers_checkout_origin_over_stale_user_env(
         assert "NousResearch/hermes-agent" not in body
 
 
+def test_internal_desktop_marker_overrides_legacy_public_origin(
+    tmp_path, monkeypatch
+):
+    """A Lemon repair can run before the updater has healed origin."""
+    home, root = _make_managed(tmp_path, monkeypatch)
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/NousResearch/hermes-agent.git",
+        ],
+        check=True,
+    )
+    monkeypatch.setenv("LEMON_AI_DESKTOP_INTERNAL", "1")
+    monkeypatch.setenv("HERMES_UPDATE_REPOSITORY", "DangLemon/hermes-agent")
+
+    restored = ensure_windows_bin_launchers(root, windows=True, user_path_entries=[])
+
+    assert len(restored) == len(_WINDOWS_BIN_LAUNCHERS)
+    for name in _WINDOWS_BIN_LAUNCHERS:
+        body = (home / "bin" / f"{name}.cmd").read_text(encoding="ascii")
+        assert 'set "HERMES_UPDATE_REPOSITORY=DangLemon/hermes-agent"' in body
+        assert "NousResearch/hermes-agent" not in body
+
+
 def test_existing_wrong_repository_or_source_wrapper_is_rewritten(
     tmp_path, monkeypatch
 ):

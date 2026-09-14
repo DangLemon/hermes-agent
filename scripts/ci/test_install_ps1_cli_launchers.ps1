@@ -174,29 +174,32 @@ try {
     $shadowBinDir = Join-Path $caseRoot 'shadow-bin'
     New-Item -ItemType Directory -Force -Path $shadowBinDir | Out-Null
     [System.IO.File]::WriteAllBytes((Join-Path $shadowBinDir 'hermes.exe'), [byte[]](77, 90, 9))
-    $originalRemoveItem = Get-Command Remove-Item -CommandType Cmdlet
     function Remove-Item {
+        [CmdletBinding()]
         param(
+            [string[]]$LiteralPath,
+            [string[]]$Path,
+            [switch]$Force,
             [Parameter(ValueFromRemainingArguments=$true)]
             [object[]]$Remaining
         )
-        $literal = $null
-        for ($i = 0; $i -lt $Remaining.Count; $i++) {
-            if ($Remaining[$i] -eq '-LiteralPath' -and ($i + 1) -lt $Remaining.Count) {
-                $literal = [string]$Remaining[$i + 1]
-            }
-        }
-        if ($literal -and $literal.EndsWith('\hermes.exe', [System.StringComparison]::OrdinalIgnoreCase)) {
+        if ($LiteralPath -and [string]$LiteralPath[0] -and [string]$LiteralPath[0].EndsWith('\hermes.exe', [System.StringComparison]::OrdinalIgnoreCase)) {
             throw "simulated launcher lock"
         }
-        & $originalRemoveItem @Remaining
+        if ($LiteralPath) {
+            Microsoft.PowerShell.Management\Remove-Item -LiteralPath $LiteralPath -Force:$Force @Remaining
+        } elseif ($Path) {
+            Microsoft.PowerShell.Management\Remove-Item -Path $Path -Force:$Force @Remaining
+        } else {
+            Microsoft.PowerShell.Management\Remove-Item @Remaining
+        }
     }
     try {
         Assert-ThrowsLike {
             Install-HermesCommandLaunchers -Root $installRoot -Destination $shadowBinDir -Repository 'DangLemon/hermes-agent' | Out-Null
         } '*stale launcher blocks PATH resolution*' 'stale hermes.exe removal failure fails closed'
     } finally {
-        Remove-Item Function:\Remove-Item -Force
+        Microsoft.PowerShell.Management\Remove-Item -LiteralPath Function:\Remove-Item -Force -ErrorAction SilentlyContinue
     }
 
     Assert-ThrowsLike {
@@ -219,7 +222,7 @@ try {
         if (-not $resolvedCase.StartsWith($tempBase, [System.StringComparison]::OrdinalIgnoreCase)) {
             throw "Refusing to remove test directory outside the system temp directory: $resolvedCase"
         }
-        Remove-Item -LiteralPath $resolvedCase -Recurse -Force
+        Microsoft.PowerShell.Management\Remove-Item -LiteralPath $resolvedCase -Recurse -Force
     }
 }
 
