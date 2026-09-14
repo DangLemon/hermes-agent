@@ -90,7 +90,7 @@ const HARNESS_ALLOWED_SETTINGS_VIEWS: readonly SettingsViewId[] = [
   'about'
 ]
 
-const HARNESS_DEFAULT_SETTINGS_VIEW = 'config:appearance' as SettingsViewId
+const HARNESS_DEFAULT_SETTINGS_VIEW = 'providers' as SettingsViewId
 
 function harnessAllowsSettingsView(view: SettingsViewId): boolean {
   return HARNESS_ALLOWED_SETTINGS_VIEWS.includes(view)

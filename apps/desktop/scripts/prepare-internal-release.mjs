@@ -14,6 +14,7 @@ const CHECK_KEYS = [
   'stamp',
   'generatedConfig',
   'platformIdentity',
+  'rendererHarness',
   'codeSignature',
   'nativePayload'
 ]

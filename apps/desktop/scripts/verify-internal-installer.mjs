@@ -16,6 +16,7 @@ const DEFAULT_CANONICAL_MANIFEST = path.join(DESKTOP_ROOT, 'lemon-ai-desktop.con
 const DEFAULT_GENERATED_CONFIG = path.join(DESKTOP_ROOT, 'build', 'electron-builder.generated.json')
 const DEFAULT_SEED_HELPER = path.join(DESKTOP_ROOT, 'electron', 'lemon-ai-harness-seed.py')
 const RECEIPT_FILENAME = 'installer-receipt.json'
+const RENDERER_HARNESS_MARKER_FILENAME = 'lemon-ai-renderer-harness.json'
 
 const EXPECTED_REPOSITORY = 'DangLemon/hermes-agent'
 const EXPECTED_WINDOWS_VERSION = {
@@ -145,6 +146,7 @@ export function resolveLayout({
     packagedSeedHelperPath: path.join(resourcesPath, 'lemon-ai-harness-seed.py'),
     stampPath: path.join(resourcesPath, 'install-stamp.json'),
     unpackedDistIndex: path.join(resourcesPath, 'app.asar.unpacked', 'dist', 'index.html'),
+    rendererHarnessMarkerPath: path.join(resourcesPath, 'app.asar.unpacked', 'dist', RENDERER_HARNESS_MARKER_FILENAME),
     nodePtyRoot: path.join(resourcesPath, 'app.asar.unpacked', 'dist', 'node_modules', 'node-pty'),
     getWindowsRoot: path.join(resourcesPath, 'app.asar.unpacked', 'dist', 'node_modules', 'get-windows'),
     osName,
@@ -206,6 +208,19 @@ export function validateGeneratedConfig(config) {
     'electron-builder mac.extendInfo.CFBundleExecutable'
   )
   assertEqual(config.appId, 'com.lemondigital.lemonai', 'electron-builder appId')
+}
+
+export function validateRendererHarnessMarker({ markerPath, manifest }) {
+  ensureFile(markerPath, 'renderer harness marker')
+  const marker = readJson(markerPath, 'renderer harness marker')
+  assertEqual(marker.schemaVersion, 1, 'renderer harness schemaVersion')
+  assertEqual(marker.profile, 'internal', 'renderer harness profile')
+
+  for (const key of ['agents', 'cron', 'messaging', 'terminal', 'webhooks']) {
+    assertEqual(marker.ui?.[key], manifest.ui?.[key], `renderer harness ui.${key}`)
+  }
+
+  return marker
 }
 
 export function readMachOArchitectures(filePath) {
@@ -569,6 +584,10 @@ export function verifyInternalInstaller(options) {
   })
   const manifest = readJson(layout.packagedManifestPath, 'packaged harness manifest')
   validateHarnessManifest(manifest)
+  const rendererHarness = validateRendererHarnessMarker({
+    markerPath: layout.rendererHarnessMarkerPath,
+    manifest
+  })
   const stamp = readJson(layout.stampPath, 'packaged install stamp')
   validateStamp(stamp, config)
   validateGeneratedConfig(readJson(config.generatedConfigPath, 'generated electron-builder config'))
@@ -614,6 +633,7 @@ export function verifyInternalInstaller(options) {
       stamp: true,
       generatedConfig: true,
       platformIdentity: true,
+      rendererHarness: true,
       codeSignature: true,
       nativePayload: true
     }
@@ -627,6 +647,7 @@ export function verifyInternalInstaller(options) {
   return {
     layout,
     manifest,
+    rendererHarness,
     stamp,
     nativePayload,
     receipt: {

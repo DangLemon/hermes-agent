@@ -69,6 +69,20 @@ afterEach(async () => {
 })
 
 describe('AiConnectionSettings', () => {
+  it('surfaces the custom provider form and primary actions immediately', async () => {
+    getCustomEndpoints.mockResolvedValueOnce({ current: { base_url: '', model: '', provider: '' }, endpoints: [] })
+
+    await renderAiConnectionSettings()
+
+    expect(await screen.findByRole('button', { name: 'Add connection' })).toBeTruthy()
+    expect(screen.getByLabelText('Connection name')).toBeTruthy()
+    expect(screen.getByLabelText('Server address')).toBeTruthy()
+    expect(screen.getByLabelText('API key')).toBeTruthy()
+    expect(screen.getByLabelText('Model')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Test connection' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Save and use' })).toBeTruthy()
+  })
+
   it('clears editable state when a later scope fails to load', async () => {
     const { $settingsScopeOverride } = await import('@/store/settings-scope')
     getCustomEndpoints
@@ -107,7 +121,7 @@ describe('AiConnectionSettings', () => {
     await act(async () => {
       $settingsScopeOverride.set('research')
     })
-    await screen.findByText('Add connection')
+    await screen.findByRole('button', { name: 'Add connection' })
 
     await act(async () => {
       rejectValidation(new Error('old scope failure'))
@@ -135,7 +149,7 @@ describe('AiConnectionSettings', () => {
     await act(async () => {
       $settingsScopeOverride.set('research')
     })
-    await screen.findByText('Add connection')
+    await screen.findByRole('button', { name: 'Add connection' })
 
     await act(async () => {
       rejectSave(new Error('old scope save failure'))
