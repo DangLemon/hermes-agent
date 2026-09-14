@@ -201,7 +201,7 @@ def test_install_sh_raw_script_defaults_to_upstream_without_network(tmp_path: Pa
 
     assert '"ok":true' in result.stdout.replace(" ", "")
     assert (install_dir / "README.md").read_text(encoding="utf-8") == "upstream\n"
-    assert origin_url(install_dir) == "https://github.com/NousResearch/hermes-agent.git"
+    assert origin_url(install_dir) == "git@github.com:NousResearch/hermes-agent.git"
 
 
 def test_install_sh_internal_fresh_clone_defaults_to_lemon_repository(tmp_path: Path) -> None:
@@ -219,7 +219,7 @@ def test_install_sh_internal_fresh_clone_defaults_to_lemon_repository(tmp_path: 
 
     assert '"ok":true' in result.stdout.replace(" ", "")
     assert (install_dir / "README.md").read_text(encoding="utf-8") == "internal\n"
-    assert origin_url(install_dir) == "https://github.com/DangLemon/hermes-agent.git"
+    assert origin_url(install_dir) == "git@github.com:DangLemon/hermes-agent.git"
 
 
 def test_install_sh_checkout_manifest_defaults_to_lemon_repository(tmp_path: Path) -> None:
@@ -231,7 +231,7 @@ def test_install_sh_checkout_manifest_defaults_to_lemon_repository(tmp_path: Pat
 
     assert '"ok":true' in result.stdout.replace(" ", "")
     assert (install_dir / "README.md").read_text(encoding="utf-8") == "internal\n"
-    assert origin_url(install_dir) == "https://github.com/DangLemon/hermes-agent.git"
+    assert origin_url(install_dir) == "git@github.com:DangLemon/hermes-agent.git"
 
 
 def test_install_sh_checkout_manifest_reports_lemon_stage_titles(tmp_path: Path) -> None:
@@ -389,7 +389,7 @@ def test_install_sh_brand_hermes_overrides_checkout_manifest(tmp_path: Path) -> 
 
     assert '"ok":true' in result.stdout.replace(" ", "")
     assert (install_dir / "README.md").read_text(encoding="utf-8") == "upstream\n"
-    assert origin_url(install_dir) == "https://github.com/NousResearch/hermes-agent.git"
+    assert origin_url(install_dir) == "git@github.com:NousResearch/hermes-agent.git"
 
 
 def test_install_sh_brand_lemon_overrides_raw_script_default(tmp_path: Path) -> None:
@@ -409,7 +409,7 @@ def test_install_sh_brand_lemon_overrides_raw_script_default(tmp_path: Path) -> 
 
     assert '"ok":true' in result.stdout.replace(" ", "")
     assert (install_dir / "README.md").read_text(encoding="utf-8") == "internal\n"
-    assert origin_url(install_dir) == "https://github.com/DangLemon/hermes-agent.git"
+    assert origin_url(install_dir) == "git@github.com:DangLemon/hermes-agent.git"
 
 
 def test_install_cmd_selects_configured_repository_for_powershell_handoff() -> None:
@@ -512,7 +512,7 @@ def test_install_sh_invalid_explicit_selector_does_not_auto_detect_checkout_mani
 
     assert '"ok":true' in result.stdout.replace(" ", "")
     assert (install_dir / "README.md").read_text(encoding="utf-8") == "upstream\n"
-    assert origin_url(install_dir) == "https://github.com/NousResearch/hermes-agent.git"
+    assert origin_url(install_dir) == "git@github.com:NousResearch/hermes-agent.git"
 
 
 def test_install_sh_internal_help_reports_only_lemon_default_paths(tmp_path: Path) -> None:
@@ -571,6 +571,53 @@ def test_install_sh_custom_repo_clone_and_existing_update_use_selected_repo(tmp_
 
     assert '"ok":true' in first.stdout.replace(" ", "")
     assert '"ok":true' in second.stdout.replace(" ", "")
+    assert (install_dir / "README.md").read_text(encoding="utf-8") == "internal\n"
+    assert origin_url(install_dir) == "git@github.com:DangLemon/hermes-agent.git"
+
+
+def write_fake_ssh_fail_tools(tmp_path: Path) -> Path:
+    bin_dir = tmp_path / "fake-ssh-fail-bin"
+    bin_dir.mkdir()
+    git_wrapper = bin_dir / "git"
+    git_wrapper.write_text(
+        textwrap.dedent(
+            f"""
+            #!/bin/sh
+            if [ "$1" = "clone" ]; then
+                for arg in "$@"; do
+                    case "$arg" in
+                        git@github.com:*) exit 42 ;;
+                    esac
+                done
+            fi
+            exec "{REAL_GIT}" "$@"
+            """
+        ).lstrip(),
+        encoding="utf-8",
+    )
+    sleep_wrapper = bin_dir / "sleep"
+    sleep_wrapper.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    for executable in (git_wrapper, sleep_wrapper):
+        executable.chmod(executable.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return bin_dir
+
+
+def test_install_sh_https_fallback_keeps_https_origin(tmp_path: Path) -> None:
+    internal, _ = create_remote(tmp_path, "DangLemon/hermes-agent", marker="internal")
+    gitconfig = write_gitconfig(tmp_path, {"DangLemon/hermes-agent": internal})
+    install_dir = tmp_path / "install"
+    fake_bin = write_fake_ssh_fail_tools(tmp_path)
+
+    result = run_repository_stage(
+        tmp_path,
+        gitconfig=gitconfig,
+        install_dir=install_dir,
+        repository="DangLemon/hermes-agent",
+        extra_path=fake_bin,
+        check=True,
+    )
+
+    assert '"ok":true' in result.stdout.replace(" ", "")
     assert (install_dir / "README.md").read_text(encoding="utf-8") == "internal\n"
     assert origin_url(install_dir) == "https://github.com/DangLemon/hermes-agent.git"
 

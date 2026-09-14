@@ -184,11 +184,23 @@ def _shallow_git(head_sha, fetch_head_sha):
 
 def _internal_shallow_git_with_upstream_origin(head_sha, fetch_head_sha):
     origin = {"url": "https://github.com/NousResearch/hermes-agent.git"}
+    calls = []
 
     def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
         if cmd[:4] == ["git", "remote", "get-url", "origin"]:
             return MagicMock(returncode=0, stdout=f"{origin['url']}\n")
+        if cmd == ["git", "show-ref", "--verify", "--quiet", "refs/remotes/origin/main"]:
+            assert origin["url"] == "https://github.com/NousResearch/hermes-agent.git"
+            return MagicMock(returncode=0, stdout=b"")
+        if cmd == ["git", "update-ref", "-d", "refs/remotes/origin/main"]:
+            assert origin["url"] == "https://github.com/NousResearch/hermes-agent.git"
+            return MagicMock(returncode=0, stdout=b"")
         if cmd[:4] == ["git", "remote", "set-url", "origin"]:
+            assert [
+                ["git", "show-ref", "--verify", "--quiet", "refs/remotes/origin/main"],
+                ["git", "update-ref", "-d", "refs/remotes/origin/main"],
+            ] == calls[-3:-1]
             origin["url"] = cmd[4]
             return MagicMock(returncode=0, stdout="")
         if cmd[:3] == ["git", "rev-parse", "--is-shallow-repository"]:
@@ -203,7 +215,7 @@ def _internal_shallow_git_with_upstream_origin(head_sha, fetch_head_sha):
             return MagicMock(returncode=0, stdout=f"{fetch_head_sha}\n")
         raise AssertionError(f"unexpected git command: {cmd!r}")
 
-    return fake_run
+    return fake_run, calls
 
 
 def test_check_via_local_git_internal_env_repoints_upstream_origin(monkeypatch, tmp_path):
@@ -213,12 +225,26 @@ def test_check_via_local_git_internal_env_repoints_upstream_origin(monkeypatch, 
     repo_dir = tmp_path / "hermes-agent"
     repo_dir.mkdir()
 
+    fake_run, calls = _internal_shallow_git_with_upstream_origin(SHA_A, SHA_B)
+
     with patch(
         "hermes_cli.banner.subprocess.run",
-        side_effect=_internal_shallow_git_with_upstream_origin(SHA_A, SHA_B),
+        side_effect=fake_run,
     ), patch.object(banner, "_github_compare_behind", return_value=7) as compare:
         assert banner._check_via_local_git(repo_dir) == 7
 
+    assert calls[:4] == [
+        ["git", "remote", "get-url", "origin"],
+        ["git", "show-ref", "--verify", "--quiet", "refs/remotes/origin/main"],
+        ["git", "update-ref", "-d", "refs/remotes/origin/main"],
+        [
+            "git",
+            "remote",
+            "set-url",
+            "origin",
+            "https://github.com/DangLemon/hermes-agent.git",
+        ],
+    ]
     compare.assert_called_once_with(SHA_A, SHA_B, repository="DangLemon/hermes-agent")
 
 
