@@ -73,6 +73,23 @@ describe('desktop i18n languages', () => {
     expect(t.skills.sortMostUsed).toBe('Dùng nhiều')
   })
 
+  it('translates artifact surfaces into Vietnamese', () => {
+    const t = TRANSLATIONS.vi
+
+    expect(t.artifacts.tabAll).toBe('Tất cả')
+    expect(t.artifacts.tabImages).toBe('Hình ảnh')
+    expect(t.artifacts.tabFiles).toBe('Tệp')
+    expect(t.artifacts.tabLinks).toBe('Liên kết')
+    expect(t.artifacts.noArtifactsTitle).toBe('Chưa có tài liệu nào')
+    expect(t.artifacts.noArtifactsDesc).toContain('sẽ xuất hiện ở đây')
+    expect(t.artifacts.partialLoadMessage(1, 4)).toContain('Đã bỏ qua 1/4')
+    expect(t.artifacts.safeLimitDetail(2)).toContain('giới hạn tải nội dung an toàn')
+    expect(t.artifacts.unreadableDetail(3)).toBe('Không đọc được 3 cuộc trò chuyện.')
+    expect(t.artifacts.rangeOf(1, 2, 3)).toBe('1-2 trên 3')
+    expect(t.artifactCard.open).toBe('Mở')
+    expect(t.artifactPreview.openInBrowser).toBe('Mở trong trình duyệt')
+  })
+
   it('keeps the English internal new conversation label icon-free', () => {
     expect(TRANSLATIONS.en.internalWorkspace.actions.newConversation).toBe('New conversation')
   })

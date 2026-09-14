@@ -1964,6 +1964,9 @@ export interface Translations {
     noArtifactsTitle: string
     noArtifactsDesc: string
     failedLoad: string
+    partialLoadMessage: (skipped: number, total: number) => string
+    safeLimitDetail: (count: number) => string
+    unreadableDetail: (count: number) => string
     openFailed: string
     itemsImage: string
     itemsLink: string

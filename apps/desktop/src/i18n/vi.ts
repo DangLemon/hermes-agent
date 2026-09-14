@@ -268,6 +268,65 @@ export const vi = defineLocale({
     }
   },
 
+  artifacts: {
+    search: 'Tìm tài liệu...',
+    refresh: 'Làm mới tài liệu',
+    refreshing: 'Đang làm mới tài liệu',
+    indexing: 'Đang quét tài liệu từ các cuộc trò chuyện gần đây',
+    tabAll: 'Tất cả',
+    tabImages: 'Hình ảnh',
+    tabFiles: 'Tệp',
+    tabLinks: 'Liên kết',
+    noArtifactsTitle: 'Chưa có tài liệu nào',
+    noArtifactsDesc: 'Hình ảnh và tệp được tạo sẽ xuất hiện ở đây sau khi cuộc trò chuyện tạo ra chúng.',
+    failedLoad: 'Không thể tải tài liệu',
+    partialLoadMessage: (skipped, total) =>
+      `Đã bỏ qua ${skipped}/${total} cuộc trò chuyện gần đây khi lập chỉ mục tài liệu.`,
+    safeLimitDetail: count => `${count} cuộc trò chuyện vượt quá giới hạn tải nội dung an toàn.`,
+    unreadableDetail: count => `Không đọc được ${count} cuộc trò chuyện.`,
+    openFailed: 'Không thể mở',
+    itemsImage: 'hình ảnh',
+    itemsLink: 'liên kết',
+    itemsFile: 'tệp',
+    itemsGeneric: 'mục',
+    zero: '0',
+    rangeOf: (start, end, total) => `${start}-${end} trên ${total}`,
+    goToPage: (itemLabel, page) => `Đi tới trang ${itemLabel} ${page}`,
+    colTitleLink: 'Tiêu đề liên kết',
+    colTitleFile: 'Tên',
+    colTitleDefault: 'Tiêu đề / tên',
+    colLocationLink: 'URL',
+    colLocationFile: 'Đường dẫn',
+    colLocationDefault: 'Vị trí',
+    colSession: 'Cuộc trò chuyện',
+    kindImage: 'hình ảnh',
+    kindFile: 'tệp',
+    kindLink: 'liên kết',
+    chat: 'Mở cuộc trò chuyện',
+    copyUrl: 'Sao chép URL',
+    copyPath: 'Sao chép đường dẫn'
+  },
+
+  artifactCard: {
+    kind: { code: 'Mã nguồn', html: 'Trang tương tác', svg: 'Đồ họa' },
+    generating: lines => `Đang tạo… ${lines} dòng`,
+    versionBadge: count => `${count} phiên bản`,
+    open: 'Mở'
+  },
+
+  artifactPreview: {
+    versionOf: (current, total) => `v${current}/${total}`,
+    olderVersion: 'Phiên bản cũ hơn',
+    newerVersion: 'Phiên bản mới hơn',
+    latest: 'Mới nhất',
+    copyContent: 'Sao chép nội dung',
+    download: 'Tải xuống',
+    openInBrowser: 'Mở trong trình duyệt',
+    openInBrowserFailed: 'Không thể mở trong trình duyệt',
+    missingTitle: 'Không tìm thấy tài liệu',
+    missingBody: 'Tài liệu này không còn trong danh mục cục bộ.'
+  },
+
   internalWorkspace: {
     brand: {
       name: 'Lemon AI',
