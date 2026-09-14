@@ -26,6 +26,14 @@ _ZIP_PRESERVED_TOP_LEVEL = {"venv", "node_modules", ".git", ".env"}
 _STASH_HINT = "  Stash or commit your changes, then rerun `hermes update`."
 
 
+def _zip_reinstall_url_for_configured_repository() -> str:
+    from hermes_cli.update_cmd import _configured_update_repository, _is_default_update_repository
+    if _is_default_update_repository():
+        return "https://hermes-agent.nousresearch.com"
+    repository = _configured_update_repository()
+    return f"https://raw.githubusercontent.com/{repository}/main/scripts/install.ps1"
+
+
 def _remove_path(path: str, *, ignore_errors: bool = False) -> None:
     """Remove a dir or file; missing paths are a no-op."""
     if os.path.isdir(path):
@@ -310,7 +318,10 @@ def _download_and_swap_zip(branch: str, zip_url: str) -> None:
         print(f"✗ ZIP update failed: {e}")
         # Two-phase replace commits all or rolls all back, so no mixed tree here — don't push a needless reinstall.
         print("  Your existing install was left in place.")
-        print("  Re-run `hermes update` to retry; if the agent won't start, reinstall from https://hermes-agent.nousresearch.com")
+        print(
+            "  Re-run `hermes update` to retry; if the agent won't start, "
+            f"reinstall from {_zip_reinstall_url_for_configured_repository()}"
+        )
         _m().sys.exit(1)
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)

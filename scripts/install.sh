@@ -494,6 +494,14 @@ ensure_managed_origin() {
     fi
 }
 
+powershell_installer_url() {
+    if [ "$(repository_identity_key "$REPOSITORY")" = "$(repository_identity_key "$HERMES_DEFAULT_REPOSITORY")" ]; then
+        printf '%s\n' "https://hermes-agent.nousresearch.com/install.ps1"
+    else
+        printf '%s\n' "https://raw.githubusercontent.com/${REPOSITORY}/main/scripts/install.ps1"
+    fi
+}
+
 archive_ref_url_and_label() {
     if [ -n "$INSTALL_COMMIT" ]; then
         ARCHIVE_URL="https://github.com/${REPOSITORY}/archive/${INSTALL_COMMIT}.zip"
@@ -884,7 +892,7 @@ detect_os() {
             OS="windows"
             DISTRO="windows"
             log_error "Windows detected. Please use the PowerShell installer:"
-            log_info "  iex (irm https://hermes-agent.nousresearch.com/install.ps1)"
+            log_info "  iex (irm $(powershell_installer_url))"
             exit 1
             ;;
         *)

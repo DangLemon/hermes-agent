@@ -132,6 +132,58 @@ def copy_raw_install_sh(tmp_path: Path) -> Path:
     return raw_script
 
 
+def write_fake_windows_uname(tmp_path: Path) -> Path:
+    bin_dir = tmp_path / "fake-windows-bin"
+    bin_dir.mkdir()
+    uname = bin_dir / "uname"
+    uname.write_text("#!/bin/sh\nprintf 'MINGW64_NT-10.0\\n'\n", encoding="utf-8")
+    uname.chmod(uname.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return bin_dir
+
+
+def run_raw_install_sh_on_fake_windows(
+    tmp_path: Path, *, repository: str | None = None
+) -> subprocess.CompletedProcess[str]:
+    raw_script = copy_raw_install_sh(tmp_path)
+    env = os.environ.copy()
+    env.update({"HOME": str(tmp_path / "home")})
+    env["PATH"] = f"{write_fake_windows_uname(tmp_path)}{os.pathsep}{env['PATH']}"
+    if repository is not None:
+        env["HERMES_INSTALL_REPOSITORY"] = repository
+    return subprocess.run(
+        ["bash", str(raw_script), "--non-interactive"],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+
+
+def test_install_sh_windows_handoff_keeps_public_powershell_installer(
+    tmp_path: Path,
+) -> None:
+    result = run_raw_install_sh_on_fake_windows(tmp_path)
+
+    assert result.returncode == 1
+    assert "iex (irm https://hermes-agent.nousresearch.com/install.ps1)" in result.stdout
+    assert "raw.githubusercontent.com" not in result.stdout
+
+
+def test_install_sh_windows_handoff_uses_configured_powershell_installer(
+    tmp_path: Path,
+) -> None:
+    result = run_raw_install_sh_on_fake_windows(
+        tmp_path, repository="DangLemon/hermes-agent"
+    )
+
+    assert result.returncode == 1
+    assert (
+        "iex (irm "
+        "https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.ps1)"
+    ) in result.stdout
+    assert "https://hermes-agent.nousresearch.com/install.ps1" not in result.stdout
+
+
 def test_install_sh_raw_script_defaults_to_upstream_without_network(tmp_path: Path) -> None:
     upstream, _ = create_remote(tmp_path, "NousResearch/hermes-agent", marker="upstream")
     gitconfig = write_gitconfig(tmp_path, {"NousResearch/hermes-agent": upstream})
