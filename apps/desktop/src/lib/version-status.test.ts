@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
 import { en } from '@/i18n/en'
+import { lemonAppBrand } from '@/lib/app-brand'
 
-import { resolveVersionStatus } from './version-status'
+import { resolveVersionStatus, versionStatusCopyForBrand } from './version-status'
 
 const copy = en.shell.statusbar
 
@@ -70,6 +71,15 @@ describe('resolveVersionStatus', () => {
     expect(client({ applying: true, version: '0.4.2' }).tooltip).toBe(
       `${copy.updateInProgress} · Hermes Desktop v0.4.2`
     )
+  })
+
+  it('uses the Lemon AI app name in internal client version tooltips', () => {
+    const lemonCopy = versionStatusCopyForBrand(copy, lemonAppBrand)
+
+    expect(client({ applying: true, copy: lemonCopy, version: '0.21.0' }).tooltip).toBe(
+      `${copy.updateInProgress} · Lemon AI v0.21.0`
+    )
+    expect(client({ applying: true, copy: lemonCopy, version: '0.21.0' }).tooltip).not.toContain('Hermes Desktop')
   })
 
   it('labels the backend target distinctly and never claims a client sha', () => {

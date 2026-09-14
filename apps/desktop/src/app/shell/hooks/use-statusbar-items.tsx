@@ -14,6 +14,7 @@ import { $paneVisible, togglePaneVisible } from '@/components/pane-shell/tree/st
 import { Codicon } from '@/components/ui/codicon'
 import { GlyphSpinner } from '@/components/ui/glyph-spinner'
 import { useI18n } from '@/i18n'
+import { appBrandForEnv } from '@/lib/app-brand'
 import { displayPath, pathLeaf } from '@/lib/display-path'
 import {
   Activity,
@@ -32,7 +33,7 @@ import { runtimeReadinessDisplay, type RuntimeReadinessResult } from '@/lib/runt
 import { cacheHitLabel, contextBarLabel, LiveDuration, tokensPerSecondLabel, usageContextLabel } from '@/lib/statusbar'
 import { useStoreSelector } from '@/lib/use-session-slice'
 import { cn } from '@/lib/utils'
-import { resolveVersionStatus } from '@/lib/version-status'
+import { resolveVersionStatus, versionStatusCopyForBrand } from '@/lib/version-status'
 import { copyFilePath, revealFile } from '@/store/file-actions'
 import { revealFileInTree } from '@/store/layout'
 import { $activeGatewayProfile } from '@/store/profile'
@@ -102,6 +103,7 @@ export function useStatusbarItems({
   const { t } = useI18n()
   const navigate = useNavigate()
   const copy = t.shell.statusbar
+  const versionCopy = useMemo(() => versionStatusCopyForBrand(copy, appBrandForEnv()), [copy])
   const fileMenu = t.fileMenu
   const primaryActiveSessionId = useStore($activeSessionId)
   const activeGatewayProfile = useStore($activeGatewayProfile)
@@ -354,7 +356,7 @@ export function useStatusbarItems({
       applyMessage: updateApply.message,
       behind: updateStatus?.behind ?? 0,
       branch: updateStatus?.branch,
-      copy,
+      copy: versionCopy,
       remote: connection?.mode === 'remote',
       restarting: updateApply.stage === 'restart',
       sha: updateStatus?.currentSha?.slice(0, 7) ?? null,
@@ -381,7 +383,7 @@ export function useStatusbarItems({
   }, [
     desktopVersion?.appVersion,
     connection?.mode,
-    copy,
+    versionCopy,
     updateApply.applying,
     updateApply.message,
     updateApply.stage,
@@ -402,7 +404,7 @@ export function useStatusbarItems({
       applying,
       applyMessage: backendUpdateApply.message,
       behind: backendUpdateStatus?.behind ?? 0,
-      copy,
+      copy: versionCopy,
       remote: true,
       restarting: backendUpdateApply.stage === 'restart',
       target: 'backend',
@@ -430,7 +432,7 @@ export function useStatusbarItems({
     backendUpdateApply.applying,
     backendUpdateApply.message,
     backendUpdateApply.stage,
-    copy
+    versionCopy
   ])
 
   const coreLeftStatusbarItems = useMemo<readonly StatusbarItem[]>(

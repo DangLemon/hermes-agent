@@ -10,6 +10,8 @@
 
 import type { UpdateTarget } from '@/lib/update-copy'
 
+import type { AppBrand } from './app-brand'
+
 export interface VersionStatusCopy {
   backendLabel: (version: string) => string
   backendVersion: (version: string) => string
@@ -53,6 +55,17 @@ export interface VersionStatusResult {
   tooltip?: string
   /** Nothing identifies this target yet — callers hide the row. */
   unknown: boolean
+}
+
+export function versionStatusCopyForBrand(copy: VersionStatusCopy, brand: AppBrand): VersionStatusCopy {
+  if (brand.mode === 'upstream') {
+    return copy
+  }
+
+  return {
+    ...copy,
+    desktopVersion: version => `${brand.displayName} v${version}`
+  }
 }
 
 export function resolveVersionStatus({

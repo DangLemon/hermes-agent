@@ -202,6 +202,10 @@ test('validated internal package config applies Lemon physical identity while pr
     assert.equal(config.linux.synopsis, 'Native desktop shell for Lemon AI.')
     assert.equal(config.nsis.shortcutName, 'Lemon AI')
     assert.equal(config.nsis.uninstallDisplayName, 'Lemon AI')
+    assert.deepEqual(config.extraMetadata, {
+      name: 'lemon-ai',
+      productName: 'Lemon AI'
+    })
     assert.deepEqual(config.extraResources[1], {
       from: 'assets/lemon-icon.ico',
       to: 'icon.ico'
@@ -211,6 +215,10 @@ test('validated internal package config applies Lemon physical identity while pr
       to: '.',
       filter: ['lemon-ai-harness.json', 'lemon-ai-harness-seed.py']
     })
+    const serializedConfig = JSON.stringify(config)
+    assert.equal(serializedConfig.includes('NousResearch/hermes-agent'), false)
+    assert.equal(serializedConfig.includes('hermes-updater'), false)
+    assert.equal(serializedConfig.includes('"publish"'), false)
     await validateConfiguration(structuredClone(config))
   })
 })
