@@ -139,17 +139,57 @@ describe('GatewayMenuPanel internal harness chrome', () => {
     expect(onOpenAiConnection).toHaveBeenCalledOnce()
   })
 
-  it('renders an unknown provisioning notice without blocking the menu', () => {
+  it('renders an unknown provisioning notice with a direct AI connection action', () => {
+    const onClose = vi.fn()
+    const onOpenAiConnection = vi.fn()
+
     renderPanel('open', {
       harnessMode: true,
       harnessProvisioning: {
         detail: 'Runtime provisioning has not reported readiness yet.',
         missing: [],
         state: 'unknown'
-      }
+      },
+      onClose,
+      onOpenAiConnection
     })
 
     expect(screen.getByText('IT setup status unknown')).toBeTruthy()
     expect(screen.getByText('Runtime provisioning has not reported readiness yet.')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open AI Connection' }))
+
+    expect(onClose).toHaveBeenCalledOnce()
+    expect(onOpenAiConnection).toHaveBeenCalledOnce()
+  })
+
+  it('opens AI connection from the disconnected harness state', () => {
+    const onOpenAiConnection = vi.fn()
+
+    renderPanel('closed', {
+      harnessMode: true,
+      onOpenAiConnection
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open AI Connection' }))
+
+    expect(onOpenAiConnection).toHaveBeenCalledOnce()
+  })
+
+  it('opens AI connection when provisioning is complete but inference is not ready', () => {
+    const onOpenAiConnection = vi.fn()
+
+    renderPanel('open', {
+      harnessMode: true,
+      harnessProvisioning: { missing: [], state: 'complete' },
+      inferenceStatus: { checksDisagree: false, ready: false, reason: 'No provider can serve the selected model.', source: 'runtime_check' },
+      onOpenAiConnection
+    })
+
+    expect(screen.getByText('No provider can serve the selected model.')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open AI Connection' }))
+
+    expect(onOpenAiConnection).toHaveBeenCalledOnce()
   })
 })
