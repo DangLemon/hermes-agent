@@ -16,9 +16,10 @@ import { Loader } from '@/components/ui/loader'
 import { Progress } from '@/components/ui/progress'
 import type { DesktopUpdateBlocker, DesktopUpdateCommit, DesktopUpdateStage, DesktopUpdateStatus } from '@/global'
 import { useI18n } from '@/i18n'
+import { appBrandForEnv } from '@/lib/app-brand'
 import { buildCommitChangelog, type CommitGroup } from '@/lib/commit-changelog'
 import { AlertCircle, Check, Copy, Terminal } from '@/lib/icons'
-import { resolveUpdateCopy, type UpdateTarget } from '@/lib/update-copy'
+import { brandUpdateCopy, resolveUpdateCopy, type UpdateTarget } from '@/lib/update-copy'
 import { cn } from '@/lib/utils'
 import {
   $backendUpdateApply,
@@ -40,6 +41,12 @@ import {
 
 function totalItems(groups: readonly CommitGroup[]) {
   return groups.reduce((sum, g) => sum + g.items.length, 0)
+}
+
+function useBrandedUpdatesCopy() {
+  const { t } = useI18n()
+
+  return brandUpdateCopy(t.updates, appBrandForEnv())
 }
 
 export function UpdatesOverlay() {
@@ -170,8 +177,7 @@ function IdleView({
   target: UpdateTarget
   updateAvailable: boolean
 }) {
-  const { t } = useI18n()
-  const u = t.updates
+  const u = useBrandedUpdatesCopy()
 
   if (!status && checking) {
     return (
@@ -281,8 +287,7 @@ function IdleView({
 }
 
 function ManualView({ command, message, onDone }: { command: string | null; message?: string; onDone: () => void }) {
-  const { t } = useI18n()
-  const u = t.updates
+  const u = useBrandedUpdatesCopy()
   const [copied, setCopied] = useState(false)
 
   const handleCopy = () => {
@@ -361,8 +366,7 @@ function ManualView({ command, message, onDone }: { command: string | null; mess
 // tells the user to update/reinstall the desktop app — never claims the GUI was
 // updated.
 function GuiSkewView({ message, onDone }: { message?: string; onDone: () => void }) {
-  const { t } = useI18n()
-  const u = t.updates
+  const u = useBrandedUpdatesCopy()
 
   return (
     <div className="grid gap-5 px-6 pb-6 pt-7 pr-8">
@@ -383,8 +387,7 @@ function GuiSkewView({ message, onDone }: { message?: string; onDone: () => void
 }
 
 function ApplyingView({ apply, isBackend }: { apply: UpdateApplyState; isBackend: boolean }) {
-  const { t } = useI18n()
-  const u = t.updates
+  const u = useBrandedUpdatesCopy()
   const label = u.stages[apply.stage as DesktopUpdateStage] ?? u.stages.idle
   const body = isBackend ? u.applyingBodyBackend : u.applyingBody
   const currentMessage = apply.message.trim()
@@ -463,8 +466,7 @@ export function BlockerView({
   onDismiss: () => void
   onStopAndUpdate: () => void
 }) {
-  const { t } = useI18n()
-  const u = t.updates
+  const u = useBrandedUpdatesCopy()
 
   const safeBlockers = blockers.filter(blocker => blocker.kind === 'local-preview' && blocker.safeToStop)
   const hasForeignBlockers = safeBlockers.length !== blockers.length
@@ -531,8 +533,7 @@ export function BlockerView({
 }
 
 function ErrorView({ message, onDismiss, onRetry }: { message: string; onDismiss: () => void; onRetry: () => void }) {
-  const { t } = useI18n()
-  const u = t.updates
+  const u = useBrandedUpdatesCopy()
 
   return (
     <ErrorState

@@ -383,6 +383,7 @@ export function useStatusbarItems({
   }, [
     desktopVersion?.appVersion,
     connection?.mode,
+    copy.toggleVersion,
     versionCopy,
     updateApply.applying,
     updateApply.message,
@@ -432,6 +433,7 @@ export function useStatusbarItems({
     backendUpdateApply.applying,
     backendUpdateApply.message,
     backendUpdateApply.stage,
+    copy.toggleBackendVersion,
     versionCopy
   ])
 

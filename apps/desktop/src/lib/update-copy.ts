@@ -8,6 +8,8 @@
  * Extracted from updates-overlay.tsx so the wording logic is unit-testable.
  */
 
+import { type AppBrand, replaceHermesBrandTerms } from '@/lib/app-brand'
+
 export type UpdateTarget = 'client' | 'backend'
 
 export interface UpdateCopyStrings {
@@ -41,4 +43,27 @@ export function resolveUpdateCopy({ target, shownItems, copy }: ResolveUpdateCop
         : copy.availableBody
 
   return { title, body }
+}
+
+export function brandUpdateCopy<T>(copy: T, brand: AppBrand): T {
+  if (brand.mode === 'upstream' || copy === null || typeof copy !== 'object') {
+    return copy
+  }
+
+  if (Array.isArray(copy)) {
+    return copy.map(value => brandUpdateCopy(value, brand)) as T
+  }
+
+  const branded: Record<string, unknown> = {}
+
+  for (const [key, value] of Object.entries(copy)) {
+    branded[key] =
+      typeof value === 'string'
+        ? replaceHermesBrandTerms(value, brand)
+        : value && typeof value === 'object'
+          ? brandUpdateCopy(value, brand)
+          : value
+  }
+
+  return branded as T
 }

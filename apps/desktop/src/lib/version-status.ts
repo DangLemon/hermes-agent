@@ -8,9 +8,8 @@
  * into describing the same install differently.
  */
 
+import { type AppBrand, replaceHermesBrandTerms } from '@/lib/app-brand'
 import type { UpdateTarget } from '@/lib/update-copy'
-
-import type { AppBrand } from './app-brand'
 
 export interface VersionStatusCopy {
   backendLabel: (version: string) => string
@@ -64,7 +63,7 @@ export function versionStatusCopyForBrand(copy: VersionStatusCopy, brand: AppBra
 
   return {
     ...copy,
-    desktopVersion: version => `${brand.displayName} v${version}`
+    desktopVersion: version => replaceHermesBrandTerms(copy.desktopVersion(version), brand)
   }
 }
 

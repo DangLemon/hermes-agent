@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest'
 
 import { harnessEnvFromBuildConstants } from '@/app/internal-company/capabilities'
 
-import { appBrandForEnv, applyAppBrandRoot, lemonAppBrand, replaceAppBrandTokens, upstreamAppBrand } from './app-brand'
+import {
+  appBrandForEnv,
+  applyAppBrandRoot,
+  lemonAppBrand,
+  replaceAppBrandTokens,
+  replaceHermesBrandTerms,
+  upstreamAppBrand
+} from './app-brand'
 
 describe('appBrandForEnv', () => {
   it('keeps upstream Hermes branding by default', () => {
@@ -45,6 +52,13 @@ describe('appBrandForEnv', () => {
     expect(replaceAppBrandTokens('Uninstall {appName}: remove {agentName}.', lemonAppBrand)).toBe(
       'Uninstall Lemon AI: remove the Lemon AI agent.'
     )
+  })
+
+  it('replaces legacy Hermes terms across internal update copy', () => {
+    const source = 'Hermes Desktop checks for updates and restarts the Hermes Agent.'
+
+    expect(replaceHermesBrandTerms(source, upstreamAppBrand)).toBe(source)
+    expect(replaceHermesBrandTerms(source, lemonAppBrand)).toBe('Lemon AI checks for updates and restarts the Lemon AI.')
   })
 })
 

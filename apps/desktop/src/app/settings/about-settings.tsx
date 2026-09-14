@@ -5,7 +5,7 @@ import { BrandMark } from '@/components/brand-mark'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import { type Translations, useI18n } from '@/i18n'
-import { type AppBrand, appBrandForEnv, replaceAppBrandTokens } from '@/lib/app-brand'
+import { type AppBrand, appBrandForEnv, replaceHermesBrandTerms } from '@/lib/app-brand'
 import { AlertTriangle, CheckCircle2, ExternalLink, Loader2, RefreshCw } from '@/lib/icons'
 import { cn } from '@/lib/utils'
 import {
@@ -32,12 +32,7 @@ type BrandableAboutCopy = Pick<
 >
 
 function replaceAboutBrandTerms(value: string, brand: AppBrand): string {
-  const tokenized = value
-    .replaceAll('Hermes Desktop', '{appName}')
-    .replaceAll('Hermes Agent', '{appName}')
-    .replaceAll('Hermes', '{appName}')
-
-  return replaceAppBrandTokens(tokenized, brand)
+  return replaceHermesBrandTerms(value, brand)
 }
 
 export function aboutSettingsCopyForBrand(copy: BrandableAboutCopy, brand: AppBrand): BrandableAboutCopy {
