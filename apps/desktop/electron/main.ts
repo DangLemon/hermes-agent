@@ -66,6 +66,7 @@ import {
 import { waitForDashboardPortAnnouncement } from './backend-ready'
 import { recycleOwnedBackend } from './backend-recycle'
 import { isPidAliveWindows, waitForBackendRelease } from './backend-release-gate'
+import { shouldAllowExternalRuntime } from './backend-resolution-policy'
 import { buildHermesBackendSpawnEnv } from './backend-spawn-env'
 import {
   isHostKeyChangedBootFailure,
@@ -5112,9 +5113,15 @@ function resolveHermesBackend(backendArgs) {
   //    do NOT write a bootstrap marker; the user did this themselves and we
   //    don't want to take ownership of an install we didn't perform.
   //    HERMES_DESKTOP_IGNORE_EXISTING=1 forces the bootstrap path for testing.
-  if (process.env.HERMES_DESKTOP_IGNORE_EXISTING !== '1') {
+  const hermesOverride = process.env.HERMES_DESKTOP_HERMES
+
+  const allowExternalRuntime = shouldAllowExternalRuntime({
+    explicitCommand: hermesOverride,
+    internalHarnessActive: INTERNAL_DESKTOP_HARNESS.active
+  })
+
+  if (allowExternalRuntime && process.env['HERMES_DESKTOP_IGNORE_EXISTING'] !== '1') {
     let hermesCommand = null
-    const hermesOverride = process.env.HERMES_DESKTOP_HERMES
 
     if (hermesOverride) {
       const resolvedOverride = findOnPath(hermesOverride)
@@ -5183,7 +5190,7 @@ function resolveHermesBackend(backendArgs) {
   // 5. Last-ditch: pip-installed hermes_cli module via system Python.
   //    Same rationale as #4 -- the user installed this; we use it but don't
   //    take ownership.
-  const python = findSystemPython()
+  const python = INTERNAL_DESKTOP_HARNESS.active ? null : findSystemPython()
 
   if (python) {
     // Same smoke-test rationale as step 4: a system Python in the

@@ -142,6 +142,10 @@ export function GatewayMenuPanel({
   const showProvisioningNotice = harnessMode && harnessProvisioning?.state && harnessProvisioning.state !== 'complete'
   const gatewayConnecting = gatewayState === 'connecting'
   const inferenceReady = gatewayOpen && inferenceStatus?.ready === true
+  const provisioningAlreadyOffersAiConnection =
+    harnessProvisioning?.state === 'incomplete' && harnessProvisioning.missing.includes('inference')
+
+  const showAiConnectionShortcut = harnessMode && !inferenceReady && !provisioningAlreadyOffersAiConnection
 
   const connectionLabel = gatewayOpen
     ? copy.connected
@@ -234,6 +238,14 @@ export function GatewayMenuPanel({
 
       {showProvisioningNotice && harnessProvisioning && (
         <ProvisioningNotice onOpenAiConnection={openAiConnection} provisioning={harnessProvisioning} />
+      )}
+
+      {showAiConnectionShortcut && (
+        <Section className="text-xs text-muted-foreground">
+          <Button className="h-auto px-2 py-1 text-xs" onClick={openAiConnection} size="xs" type="button" variant="secondary">
+            {copy.openAiConnection}
+          </Button>
+        </Section>
       )}
 
       {inferenceStatus?.reason && (
