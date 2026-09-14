@@ -9,6 +9,7 @@
  */
 
 import type { UpdateTarget } from '@/lib/update-copy'
+
 import type { AppBrand } from './app-brand'
 
 export interface VersionStatusCopy {

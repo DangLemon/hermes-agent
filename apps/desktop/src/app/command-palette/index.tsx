@@ -22,6 +22,7 @@ import { KbdCombo } from '@/components/ui/kbd'
 import { getHermesConfigRecord, listAllProfileSessions } from '@/hermes'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useI18n } from '@/i18n'
+import { appBrandForEnv } from '@/lib/app-brand'
 import { sessionTitle } from '@/lib/chat-runtime'
 import {
   Activity,
@@ -58,7 +59,6 @@ import {
   Wrench,
   Zap
 } from '@/lib/icons'
-import { appBrandForEnv } from '@/lib/app-brand'
 import { getServers } from '@/lib/mcp-servers'
 import { normalize } from '@/lib/text'
 import { cn } from '@/lib/utils'
