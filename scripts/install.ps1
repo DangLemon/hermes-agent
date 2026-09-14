@@ -467,11 +467,33 @@ if ($script:NormalizedProfilePaths) {
     Write-PathDiag "resolved install paths: HermesHome=$HermesHome InstallDir=$InstallDir"
 }
 
+function Test-RepositoryIdentity {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
+    if ($Value -match "^(https?:|git@)") { return $false }
+    if ($Value -like "*.git") { return $false }
+    if ($Value -like "*..*") { return $false }
+    if (($Value.Split("/")).Count -ne 2) { return $false }
+    return ($Value -match "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$")
+}
+
+function Get-RepositoryIdentityKey {
+    param([string]$Value)
+    return $Value.ToLowerInvariant()
+}
+
+if (-not (Test-RepositoryIdentity $Repository)) {
+    throw "-Repository expects a safe GitHub owner/repo identity, got: $Repository"
+}
+
+$RepoUrlSsh = "git@github.com:$Repository.git"
+$RepoUrlHttps = "https://github.com/$Repository.git"
+
 function Get-InstallerRecoveryUrl {
-    if ($InternalDesktopBuild) {
-        return "https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.ps1"
+    if ((Get-RepositoryIdentityKey $Repository) -eq (Get-RepositoryIdentityKey "NousResearch/hermes-agent")) {
+        return "https://hermes-agent.nousresearch.com/install.ps1"
     }
-    return "https://hermes-agent.nousresearch.com/install.ps1"
+    return "https://raw.githubusercontent.com/$Repository/main/scripts/install.ps1"
 }
 
 # Captured here, where the values are final, and emitted from the entry-point
@@ -500,16 +522,6 @@ $script:ResolvedPathReport = @{
 # Configuration
 # ============================================================================
 
-function Test-RepositoryIdentity {
-    param([string]$Value)
-    if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
-    if ($Value -match "^(https?:|git@)") { return $false }
-    if ($Value -like "*.git") { return $false }
-    if ($Value -like "*..*") { return $false }
-    if (($Value.Split("/")).Count -ne 2) { return $false }
-    return ($Value -match "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$")
-}
-
 function Get-GitHubRepositoryIdentity {
     param([string]$Url)
     if ([string]::IsNullOrWhiteSpace($Url)) { return $null }
@@ -525,11 +537,6 @@ function Get-GitHubRepositoryIdentity {
 
     if ($repo -and (Test-RepositoryIdentity $repo)) { return $repo }
     return $null
-}
-
-function Get-RepositoryIdentityKey {
-    param([string]$Value)
-    return $Value.ToLowerInvariant()
 }
 
 function Ensure-ManagedOrigin {
@@ -565,12 +572,6 @@ function Ensure-ManagedOrigin {
     }
 }
 
-if (-not (Test-RepositoryIdentity $Repository)) {
-    throw "-Repository expects a safe GitHub owner/repo identity, got: $Repository"
-}
-
-$RepoUrlSsh = "git@github.com:$Repository.git"
-$RepoUrlHttps = "https://github.com/$Repository.git"
 $PythonVersion = "3.11"
 # Minor versions the installer accepts when the requested $PythonVersion isn't
 # available, in preference order. Only checkout-private uv-managed interpreters

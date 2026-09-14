@@ -336,6 +336,18 @@ Assert-Equal -Expected "hermes-agent" -Actual $result.RuntimeDirName -Label "bra
 Assert-Equal -Expected ".hermes-bootstrap-complete" -Actual $result.BootstrapMarker -Label "brand=hermes keeps the Hermes bootstrap marker"
 Assert-Equal -Expected "https://hermes-agent.nousresearch.com/install.ps1" -Actual $result.RecoveryUrl -Label "brand=hermes keeps the Hermes recovery URL"
 
+$result = Invoke-Normalization -Environment @{ HERMES_INSTALLER_BRAND = 'hermes' } `
+    -ExtraArgs @('-Repository', 'ExampleOrg/runtime-agent')
+Assert-Equal -Expected "ExampleOrg/runtime-agent" -Actual $result.Repository -Label "explicit custom repository selects the requested repository"
+Assert-Equal -Expected "https://raw.githubusercontent.com/ExampleOrg/runtime-agent/main/scripts/install.ps1" -Actual $result.RecoveryUrl -Label "explicit custom repository selects a repository-aware recovery URL"
+
+$result = Invoke-Normalization -Environment @{
+    HERMES_INSTALLER_BRAND = 'hermes'
+    HERMES_INSTALL_REPOSITORY = 'ExampleOrg/env-agent'
+}
+Assert-Equal -Expected "ExampleOrg/env-agent" -Actual $result.Repository -Label "environment custom repository selects the requested repository"
+Assert-Equal -Expected "https://raw.githubusercontent.com/ExampleOrg/env-agent/main/scripts/install.ps1" -Actual $result.RecoveryUrl -Label "environment custom repository selects a repository-aware recovery URL"
+
 $rawScript = Join-Path ([System.IO.Path]::GetTempPath()) "raw-install-$PID.ps1"
 Copy-Item -LiteralPath $installScript -Destination $rawScript -Force
 $result = Invoke-Normalization -ScriptPath $rawScript
