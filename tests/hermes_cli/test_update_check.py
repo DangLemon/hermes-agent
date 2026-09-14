@@ -73,6 +73,32 @@ def test_check_for_updates_rejects_cache_from_other_repository(tmp_path, monkeyp
     assert json.loads(cache_file.read_text(encoding="utf-8"))["repo"] == "DangLemon/hermes-agent"
 
 
+def test_check_for_updates_rejects_legacy_cache_without_repository(tmp_path, monkeypatch):
+    """Pre-repository cache entries miss rather than crossing source identities."""
+    from hermes_cli import __version__, banner
+
+    cache_file = tmp_path / ".update_check"
+    cache_file.write_text(
+        json.dumps(
+            {
+                "ts": time.time(),
+                "behind": 123,
+                "rev": None,
+                "ver": __version__,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_UPDATE_REPOSITORY", "DangLemon/hermes-agent")
+    monkeypatch.setattr(banner, "_resolve_repo_dir", lambda: tmp_path / "repo")
+    check = MagicMock(return_value=7)
+    monkeypatch.setattr(banner, "_check_via_local_git", check)
+
+    assert banner.check_for_updates() == 7
+    check.assert_called_once_with(tmp_path / "repo")
+
+
 
 
 
@@ -306,6 +332,5 @@ def test_check_for_updates_does_not_cache_none(tmp_path, monkeypatch):
 
     # The cache file must NOT have been written with a None result
     assert not cache_file.exists(), "None result must not be cached"
-
 
 

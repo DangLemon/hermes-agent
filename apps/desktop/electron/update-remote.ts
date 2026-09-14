@@ -13,6 +13,7 @@
  */
 
 const OFFICIAL_REPO_IDENTITY = 'NousResearch/hermes-agent'
+
 const GITHUB_REPOSITORY_RE =
   /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/
 
@@ -115,8 +116,8 @@ export {
   isOfficialSshRemote,
   isSshRemote,
   isSshRemoteForRepository,
-  remoteMatchesRepository,
-  validateGitHubRepositoryIdentity,
   OFFICIAL_REPO_CANONICAL,
-  OFFICIAL_REPO_HTTPS_URL
+  OFFICIAL_REPO_HTTPS_URL,
+  remoteMatchesRepository,
+  validateGitHubRepositoryIdentity
 }

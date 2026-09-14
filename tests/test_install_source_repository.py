@@ -359,6 +359,38 @@ def test_install_sh_brand_lemon_overrides_raw_script_default(tmp_path: Path) -> 
     assert origin_url(install_dir) == "https://github.com/DangLemon/hermes-agent.git"
 
 
+def test_install_ps1_windows_launcher_contracts_are_fail_closed() -> None:
+    """Source-level guard for Windows-only launcher behavior.
+
+    The focused PowerShell test runs on Windows CI. This keeps the contract
+    visible on non-Windows hosts too, where pwsh is not guaranteed to exist.
+    """
+    text = INSTALL_PS1.read_text(encoding="utf-8")
+
+    assert "Get-HermesLauncherRelativeSource" in text
+    assert "[System.IO.Path]::GetPathRoot($base)" in text
+    assert "[System.IO.Path]::GetPathRoot($target)" in text
+    assert "stale launcher blocks PATH resolution" in text
+    assert "Remove-Item -LiteralPath $shadowingExe -Force -ErrorAction Stop" in text
+    assert "$resolvedPython = Resolve-AvailablePythonVersion" in text
+    assert "& $UvCmd python find $PythonVersion" not in (
+        text[
+            text.index("function Set-PathVariable"):
+            text.index("function Write-BootstrapMarker")
+        ]
+    )
+
+
+def test_install_ps1_launcher_ci_loads_helper_dependencies() -> None:
+    test_text = (REPO_ROOT / "scripts" / "ci" / "test_install_ps1_cli_launchers.ps1").read_text(encoding="utf-8")
+
+    assert "$n.Name -eq 'Get-HermesLauncherRelativeSource'" in test_text
+    assert "Invoke-Expression $relativeSourceFn.Extent.Text" in test_text
+    assert "different drive roots are rejected" in test_text
+    assert "different UNC hosts are rejected" in test_text
+    assert "stale hermes.exe removal failure fails closed" in test_text
+
+
 def test_install_sh_checkout_manifest_ignores_inherited_hermes_home(tmp_path: Path) -> None:
     env = os.environ.copy()
     env.update({"HOME": str(tmp_path / "home"), "HERMES_HOME": str(tmp_path / "ambient-home")})
@@ -635,3 +667,5 @@ def test_install_ps1_source_repository_contracts_are_bounded_and_repo_aware() ->
     assert '[Parameter(Mandatory=$true)] [string]$Repository' in source
     assert 'set `"HERMES_UPDATE_REPOSITORY=$Repository`"' in source
     assert 'Set-UserEnvironmentVariableIfChanged -Name "HERMES_UPDATE_REPOSITORY"' not in source
+    assert 'function Install-HermesNoVenvCommandLauncher' in source
+    assert 'Install-HermesNoVenvCommandLauncher -Root $InstallDir' in source

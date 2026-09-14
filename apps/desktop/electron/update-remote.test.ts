@@ -27,10 +27,10 @@ import {
   isOfficialSshRemote,
   isSshRemote,
   isSshRemoteForRepository,
-  remoteMatchesRepository,
-  validateGitHubRepositoryIdentity,
   OFFICIAL_REPO_CANONICAL,
-  OFFICIAL_REPO_HTTPS_URL
+  OFFICIAL_REPO_HTTPS_URL,
+  remoteMatchesRepository,
+  validateGitHubRepositoryIdentity
 } from './update-remote'
 
 test('canonicalGitHubRemote normalizes SSH and HTTPS forms to the same value', () => {
@@ -95,9 +95,15 @@ test('GitHub repository helpers validate and build Lemon source URLs', () => {
 test('repository remote matching is driven by the configured owner/repo', () => {
   assert.equal(remoteMatchesRepository('https://github.com/DangLemon/hermes-agent.git', 'DangLemon/hermes-agent'), true)
   assert.equal(remoteMatchesRepository('git@github.com:DangLemon/hermes-agent.git', 'DangLemon/hermes-agent'), true)
-  assert.equal(remoteMatchesRepository('https://github.com/NousResearch/hermes-agent.git', 'DangLemon/hermes-agent'), false)
+  assert.equal(
+    remoteMatchesRepository('https://github.com/NousResearch/hermes-agent.git', 'DangLemon/hermes-agent'),
+    false
+  )
   assert.equal(isSshRemoteForRepository('git@github.com:DangLemon/hermes-agent.git', 'DangLemon/hermes-agent'), true)
-  assert.equal(isSshRemoteForRepository('https://github.com/DangLemon/hermes-agent.git', 'DangLemon/hermes-agent'), false)
+  assert.equal(
+    isSshRemoteForRepository('https://github.com/DangLemon/hermes-agent.git', 'DangLemon/hermes-agent'),
+    false
+  )
 })
 
 test('repository identity rejects URLs and path traversal', () => {

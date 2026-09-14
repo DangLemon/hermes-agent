@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import contextlib
 import json
+import ntpath
 import os
+import struct
 import subprocess
 import sys
 import time
@@ -95,29 +97,185 @@ def _venv_scripts_dir(root: Path) -> Path | None:
 _WINDOWS_BIN_LAUNCHERS = ("hermes", "hermes-acp")
 
 
-def _launchers_missing(target: Path) -> bool:
-    return any(not (target / f"{name}.cmd").is_file() for name in _WINDOWS_BIN_LAUNCHERS)
-
-
-def _configured_windows_update_repository() -> str | None:
-    """Validated update source inherited from this installation's launcher."""
+def _checkout_update_repository(root: Path) -> str | None:
+    """Validated GitHub repository identity from this checkout's origin."""
     try:
-        from hermes_cli.update_cmd_git import _configured_update_repository
+        result = subprocess.run(
+            ["git", "-C", str(root), "remote", "get-url", "origin"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=3,
+        )
+        if result.returncode != 0:
+            return None
 
-        return _configured_update_repository()
-    except Exception:
+        from hermes_cli.update_cmd_git import (
+            _canonical_github_remote,
+            _validate_update_repository,
+        )
+
+        canonical = _canonical_github_remote(result.stdout)
+        prefix = "github.com/"
+        if not canonical.startswith(prefix):
+            return None
+        return _validate_update_repository(canonical[len(prefix):])
+    except (OSError, subprocess.TimeoutExpired, ValueError):
         return None
 
 
-def _windows_launcher_body(source: Path, repository: str) -> str:
-    """Per-install command wrapper; ``setlocal`` prevents shell-wide identity leaks."""
+def _configured_windows_update_repository(root: Path) -> str | None:
+    """Per-install source, preferring checkout truth over collided legacy env."""
+    repository = _checkout_update_repository(root)
+    if repository is not None:
+        return repository
+    try:
+        from hermes_cli.update_cmd_git import (
+            INSTALL_REPOSITORY_ENV,
+            INTERNAL_UPDATE_ENV_VARS,
+            INTERNAL_UPDATE_REPOSITORY,
+            UPDATE_REPOSITORY_ENV,
+            _validate_update_repository,
+        )
+
+        # The normal configured-repository helper intentionally defaults to the public
+        # project.  A launcher repair cannot make that assumption: if a custom checkout's
+        # origin is unavailable, silently writing a public wrapper would redirect its next
+        # update.  Only an explicit per-install value or an explicit internal-build marker
+        # is safe when checkout identity cannot be read.
+        explicit = os.environ.get(UPDATE_REPOSITORY_ENV) or os.environ.get(INSTALL_REPOSITORY_ENV)
+        if explicit:
+            return _validate_update_repository(explicit)
+        if any(str(os.environ.get(name, "")).strip() == "1" for name in INTERNAL_UPDATE_ENV_VARS):
+            return _validate_update_repository(INTERNAL_UPDATE_REPOSITORY)
+    except Exception:
+        pass
+    return None
+
+
+def _is_valid_windows_executable(path: Path) -> bool:
+    """Return whether *path* has a structurally complete PE header.
+
+    ``Path.is_file()`` is insufficient for a console-script shim: an interrupted uv install can
+    leave a zero-byte or truncated ``.exe`` behind.  This stdlib-only header probe is deliberately
+    lighter than loading the executable (which would execute untrusted code) but rejects the
+    corrupt files that would otherwise make PATH migration fail open.
+    """
+    try:
+        file_size = path.stat().st_size
+        if file_size < 64:
+            return False
+        with path.open("rb") as handle:
+            dos_header = handle.read(64)
+            if len(dos_header) < 64 or dos_header[:2] != b"MZ":
+                return False
+            pe_offset = struct.unpack_from("<I", dos_header, 0x3C)[0]
+            if pe_offset < 64 or pe_offset + 24 > file_size:
+                return False
+            handle.seek(pe_offset)
+            pe_header = handle.read(24)
+            if len(pe_header) < 24 or pe_header[:4] != b"PE\x00\x00":
+                return False
+            machine, section_count = struct.unpack_from("<HH", pe_header, 4)
+            optional_size = struct.unpack_from("<H", pe_header, 20)[0]
+            if machine == 0 or section_count == 0:
+                return False
+            section_table_end = pe_offset + 24 + optional_size + section_count * 40
+            return section_table_end <= file_size
+    except (OSError, struct.error):
+        return False
+
+
+def _windows_launcher_body(source: Path, repository: str, target: Path) -> str | None:
+    """Per-install ASCII wrapper using a path relative to its own ``bin`` directory.
+
+    ``%~dp0`` is expanded by ``cmd.exe`` at runtime, so the batch file never embeds a user's
+    potentially non-ASCII profile path. Returning ``None`` for a cross-drive path keeps repair
+    fail-closed rather than writing a wrapper that cannot run.
+    """
+    try:
+        relative_source = ntpath.relpath(str(source), str(target))
+    except ValueError:
+        return None
+    if ntpath.isabs(relative_source):
+        return None
+    relative_source = relative_source.replace("/", "\\")
     return (
         "@echo off\r\n"
         "setlocal\r\n"
         f'set "HERMES_UPDATE_REPOSITORY={repository}"\r\n'
-        f'"{source}" %*\r\n'
+        f'"%~dp0{relative_source}" %*\r\n'
         "exit /b %ERRORLEVEL%\r\n"
     )
+
+
+def _windows_launcher_bytes(source: Path, repository: str, target: Path) -> bytes | None:
+    body = _windows_launcher_body(source, repository, target)
+    if body is None:
+        return None
+    try:
+        return body.encode("ascii")
+    except UnicodeEncodeError:
+        return None
+
+
+def _launchers_need_repair(
+    target: Path, sources: list[tuple[str, Path]], repository: str,
+) -> bool:
+    """Whether any repairable launcher is missing or differs from this install."""
+    for name, source in sources:
+        if (target / f"{name}.exe").is_file():
+            return True
+        final = target / f"{name}.cmd"
+        expected = _windows_launcher_bytes(source, repository, target)
+        if expected is None:
+            return True
+        try:
+            if final.read_bytes() != expected:
+                return True
+        except OSError:
+            return True
+    return False
+
+
+def _retire_shadowing_launcher_exe(path: Path) -> bool:
+    """Move a legacy PATHEXT-preferred launcher aside, including while it is running."""
+    if not path.is_file():
+        return True
+    quarantined = path.with_name(f"{path.name}.old.{time.time_ns()}")
+    try:
+        os.rename(path, quarantined)
+    except OSError:
+        return False
+    with contextlib.suppress(OSError):
+        quarantined.unlink()
+    return True
+
+
+def _windows_launcher_spec(
+    root: Path, *, windows: bool,
+) -> tuple[list[tuple[str, Path]], str] | None:
+    """Existing console-script sources plus the validated repository identity."""
+    from hermes_constants import project_venv_dir, venv_bin_dir
+
+    venv_dir = project_venv_dir(root)
+    if venv_dir is None:
+        return None
+    scripts_dir = venv_bin_dir(venv_dir, windows=windows)
+    sources = [
+        (name, scripts_dir / f"{name}.exe")
+        for name in _WINDOWS_BIN_LAUNCHERS
+        if _is_valid_windows_executable(scripts_dir / f"{name}.exe")
+    ]
+    if not sources:
+        return None
+    repository = _configured_windows_update_repository(root)
+    if repository is None:
+        return None
+    return sources, repository
 
 
 def _default_hermes_root() -> Path | None:
@@ -180,17 +338,21 @@ def ensure_windows_bin_launchers(
     if home is None:
         return []
 
+    spec = _windows_launcher_spec(root, windows=windows)
+    if spec is None:
+        return []
+    sources, repository = spec
+
     targets: list[Path] = []
-    # Runs at every hermes_cli.main process start, so the healthy path must stay a few stat calls.
     if _normalize_windows_path(root.parent) == _normalize_windows_path(home):
         canonical = home / "bin"
-        if _launchers_missing(canonical):
+        if _launchers_need_repair(canonical, sources, repository):
             targets.append(canonical)
     # Legacy target: compared as normalized literal strings — the installer wrote the long literal
     # path, and realpath'ing arbitrary PATH entries could hang on dead network shares. An entry
     # stored another way (8.3 short path, subst drive) misses the re-stage, which fails safe.
     legacy = root / "bin"
-    if _launchers_missing(legacy):
+    if _launchers_need_repair(legacy, sources, repository):
         if user_path_entries is None:
             user_path_entries = _windows_user_path_entries()
         configured = {_normalize_windows_path(entry) for entry in user_path_entries}
@@ -199,41 +361,42 @@ def ensure_windows_bin_launchers(
     if not targets:
         return []
 
-    from hermes_constants import project_venv_dir, venv_bin_dir
-
-    venv_dir = project_venv_dir(root)
-    if venv_dir is None:
-        return []
-    scripts_dir = venv_bin_dir(venv_dir, windows=windows)
-    sources = [(name, scripts_dir / f"{name}.exe") for name in _WINDOWS_BIN_LAUNCHERS
-               if (scripts_dir / f"{name}.exe").is_file()]
-    if not sources:
-        return []
-    repository = _configured_windows_update_repository()
-    if repository is None:
-        return []
-
     restored: list[str] = []
     for target in targets:
+        expected_by_name = {
+            name: _windows_launcher_bytes(source, repository, target)
+            for name, source in sources
+        }
+        if any(expected is None for expected in expected_by_name.values()):
+            continue
         try:
             target.mkdir(parents=True, exist_ok=True)
         except OSError:
             continue
         for name, source in sources:
             final = target / f"{name}.cmd"
-            expected = _windows_launcher_body(source, repository)
-            expected_bytes = expected.encode("ascii")
+            expected_bytes = expected_by_name[name]
+            if expected_bytes is None:
+                continue
+            matches = False
             try:
-                if final.is_file() and final.read_bytes() == expected_bytes:
-                    continue
+                matches = final.read_bytes() == expected_bytes
             except OSError:
                 pass
+            shadowing_exe = target / f"{name}.exe"
+            if matches:
+                if not shadowing_exe.is_file():
+                    continue
+                if not _retire_shadowing_launcher_exe(shadowing_exe):
+                    continue
+                restored.append(str(final))
+                continue
             staging = target / f"{final.name}.heal.{os.getpid()}"
             try:
                 staging.write_bytes(expected_bytes)
                 os.replace(staging, final)
-                with contextlib.suppress(OSError):
-                    (target / f"{name}.exe").unlink()
+                if not _retire_shadowing_launcher_exe(shadowing_exe):
+                    continue
                 restored.append(str(final))
             except OSError:
                 with contextlib.suppress(OSError):
@@ -272,7 +435,7 @@ def migrate_windows_bin_path(
 ) -> bool:
     """One-time PATH migration to the ``HERMES_HOME\\bin`` launcher layout (``hermes update`` tail).
 
-    1. stage launchers into the managed binary dir; 2. verify both are present — otherwise STOP,
+    1. stage launchers into the managed binary dir; 2. verify both are valid — otherwise STOP,
     leaving the user PATH untouched (never strip a working entry before its replacement is proven);
     3. prepend the managed binary dir to the user PATH; 4. strip the legacy ``<root>\\bin`` and
     ``<root>\\venv\\Scripts`` entries. Legacy ``<root>\\bin`` FILES stay: configs that captured
@@ -298,7 +461,14 @@ def migrate_windows_bin_path(
 
     ensure_windows_bin_launchers(root, windows=windows, user_path_entries=[])
     home_bin = home / "bin"
-    if any(not (home_bin / f"{name}.cmd").is_file() for name in _WINDOWS_BIN_LAUNCHERS):
+    spec = _windows_launcher_spec(root, windows=windows)
+    if spec is None:
+        return False
+    sources, repository = spec
+    if (
+        len(sources) != len(_WINDOWS_BIN_LAUNCHERS)
+        or _launchers_need_repair(home_bin, sources, repository)
+    ):
         return False  # staging incomplete — leave the PATH alone
 
     if read_user_path is None:

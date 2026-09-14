@@ -23,12 +23,30 @@ $fn = $ast.Find({
     $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
     $n.Name -eq 'Install-HermesCommandLaunchers'
 }, $true)
+$relativeSourceFn = $ast.Find({
+    param($n)
+    $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $n.Name -eq 'Get-HermesLauncherRelativeSource'
+}, $true)
+$noVenvFn = $ast.Find({
+    param($n)
+    $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $n.Name -eq 'Install-HermesNoVenvCommandLauncher'
+}, $true)
 
+if (-not $relativeSourceFn) {
+    throw "Get-HermesLauncherRelativeSource not found in $installPs1"
+}
 if (-not $fn) {
     throw "Install-HermesCommandLaunchers not found in $installPs1"
 }
+if (-not $noVenvFn) {
+    throw "Install-HermesNoVenvCommandLauncher not found in $installPs1"
+}
 
+Invoke-Expression $relativeSourceFn.Extent.Text
 Invoke-Expression $fn.Extent.Text
+Invoke-Expression $noVenvFn.Extent.Text
 
 $tempBase = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
 $caseRoot = [System.IO.Path]::GetFullPath((Join-Path $tempBase (
@@ -62,6 +80,17 @@ function Assert-BytesEqual {
         }
     }
     Assert-True $same $Name
+}
+
+function Assert-ThrowsLike {
+    param([scriptblock]$Script, [string]$Pattern, [string]$Name)
+    $threw = $false
+    try {
+        & $Script
+    } catch {
+        $threw = $_.Exception.Message -like $Pattern
+    }
+    Assert-True $threw $Name
 }
 
 try {
@@ -103,10 +132,10 @@ try {
     [System.IO.File]::WriteAllBytes((Join-Path $scriptsDir 'hermes-acp.exe'), $acp)
     Install-HermesCommandLaunchers -Root $installRoot -Destination $binDir -Repository 'DangLemon/hermes-agent' | Out-Null
     $refreshedCmdBody = [System.IO.File]::ReadAllText((Join-Path $binDir 'hermes.cmd'))
-    Assert-True ($refreshedCmdBody.Contains((Join-Path $scriptsDir 'hermes.exe')) -and $refreshedCmdBody.Contains('HERMES_UPDATE_REPOSITORY=DangLemon/hermes-agent')) `
+    Assert-True ($refreshedCmdBody.Contains('"%~dp0..\hermes-agent\venv\Scripts\hermes.exe" %*') -and $refreshedCmdBody.Contains('HERMES_UPDATE_REPOSITORY=DangLemon/hermes-agent')) `
         'installer refreshes the repository-aware Hermes wrapper'
     $acpCmdBody = [System.IO.File]::ReadAllText((Join-Path $binDir 'hermes-acp.cmd'))
-    Assert-True ($acpCmdBody.Contains((Join-Path $scriptsDir 'hermes-acp.exe')) -and $acpCmdBody.Contains('HERMES_UPDATE_REPOSITORY=DangLemon/hermes-agent')) `
+    Assert-True ($acpCmdBody.Contains('"%~dp0..\hermes-agent\venv\Scripts\hermes-acp.exe" %*') -and $acpCmdBody.Contains('HERMES_UPDATE_REPOSITORY=DangLemon/hermes-agent')) `
         'installer stages the optional ACP wrapper when present'
 
     # Relocatable venv: uses the same wrapper form; delegating to the in-venv
@@ -119,8 +148,71 @@ try {
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir 'hermes.exe'))) `
         'relocatable venv: stale exe copy removed'
     $cmdBody = [System.IO.File]::ReadAllText((Join-Path $binDir 'hermes.cmd'))
-    Assert-True ($cmdBody.Contains((Join-Path $scriptsDir 'hermes.exe')) -and $cmdBody.Contains('%*') -and $cmdBody.Contains('HERMES_UPDATE_REPOSITORY=DangLemon/hermes-agent')) `
+    Assert-True ($cmdBody.Contains('"%~dp0..\hermes-agent\venv\Scripts\hermes.exe" %*') -and $cmdBody.Contains('HERMES_UPDATE_REPOSITORY=DangLemon/hermes-agent')) `
         'wrapper invokes the in-venv exe, pins the update repository, and forwards args'
+
+    $publicBinDir = Join-Path $caseRoot 'public-bin'
+    Install-HermesCommandLaunchers -Root $installRoot -Destination $publicBinDir -Repository 'NousResearch/hermes-agent' | Out-Null
+    $publicBody = [System.IO.File]::ReadAllText((Join-Path $publicBinDir 'hermes.cmd'))
+    Assert-True ($publicBody.Contains('HERMES_UPDATE_REPOSITORY=NousResearch/hermes-agent')) `
+        'second installation keeps an independent public repository identity'
+    Assert-True ($cmdBody.Contains('HERMES_UPDATE_REPOSITORY=DangLemon/hermes-agent')) `
+        'first installation keeps its Lemon repository identity'
+
+    $noVenvBinDir = Join-Path $caseRoot 'no-venv-bin'
+    $pythonExe = Join-Path $caseRoot 'python.exe'
+    [System.IO.File]::WriteAllBytes($pythonExe, [byte[]](77, 90, 4))
+    Set-Content -Path (Join-Path $installRoot 'hermes') -Value '# launcher' -Encoding Ascii
+    Install-HermesNoVenvCommandLauncher -Root $installRoot -Destination $noVenvBinDir `
+        -Repository 'DangLemon/hermes-agent' -PythonExe $pythonExe | Out-Null
+    $noVenvBody = [System.IO.File]::ReadAllText((Join-Path $noVenvBinDir 'hermes.cmd'))
+    Assert-True ($noVenvBody.Contains('HERMES_UPDATE_REPOSITORY=DangLemon/hermes-agent')) `
+        '-NoVenv wrapper embeds the selected repository'
+    Assert-True ($noVenvBody.Contains('"%~dp0..\python.exe"') -and $noVenvBody.Contains('"%~dp0..\hermes-agent\hermes"')) `
+        '-NoVenv wrapper invokes the selected Python and checkout launcher'
+
+    $shadowBinDir = Join-Path $caseRoot 'shadow-bin'
+    New-Item -ItemType Directory -Force -Path $shadowBinDir | Out-Null
+    [System.IO.File]::WriteAllBytes((Join-Path $shadowBinDir 'hermes.exe'), [byte[]](77, 90, 9))
+    $originalRemoveItem = Get-Command Remove-Item -CommandType Cmdlet
+    function Remove-Item {
+        param(
+            [Parameter(ValueFromRemainingArguments=$true)]
+            [object[]]$Remaining
+        )
+        $literal = $null
+        for ($i = 0; $i -lt $Remaining.Count; $i++) {
+            if ($Remaining[$i] -eq '-LiteralPath' -and ($i + 1) -lt $Remaining.Count) {
+                $literal = [string]$Remaining[$i + 1]
+            }
+        }
+        if ($literal -and $literal.EndsWith('\hermes.exe', [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "simulated launcher lock"
+        }
+        & $originalRemoveItem @Remaining
+    }
+    try {
+        Assert-ThrowsLike {
+            Install-HermesCommandLaunchers -Root $installRoot -Destination $shadowBinDir -Repository 'DangLemon/hermes-agent' | Out-Null
+        } '*stale launcher blocks PATH resolution*' 'stale hermes.exe removal failure fails closed'
+    } finally {
+        Remove-Item Function:\Remove-Item -Force
+    }
+
+    Assert-ThrowsLike {
+        Get-HermesLauncherRelativeSource -LauncherDirectory 'C:\Users\Dang\AppData\Local\Lemon AI\bin' `
+            -Source 'D:\Lemon AI\lemon-agent\venv\Scripts\hermes.exe' | Out-Null
+    } '*source path cannot be represented relative*' 'different drive roots are rejected'
+
+    Assert-ThrowsLike {
+        Get-HermesLauncherRelativeSource -LauncherDirectory '\\server-a\share\Lemon AI\bin' `
+            -Source '\\server-b\share\Lemon AI\lemon-agent\venv\Scripts\hermes.exe' | Out-Null
+    } '*source path cannot be represented relative*' 'different UNC hosts are rejected'
+
+    Assert-ThrowsLike {
+        Get-HermesLauncherRelativeSource -LauncherDirectory '\\server\share-a\Lemon AI\bin' `
+            -Source '\\server\share-b\Lemon AI\lemon-agent\venv\Scripts\hermes.exe' | Out-Null
+    } '*source path cannot be represented relative*' 'different UNC shares are rejected'
 } finally {
     if (Test-Path -LiteralPath $caseRoot) {
         $resolvedCase = [System.IO.Path]::GetFullPath($caseRoot)

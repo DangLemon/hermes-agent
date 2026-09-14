@@ -3150,7 +3150,12 @@ function Install-Dependencies {
 
     # Parse [project.optional-dependencies].all from pyproject.toml.
     # tomllib is stdlib on Python 3.11+ which the bootstrap guarantees.
-    $pythonExeForParse = if (-not $NoVenv) { "$InstallDir\venv\Scripts\python.exe" } else { (& $UvCmd python find $PythonVersion) }
+    $pythonExeForParse = if (-not $NoVenv) {
+        "$InstallDir\venv\Scripts\python.exe"
+    } else {
+        $resolvedPythonForParse = Resolve-AvailablePythonVersion
+        if ($resolvedPythonForParse) { [string]$resolvedPythonForParse.Path } else { "" }
+    }
     $allExtras = @()
     if (Test-Path $pythonExeForParse) {
         $parsed = & $pythonExeForParse -c @"
@@ -3296,7 +3301,12 @@ print(','.join(scripts))
     # users hit and lazy-import errors from `hermes dashboard` are confusing.
     # If tier 1 failed (the common case), [web] was still picked up by tiers
     # 2-3; only tier 4 leaves you without it.
-    $pythonExe = if (-not $NoVenv) { "$InstallDir\venv\Scripts\python.exe" } else { (& $UvCmd python find $PythonVersion) }
+    $pythonExe = if (-not $NoVenv) {
+        "$InstallDir\venv\Scripts\python.exe"
+    } else {
+        $resolvedPythonForWeb = Resolve-AvailablePythonVersion
+        if ($resolvedPythonForWeb) { [string]$resolvedPythonForWeb.Path } else { "" }
+    }
     if (Test-Path $pythonExe) {
         $webOk = $false
         $webServerSyntaxOk = $false
@@ -3336,6 +3346,48 @@ print(','.join(scripts))
     Write-Success "All dependencies installed"
 }
 
+function Get-HermesLauncherRelativeSource {
+    param(
+        [Parameter(Mandatory=$true)] [string]$LauncherDirectory,
+        [Parameter(Mandatory=$true)] [string]$Source
+    )
+
+    try {
+        $base = [System.IO.Path]::GetFullPath($LauncherDirectory).TrimEnd('\') + '\'
+        $target = [System.IO.Path]::GetFullPath($Source)
+        $baseRoot = [System.IO.Path]::GetPathRoot($base)
+        $targetRoot = [System.IO.Path]::GetPathRoot($target)
+        if (
+            [string]::IsNullOrWhiteSpace($baseRoot) -or
+            [string]::IsNullOrWhiteSpace($targetRoot) -or
+            -not [string]::Equals($baseRoot.TrimEnd('\'), $targetRoot.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)
+        ) {
+            throw "launcher and source are on different filesystem roots"
+        }
+        $baseUri = [System.Uri]$base
+        $targetUri = [System.Uri]$target
+        if (
+            $baseUri.Scheme -ne $targetUri.Scheme -or
+            -not [string]::Equals($baseUri.Host, $targetUri.Host, [System.StringComparison]::OrdinalIgnoreCase)
+        ) {
+            throw "launcher and source are on different filesystem roots"
+        }
+        $relative = [System.Uri]::UnescapeDataString($baseUri.MakeRelativeUri($targetUri).ToString()).Replace('/', '\')
+        if ([System.IO.Path]::IsPathRooted($relative) -or [string]::IsNullOrWhiteSpace($relative)) {
+            throw "source path is not relative to launcher directory"
+        }
+        # The batch file is intentionally ASCII. %~dp0 expands the user's
+        # profile path at runtime, so non-ASCII profile names never enter the
+        # file bytes (and cannot be mangled by PowerShell 5.1's ASCII writer).
+        if ([System.Text.Encoding]::ASCII.GetString([System.Text.Encoding]::ASCII.GetBytes($relative)) -ne $relative) {
+            throw "relative source path contains non-ASCII characters"
+        }
+        return $relative
+    } catch {
+        throw "Cannot set up the hermes command: source path cannot be represented relative to launcher directory"
+    }
+}
+
 function Install-HermesCommandLaunchers {
     param(
         [Parameter(Mandatory=$true)] [string]$Root,
@@ -3365,21 +3417,72 @@ function Install-HermesCommandLaunchers {
         $src = Join-Path $scriptsDir "$launcher.exe"
         if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { continue }
         $cmd = Join-Path $Destination "$launcher.cmd"
+        $relativeSource = Get-HermesLauncherRelativeSource -LauncherDirectory $Destination -Source $src
         $body = @(
             "@echo off"
             "setlocal"
             "set `"HERMES_UPDATE_REPOSITORY=$Repository`""
-            "`"$src`" %*"
+            "`"%~dp0$relativeSource`" %*"
             "exit /b %ERRORLEVEL%"
         ) -join "`r`n"
         Set-Content -Path $cmd -Value $body -Encoding Ascii
-        Remove-Item (Join-Path $Destination "$launcher.exe") -Force -ErrorAction SilentlyContinue
+        $shadowingExe = Join-Path $Destination "$launcher.exe"
+        if (Test-Path -LiteralPath $shadowingExe -PathType Leaf) {
+            try {
+                Remove-Item -LiteralPath $shadowingExe -Force -ErrorAction Stop
+            } catch {
+                throw "Cannot set up the hermes command: stale launcher blocks PATH resolution: $shadowingExe"
+            }
+        }
     }
 
     # Verify the repository-aware form before the caller mutates PATH.
     $requiredCmd = Join-Path $Destination "hermes.cmd"
     if (-not (Test-Path -LiteralPath $requiredCmd -PathType Leaf)) {
         throw "Cannot set up the hermes command: launcher was not installed: $requiredCmd"
+    }
+    return $Destination
+}
+
+function Install-HermesNoVenvCommandLauncher {
+    param(
+        [Parameter(Mandatory=$true)] [string]$Root,
+        [Parameter(Mandatory=$true)] [string]$Destination,
+        [Parameter(Mandatory=$true)] [string]$Repository,
+        [Parameter(Mandatory=$true)] [string]$PythonExe
+    )
+
+    $source = Join-Path $Root "hermes"
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+        throw "Cannot set up the hermes command: checkout launcher not found: $source"
+    }
+    if (-not (Test-Path -LiteralPath $PythonExe -PathType Leaf)) {
+        throw "Cannot set up the hermes command: Python not found: $PythonExe"
+    }
+
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    $cmd = Join-Path $Destination "hermes.cmd"
+    $relativeSource = Get-HermesLauncherRelativeSource -LauncherDirectory $Destination -Source $source
+    $relativePython = Get-HermesLauncherRelativeSource -LauncherDirectory $Destination -Source $PythonExe
+    $body = @(
+        "@echo off"
+        "setlocal"
+        "set `"HERMES_UPDATE_REPOSITORY=$Repository`""
+        "`"%~dp0$relativePython`" `"%~dp0$relativeSource`" %*"
+        "exit /b %ERRORLEVEL%"
+    ) -join "`r`n"
+    Set-Content -Path $cmd -Value $body -Encoding Ascii
+    $shadowingExe = Join-Path $Destination "hermes.exe"
+    if (Test-Path -LiteralPath $shadowingExe -PathType Leaf) {
+        try {
+            Remove-Item -LiteralPath $shadowingExe -Force -ErrorAction Stop
+        } catch {
+            throw "Cannot set up the hermes command: stale launcher blocks PATH resolution: $shadowingExe"
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $cmd -PathType Leaf)) {
+        throw "Cannot set up the hermes command: launcher was not installed: $cmd"
     }
     return $Destination
 }
@@ -3402,7 +3505,13 @@ function Set-PathVariable {
     Write-Info "Setting up hermes command..."
     
     if ($NoVenv) {
-        $hermesBin = "$InstallDir"
+        $resolvedPython = Resolve-AvailablePythonVersion
+        if (-not $resolvedPython -or [string]::IsNullOrWhiteSpace([string]$resolvedPython.Path)) {
+            throw "Cannot set up the hermes command: managed Python $PythonVersion was not found"
+        }
+        $hermesBin = "$HermesHome\bin"
+        Install-HermesNoVenvCommandLauncher -Root $InstallDir -Destination $hermesBin `
+            -Repository $Repository -PythonExe ([string]$resolvedPython.Path).Trim() | Out-Null
     } else {
         # $HermesHome\bin is the managed binary dir (shared with the managed
         # uv), OUTSIDE the git checkout: `hermes update`'s autostash
