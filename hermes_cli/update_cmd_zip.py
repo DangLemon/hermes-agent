@@ -316,6 +316,11 @@ def _download_and_swap_zip(branch: str, zip_url: str) -> None:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+def _zip_source_archive_url(branch: str) -> str:
+    from hermes_cli.update_cmd import _configured_update_repository
+    return f"https://github.com/{_configured_update_repository()}/archive/refs/heads/{branch}.zip"
+
+
 def _reinstall_python_deps_after_zip(active_tool_dependencies) -> None:
     """Reinstall Python deps (uv preferred, pip fallback) and re-arm active tool deps."""
     from hermes_cli.update_cmd import (
@@ -379,7 +384,7 @@ def _update_via_zip(args, *, had_desktop_app_before_update: bool = False) -> boo
         )
         _m().sys.exit(1)
     _abort_zip_update_if_dirty_tree()
-    _download_and_swap_zip(branch, f"https://github.com/NousResearch/hermes-agent/archive/refs/heads/{branch}.zip")
+    _download_and_swap_zip(branch, _zip_source_archive_url(branch))
     _sweep_bytecode_after_update(branch)
     # Self-lock deferral: the code swap is committed; defer only the dependency sync when this process
     # holds a native extension the sync must rewrite.

@@ -7,6 +7,7 @@ test patches on ``update_cmd`` stay effective).
 
 import logging
 from contextlib import suppress
+import os
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -20,7 +21,15 @@ _ORPHAN_RESCUE_REF_MAX_AGE_DAYS = 30
 
 _GIT_TEXT_KW = dict(capture_output=True, text=True, encoding="utf-8", errors="replace")
 _BAR = "=" * 68
-_UPSTREAM_ADD_CMD = "git remote add upstream https://github.com/NousResearch/hermes-agent.git"
+UPDATE_REPOSITORY_ENV = "HERMES_UPDATE_REPOSITORY"
+INSTALL_REPOSITORY_ENV = "HERMES_INSTALL_REPOSITORY"
+DEFAULT_UPDATE_REPOSITORY = "NousResearch/hermes-agent"
+INTERNAL_UPDATE_REPOSITORY = "DangLemon/hermes-agent"
+INTERNAL_UPDATE_ENV_VARS = ("LEMON_AI_DESKTOP_INTERNAL", "HERMES_DESKTOP_INTERNAL", "HERMES_DESKTOP_INTERNAL_PACKAGE")
+_GITHUB_REPOSITORY_RE = (
+    r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/"
+    r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$"
+)
 
 
 def _git_ok(git_cmd, args, cwd, **kw) -> bool:
@@ -168,13 +177,84 @@ def _print_parked_branch_kept_notice(current_branch: str, target_branch: str, un
     )
 
 
-OFFICIAL_REPO_URLS = {
-    "https://github.com/NousResearch/hermes-agent.git",
-    "git@github.com:NousResearch/hermes-agent.git",
-    "https://github.com/NousResearch/hermes-agent",
-    "git@github.com:NousResearch/hermes-agent",
-}
-OFFICIAL_REPO_URL = "https://github.com/NousResearch/hermes-agent.git"
+def _validate_update_repository(repository: str | None) -> str:
+    """Return a safe GitHub ``owner/repo`` identity for update source selection."""
+    import re
+
+    value = (repository or DEFAULT_UPDATE_REPOSITORY).strip()
+    if not value or not re.match(_GITHUB_REPOSITORY_RE, value):
+        raise ValueError(f"{UPDATE_REPOSITORY_ENV} must be a GitHub owner/repo identity")
+    if (
+        ".." in value
+        or value.endswith(".git")
+        or value.startswith("-")
+        or value.lower().startswith(("http:", "https:", "git@"))
+    ):
+        raise ValueError(f"{UPDATE_REPOSITORY_ENV} must be a safe GitHub owner/repo identity")
+    return value
+
+
+def _configured_update_repository() -> str:
+    """Configured update source repository, defaulting to public Hermes.
+
+    Desktop passes ``HERMES_UPDATE_REPOSITORY`` at runtime. The installers also
+    expose ``HERMES_INSTALL_REPOSITORY`` and Lemon internal build flags, so direct
+    CLI update checks from the installed agent keep using the Lemon fork even
+    when they are not spawned by Electron.
+    """
+    explicit_repository = os.environ.get(UPDATE_REPOSITORY_ENV) or os.environ.get(INSTALL_REPOSITORY_ENV)
+    if explicit_repository:
+        return _validate_update_repository(explicit_repository)
+    if any(str(os.environ.get(name, "")).strip() == "1" for name in INTERNAL_UPDATE_ENV_VARS):
+        return INTERNAL_UPDATE_REPOSITORY
+    return DEFAULT_UPDATE_REPOSITORY
+
+
+def _configured_update_repository_url() -> str:
+    """HTTPS Git remote URL for the configured update repository."""
+    return f"https://github.com/{_configured_update_repository()}.git"
+
+
+def _configured_update_repository_canonical() -> str:
+    return f"github.com/{_configured_update_repository()}".lower()
+
+
+def _is_default_update_repository() -> bool:
+    return _configured_update_repository().lower() == DEFAULT_UPDATE_REPOSITORY.lower()
+
+
+def _canonical_github_remote(url: str | None) -> str:
+    if not url:
+        return ""
+    value = str(url).strip()
+    if value.startswith("git@github.com:"):
+        value = "github.com/" + value[len("git@github.com:"):]
+    elif value.startswith("ssh://git@github.com/"):
+        value = "github.com/" + value[len("ssh://git@github.com/"):]
+    else:
+        with suppress(Exception):
+            from urllib.parse import urlparse
+            parsed = urlparse(value)
+            if parsed.netloc and parsed.path:
+                value = f"{parsed.netloc}{parsed.path}"
+    value = value.strip().rstrip("/")
+    if value.endswith(".git"):
+        value = value[:-4]
+    return value.lower()
+
+
+def _repository_remote_urls(repository: str) -> set[str]:
+    return {
+        f"https://github.com/{repository}.git",
+        f"git@github.com:{repository}.git",
+        f"https://github.com/{repository}",
+        f"git@github.com:{repository}",
+    }
+
+
+OFFICIAL_REPO_URL = f"https://github.com/{DEFAULT_UPDATE_REPOSITORY}.git"
+OFFICIAL_REPO_URLS = _repository_remote_urls(DEFAULT_UPDATE_REPOSITORY)
+_UPSTREAM_ADD_CMD = f"git remote add upstream {OFFICIAL_REPO_URL}"
 SKIP_UPSTREAM_PROMPT_FILE = ".skip_upstream_prompt"
 
 
@@ -184,15 +264,25 @@ def _get_origin_url(git_cmd: list[str], cwd: Path) -> Optional[str]:
 
 
 def _is_fork(origin_url: Optional[str]) -> bool:
-    """Check if the origin remote points to a fork (not the official repo)."""
+    """Check if the origin remote points outside the configured update repo."""
     if not origin_url:
         return False
 
-    def _norm(url: str) -> str:
-        url = url.rstrip("/")
-        return url[:-4] if url.endswith(".git") else url
+    return _canonical_github_remote(origin_url) != _configured_update_repository_canonical()
 
-    return _norm(origin_url) not in {_norm(official) for official in OFFICIAL_REPO_URLS}
+
+def _ensure_origin_matches_configured_repository(git_cmd: list[str], cwd: Path) -> bool:
+    """For internal builds, pin origin to the configured repository before fetching."""
+    if _is_default_update_repository():
+        return True
+
+    expected_url = _configured_update_repository_url()
+    origin_url = _get_origin_url(git_cmd, cwd)
+    if _canonical_github_remote(origin_url) == _configured_update_repository_canonical():
+        return True
+
+    args = ["remote", "set-url", "origin", expected_url] if origin_url else ["remote", "add", "origin", expected_url]
+    return _git_ok(git_cmd, args, cwd)
 
 
 def _has_upstream_remote(git_cmd: list[str], cwd: Path) -> bool:
@@ -274,6 +364,8 @@ def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path, *, assume_yes: 
     See #97052.
     """
     from hermes_cli.update_cmd import _count_commits_between, _has_upstream_remote, _no_prompt_git_kwargs, _should_skip_upstream_prompt
+    if not _is_default_update_repository():
+        return False
     if not _has_upstream_remote(git_cmd, cwd) and (
         _should_skip_upstream_prompt() or not _offer_upstream_remote(git_cmd, cwd, assume_yes=assume_yes, input_fn=input_fn)
     ):

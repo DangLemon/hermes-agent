@@ -300,7 +300,8 @@ export function buildDesktopRuntimeEnv({
   hermesHome,
   identity,
   internalBuild = false,
-  legacyHarnessConfigPath
+  legacyHarnessConfigPath,
+  updateRepository
 }: {
   activeRuntimeRoot: string
   harnessResourcePath?: string | null
@@ -308,6 +309,7 @@ export function buildDesktopRuntimeEnv({
   identity: DesktopRuntimeIdentity
   internalBuild?: boolean
   legacyHarnessConfigPath?: string
+  updateRepository?: string | null
 }): Record<string, string | undefined> {
   const runtimeDirName = path.basename(activeRuntimeRoot)
 
@@ -322,6 +324,7 @@ export function buildDesktopRuntimeEnv({
     HERMES_UPDATE_HANDOFF_LOG_NAME: identity.updateHandoffLogName,
     HERMES_UPDATE_MARKER_NAME: identity.updateMarkerName,
     HERMES_UPDATE_PRODUCT_NAME: identity.appName,
+    HERMES_UPDATE_REPOSITORY: updateRepository || undefined,
     HERMES_UPDATE_TEMP_PREFIX: identity.updateTempPrefix,
     HERMES_UPDATE_RESULT_NAME: identity.handoffResultName
   }

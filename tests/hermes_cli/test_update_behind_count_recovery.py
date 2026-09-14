@@ -60,6 +60,14 @@ def test_compare_behind_returns_ahead_by():
         assert banner._github_compare_behind(SHA_A, SHA_B) == 61
 
 
+def test_compare_behind_uses_configured_repository():
+    with patch("urllib.request.urlopen", return_value=_FakeResponse(json.dumps({"ahead_by": 7}).encode())) as open_mock:
+        assert banner._github_compare_behind(SHA_A, SHA_B, repository="DangLemon/hermes-agent") == 7
+
+    request = open_mock.call_args.args[0]
+    assert request.full_url == f"https://api.github.com/repos/DangLemon/hermes-agent/compare/{SHA_A}...{SHA_B}"
+
+
 def test_compare_behind_zero_means_local_ahead():
     with _patch_urlopen({"ahead_by": 0, "status": "behind"}):
         assert banner._github_compare_behind(SHA_A, SHA_B) == 0

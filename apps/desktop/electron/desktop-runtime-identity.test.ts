@@ -30,7 +30,8 @@ test('desktop runtime child env carries Lemon identity and compatibility variabl
       hermesHome: '/Users/test/.lemon-ai',
       identity: LEMON_AI_IDENTITY,
       internalBuild: true,
-      legacyHarnessConfigPath: '/tmp/legacy-harness.json'
+      legacyHarnessConfigPath: '/tmp/legacy-harness.json',
+      updateRepository: 'DangLemon/hermes-agent'
     }),
     {
       HERMES_BOOTSTRAP_MARKER_NAME: '.lemon-ai-bootstrap-complete',
@@ -40,6 +41,7 @@ test('desktop runtime child env carries Lemon identity and compatibility variabl
       HERMES_DESKTOP_RUNTIME_DIR_NAME: 'lemon-agent',
       HERMES_HOME: '/Users/test/.lemon-ai',
       HERMES_INSTALL_RUNTIME_DIR_NAME: 'lemon-agent',
+      HERMES_UPDATE_REPOSITORY: 'DangLemon/hermes-agent',
       LEMON_AI_DESKTOP_INTERNAL: '1',
       LEMON_AI_HOME: '/Users/test/.lemon-ai',
       LEMON_AI_INSTALL_RUNTIME_DIR_NAME: 'lemon-agent',

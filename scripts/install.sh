@@ -2438,6 +2438,10 @@ setup_path() {
         if [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
             printf 'export HERMES_HOME=%q\n' "$HERMES_HOME"
         fi
+        # Keep direct `hermes update` invocations on the same source selected
+        # by the installer. Desktop handoffs pass this through their child
+        # environment; the shell launcher must do the same for CLI users.
+        printf 'export HERMES_UPDATE_REPOSITORY=%q\n' "$REPOSITORY"
     }
 
     # Create a user-facing shim for the hermes command.

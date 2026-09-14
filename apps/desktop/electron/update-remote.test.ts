@@ -21,8 +21,14 @@ import { test } from 'vitest'
 
 import {
   canonicalGitHubRemote,
+  githubRepositoryCanonical,
+  githubRepositoryHttpsUrl,
+  isNonDefaultRepository,
   isOfficialSshRemote,
   isSshRemote,
+  isSshRemoteForRepository,
+  remoteMatchesRepository,
+  validateGitHubRepositoryIdentity,
   OFFICIAL_REPO_CANONICAL,
   OFFICIAL_REPO_HTTPS_URL
 } from './update-remote'
@@ -76,4 +82,26 @@ test('isOfficialSshRemote does NOT match forks, other hosts, or HTTPS', () => {
 test('OFFICIAL_REPO_HTTPS_URL canonicalizes to OFFICIAL_REPO_CANONICAL', () => {
   // Invariant: the URL we substitute in must be the same repo we detect.
   assert.equal(canonicalGitHubRemote(OFFICIAL_REPO_HTTPS_URL), OFFICIAL_REPO_CANONICAL)
+})
+
+test('GitHub repository helpers validate and build Lemon source URLs', () => {
+  assert.equal(validateGitHubRepositoryIdentity('DangLemon/hermes-agent'), 'DangLemon/hermes-agent')
+  assert.equal(githubRepositoryCanonical('DangLemon/hermes-agent'), 'github.com/danglemon/hermes-agent')
+  assert.equal(githubRepositoryHttpsUrl('DangLemon/hermes-agent'), 'https://github.com/DangLemon/hermes-agent.git')
+  assert.equal(isNonDefaultRepository('DangLemon/hermes-agent'), true)
+  assert.equal(isNonDefaultRepository('NousResearch/hermes-agent'), false)
+})
+
+test('repository remote matching is driven by the configured owner/repo', () => {
+  assert.equal(remoteMatchesRepository('https://github.com/DangLemon/hermes-agent.git', 'DangLemon/hermes-agent'), true)
+  assert.equal(remoteMatchesRepository('git@github.com:DangLemon/hermes-agent.git', 'DangLemon/hermes-agent'), true)
+  assert.equal(remoteMatchesRepository('https://github.com/NousResearch/hermes-agent.git', 'DangLemon/hermes-agent'), false)
+  assert.equal(isSshRemoteForRepository('git@github.com:DangLemon/hermes-agent.git', 'DangLemon/hermes-agent'), true)
+  assert.equal(isSshRemoteForRepository('https://github.com/DangLemon/hermes-agent.git', 'DangLemon/hermes-agent'), false)
+})
+
+test('repository identity rejects URLs and path traversal', () => {
+  assert.throws(() => validateGitHubRepositoryIdentity('https://github.com/DangLemon/hermes-agent'), /sourceRepository/)
+  assert.throws(() => validateGitHubRepositoryIdentity('../hermes-agent'), /sourceRepository/)
+  assert.throws(() => validateGitHubRepositoryIdentity('DangLemon/hermes-agent.git'), /sourceRepository/)
 })

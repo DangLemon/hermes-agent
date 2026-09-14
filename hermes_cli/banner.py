@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import threading
 import time
+from contextlib import suppress
 from pathlib import Path
 from urllib.parse import urlparse
 from hermes_constants import get_hermes_home
@@ -131,9 +132,6 @@ _UPDATE_CHECK_CACHE_SECONDS = 6 * 3600  # avoid repeated git fetches
 # Returned when an update is known to exist but commits can't be counted (e.g. nix builds).
 UPDATE_AVAILABLE_NO_COUNT = -1
 
-_UPSTREAM_REPO_URL = "https://github.com/NousResearch/hermes-agent.git"
-_OFFICIAL_REPO_CANONICAL = "github.com/nousresearch/hermes-agent"
-
 
 def _canonical_github_remote(url: str | None) -> str:
     """Return ``host/owner/repo`` for common GitHub remote URL forms."""
@@ -153,7 +151,24 @@ def _canonical_github_remote(url: str | None) -> str:
 
 def _is_official_ssh_remote(url: str | None) -> bool:
     return bool(url) and url.strip().lower().startswith(("git@", "ssh://")) and (
-        _canonical_github_remote(url) == _OFFICIAL_REPO_CANONICAL)
+        _canonical_github_remote(url) == _configured_update_repository_canonical())
+
+
+def _configured_update_repository() -> Optional[str]:
+    with suppress(Exception):
+        from hermes_cli.update_cmd_git import _configured_update_repository as _repo
+        return _repo()
+    return None
+
+
+def _configured_update_repository_url() -> Optional[str]:
+    repo = _configured_update_repository()
+    return f"https://github.com/{repo}.git" if repo else None
+
+
+def _configured_update_repository_canonical() -> str:
+    repo = _configured_update_repository()
+    return f"github.com/{repo}".lower() if repo else ""
 
 
 _GIT_TEXT_KW = {"text": True, "encoding": "utf-8", "errors": "replace"}
@@ -208,7 +223,12 @@ def _is_full_sha(value: Optional[str]) -> bool:
     return isinstance(value, str) and len(value) == 40 and all(c in "0123456789abcdefABCDEF" for c in value)
 
 
-def _github_compare_behind(current_rev: str, target_rev: str) -> Optional[int]:
+def _safe_github_repository(repository: str | None) -> str:
+    from hermes_cli.update_cmd_git import _validate_update_repository
+    return _validate_update_repository(repository)
+
+
+def _github_compare_behind(current_rev: str, target_rev: str, *, repository: str | None = None) -> Optional[int]:
     """Exact behind-count via the GitHub compare API for uncountable graphs.
 
     Shallow installer clones and ls-remote-only probes know the two tip SHAs but have no local
@@ -216,7 +236,8 @@ def _github_compare_behind(current_rev: str, target_rev: str) -> Optional[int]:
     """
     if not (_is_full_sha(current_rev) and _is_full_sha(target_rev)):
         return None
-    url = f"https://api.github.com/repos/nousresearch/hermes-agent/compare/{current_rev}...{target_rev}"
+    repo = _safe_github_repository(repository or _configured_update_repository())
+    url = f"https://api.github.com/repos/{repo}/compare/{current_rev}...{target_rev}"
 
     def _fetch():
         import urllib.request
@@ -230,7 +251,13 @@ def _github_compare_behind(current_rev: str, target_rev: str) -> Optional[int]:
     return ahead if isinstance(ahead, int) and not isinstance(ahead, bool) and ahead >= 0 else None
 
 
-def _tips_behind(head_rev: Optional[str], target_rev: Optional[str], repo_dir: Optional[Path] = None) -> Optional[int]:
+def _tips_behind(
+    head_rev: Optional[str],
+    target_rev: Optional[str],
+    repo_dir: Optional[Path] = None,
+    *,
+    repository: str | None = None,
+) -> Optional[int]:
     """Behind-count from two tip SHAs: None if either is unknown, 0 when equal, else count/sentinel.
 
     With ``repo_dir``, a target that is already an ancestor of HEAD (local-ahead checkout) is 0 too.
@@ -243,13 +270,16 @@ def _tips_behind(head_rev: Optional[str], target_rev: Optional[str], repo_dir: O
     if head_rev == target_rev or (repo_dir is not None and _git_ok(
             ["merge-base", "--is-ancestor", target_rev, "HEAD"], cwd=repo_dir)):
         return 0
-    counted = _github_compare_behind(head_rev, target_rev)
+    counted = _github_compare_behind(head_rev, target_rev, repository=repository)
     return counted if counted is not None else UPDATE_AVAILABLE_NO_COUNT
 
 
 def _upstream_main_sha() -> Optional[str]:
     """Tip SHA of upstream main via HTTPS ls-remote (no auth, no prompts)."""
-    result = _git_run(["ls-remote", _UPSTREAM_REPO_URL, "refs/heads/main"], timeout=10, network=True)
+    repo_url = _configured_update_repository_url()
+    if not repo_url:
+        return None
+    result = _git_run(["ls-remote", repo_url, "refs/heads/main"], timeout=10, network=True)
     if result is None or result.returncode != 0 or not result.stdout:
         return None
     return result.stdout.split()[0] or None
@@ -257,11 +287,17 @@ def _upstream_main_sha() -> Optional[str]:
 
 def _check_via_rev(local_rev: str) -> Optional[int]:
     """Compare an embedded git revision to upstream main via ls-remote (see ``_tips_behind``)."""
-    return _tips_behind(local_rev, _upstream_main_sha())
+    repository = _configured_update_repository()
+    if not repository:
+        return None
+    return _tips_behind(local_rev, _upstream_main_sha(), repository=repository)
 
 
 def _check_via_local_git(repo_dir: Path) -> Optional[int]:
     """Count commits behind origin/main in a local checkout."""
+    repository = _configured_update_repository()
+    if not repository:
+        return None
     origin_url = _git_stdout(["remote", "get-url", "origin"], cwd=repo_dir)
     if _is_official_ssh_remote(origin_url):
         head_rev = _git_stdout(["rev-parse", "HEAD"], cwd=repo_dir)
@@ -272,7 +308,7 @@ def _check_via_local_git(repo_dir: Path) -> Optional[int]:
         # ahead checkout nudges the user into `hermes update`, which can wipe carried work — hence
         # the ancestor check, against the FRESH upstream SHA (a stale tracking ref can't fake an
         # up-to-date report).
-        return _tips_behind(head_rev, _upstream_main_sha(), repo_dir)
+        return _tips_behind(head_rev, _upstream_main_sha(), repo_dir, repository=repository)
 
     # Installer checkouts are shallow (`git clone --depth 1`): a plain `git fetch` would unshallow
     # the repo and `rev-list --count HEAD..origin/main` would report a bogus "12492 commits
@@ -310,7 +346,7 @@ def _check_via_local_git(repo_dir: Path) -> Optional[int]:
         target_rev = (
             _git_stdout(["rev-parse", "FETCH_HEAD"], cwd=repo_dir)
             or _git_stdout(["rev-parse", "origin/main"], cwd=repo_dir))
-        return _tips_behind(head_rev, target_rev)
+        return _tips_behind(head_rev, target_rev, repository=repository)
     behind = _git_count(["rev-list", "--count", "HEAD..origin/main"], cwd=repo_dir)
     return behind if fetch_ok or (behind is not None and behind > 0) else None
 
@@ -402,18 +438,21 @@ def _compute_git_banner_state(repo_dir: Optional[Path] = None) -> Optional[dict]
     return {"upstream": upstream, "local": local, "ahead": max(ahead, 0)}
 
 
-_RELEASE_URL_BASE = "https://github.com/NousResearch/hermes-agent/releases/tag"
+def _release_url_base() -> Optional[str]:
+    repo = _configured_update_repository()
+    return f"https://github.com/{repo}/releases/tag" if repo else None
 
 
 def get_latest_release_tag(repo_dir: Optional[Path] = None) -> Optional[tuple]:
     """Return ``(tag, release_url)`` for the latest local git tag, or None (a miss is cached too).
 
-    Release URL always points at the canonical NousResearch/hermes-agent repo (forks get no link).
+    Release URL points at the configured source repository.
     """
     def _compute():
         rd = repo_dir or _resolve_repo_dir()
         tag = _git_stdout(["describe", "--tags", "--abbrev=0"], cwd=rd, timeout=3) if rd else None
-        return (tag, f"{_RELEASE_URL_BASE}/{tag}") if tag else None
+        release_url_base = _release_url_base()
+        return (tag, f"{release_url_base}/{tag}") if tag and release_url_base else None
     return _memo("_latest_release_cache", _compute)
 
 

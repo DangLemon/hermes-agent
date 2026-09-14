@@ -303,6 +303,27 @@ test('resolveBootstrapSourceRepository defaults an internal harness to the Lemon
   }
 })
 
+test('resolveBootstrapSourceRepository keeps an internal package on Lemon when its manifest is missing', () => {
+  assert.equal(
+    resolveBootstrapSourceRepository({
+      resourcesPath: null,
+      env: { HERMES_DESKTOP_INTERNAL_PACKAGE: '1' }
+    }),
+    'DangLemon/hermes-agent'
+  )
+  assert.equal(
+    resolveBootstrapSourceRepository({
+      resourcesPath: null,
+      env: { LEMON_AI_DESKTOP_INTERNAL: '1' }
+    }),
+    'DangLemon/hermes-agent'
+  )
+  assert.equal(
+    resolveBootstrapSourceRepository({ resourcesPath: null, env: {} }),
+    'NousResearch/hermes-agent'
+  )
+})
+
 test('resolveBootstrapSourceRepository falls back to the legacy selector when the Lemon selector is blank', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lemon-source-repo-env-'))
 

@@ -3456,6 +3456,9 @@ function Set-PathVariable {
     # and Lemon Desktop can read its branded aliases from HKCU after Explorer
     # launches with a stale environment block.
     Set-UserEnvironmentVariableIfChanged -Name "HERMES_HOME" -Value $HermesHome
+    # Keep direct `hermes update` invocations on the same source selected by
+    # the installer. Desktop handoffs also pass this through their child env.
+    Set-UserEnvironmentVariableIfChanged -Name "HERMES_UPDATE_REPOSITORY" -Value $Repository
     if ($InternalDesktopBuild) {
         Set-UserEnvironmentVariableIfChanged -Name "LEMON_AI_HOME" -Value $HermesHome
         Set-UserEnvironmentVariableIfChanged -Name "LEMON_AI_INSTALL_RUNTIME_DIR_NAME" -Value $RuntimeDirName

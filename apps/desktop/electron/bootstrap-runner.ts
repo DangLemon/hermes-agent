@@ -148,7 +148,14 @@ function resolveBootstrapSourceRepository({
       ? environ.HERMES_DESKTOP_HARNESS_CONFIG.trim()
       : '')
 
-  return (selected ? readHarnessSourceRepository(path.resolve(selected)) : null) || DEFAULT_SOURCE_REPOSITORY
+  const internalBuild = ['LEMON_AI_DESKTOP_INTERNAL', 'HERMES_DESKTOP_INTERNAL', 'HERMES_DESKTOP_INTERNAL_PACKAGE'].some(
+    name => environ[name] === '1'
+  )
+
+  return (
+    (selected ? readHarnessSourceRepository(path.resolve(selected)) : null) ||
+    (internalBuild ? INTERNAL_SOURCE_REPOSITORY : DEFAULT_SOURCE_REPOSITORY)
+  )
 }
 
 type ExecGitFn = (args: string[], cwd: string) => string

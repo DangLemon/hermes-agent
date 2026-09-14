@@ -82,7 +82,7 @@ import {
   resolveLinuxPasswordStore
 } from './bootstrap-platform'
 import { decideBootstrapRepair } from './bootstrap-repair-guard'
-import { runBootstrap } from './bootstrap-runner'
+import { resolveBootstrapSourceRepository, runBootstrap } from './bootstrap-runner'
 import {
   BROWSER_WINDOW_HEIGHT,
   BROWSER_WINDOW_MIN_HEIGHT,
@@ -402,7 +402,11 @@ import {
 } from './update-count'
 import { waitForUpdateClearance } from './update-gate'
 import { readLiveUpdateMarker, updateHandoffConflict, writeUpdateMarker } from './update-marker'
-import { isOfficialSshRemote, OFFICIAL_REPO_HTTPS_URL } from './update-remote'
+import {
+  githubRepositoryHttpsUrl,
+  isNonDefaultRepository,
+  isSshRemoteForRepository
+} from './update-remote'
 import {
   collectRelaunchArgs,
   observeUpdaterHandoff,
@@ -891,7 +895,8 @@ function desktopRuntimeEnv() {
     hermesHome: HERMES_HOME,
     identity: DESKTOP_RUNTIME_IDENTITY,
     internalBuild: INTERNAL_DESKTOP_BUILD,
-    legacyHarnessConfigPath: process.env['HERMES_DESKTOP_HARNESS_CONFIG']
+    legacyHarnessConfigPath: process.env['HERMES_DESKTOP_HARNESS_CONFIG'],
+    updateRepository: resolveDesktopUpdateRepository()
   })
 }
 
@@ -3161,6 +3166,61 @@ async function getOriginUrl(updateRoot) {
   return origin.code === 0 ? origin.stdout.trim() : ''
 }
 
+function resolveDesktopUpdateRepository() {
+  const environ = {
+    ...process.env,
+    // The packaged identity is the authority for the fallback. This keeps a
+    // Lemon build on its own repository even when an older/partial package is
+    // missing lemon-ai-harness.json.
+    HERMES_DESKTOP_INTERNAL: INTERNAL_DESKTOP_BUILD ? '1' : process.env['HERMES_DESKTOP_INTERNAL']
+  }
+
+  try {
+    return resolveBootstrapSourceRepository({ environ })
+  } catch (error) {
+    rememberLog(`[updates] invalid packaged sourceRepository; falling back to default: ${error?.message || error}`)
+
+    return resolveBootstrapSourceRepository({
+      resourcesPath: null,
+      environ: { HERMES_DESKTOP_INTERNAL: INTERNAL_DESKTOP_BUILD ? '1' : undefined }
+    })
+  }
+}
+
+async function ensureUpdateOriginRepository(updateRoot, sourceRepository) {
+  const repository = sourceRepository || resolveDesktopUpdateRepository()
+
+  if (!repository || !isNonDefaultRepository(repository) || !directoryExists(path.join(updateRoot, '.git'))) {
+    return { ok: true, originUrl: await getOriginUrl(updateRoot), repository }
+  }
+
+  const expectedUrl = githubRepositoryHttpsUrl(repository)
+  const originUrl = await getOriginUrl(updateRoot)
+
+  if (originUrl === expectedUrl) {
+    return { ok: true, originUrl, repository }
+  }
+
+  const args = originUrl ? ['remote', 'set-url', 'origin', expectedUrl] : ['remote', 'add', 'origin', expectedUrl]
+  const result = await runGit(args, { cwd: updateRoot })
+
+  if (result.code !== 0) {
+    const action = originUrl ? 'set-url' : 'add'
+
+    return {
+      ok: false,
+      originUrl,
+      repository,
+      message: firstLine(result.stderr) || `git remote ${action} origin failed.`
+    }
+  }
+
+  const previous = originUrl || '<missing>'
+  rememberLog(`[updates] normalized update origin from ${previous} to ${expectedUrl}`)
+
+  return { ok: true, originUrl: expectedUrl, repository }
+}
+
 function emitUpdateProgress(payload) {
   const merged = { stage: 'idle', message: '', percent: null, error: null, ...payload, at: Date.now() }
   rememberLog(`[updates] ${merged.stage}: ${merged.message || merged.error || ''}`)
@@ -3176,13 +3236,13 @@ function emitUpdateProgress(payload) {
 // installed clients. Read-only ls-remote probe; only flips on a definitive
 // "ref absent" (exit 2), never on a transient network error, so a flaky
 // connection can't strand a user on the wrong branch.
-async function resolveHealedBranch(updateRoot, branch) {
+async function resolveHealedBranch(updateRoot, branch, sourceRepository = resolveDesktopUpdateRepository()) {
   if (!branch || branch === 'main') {
     return branch || 'main'
   }
 
   const originUrl = await getOriginUrl(updateRoot)
-  const remote = isOfficialSshRemote(originUrl) ? OFFICIAL_REPO_HTTPS_URL : 'origin'
+  const remote = isSshRemoteForRepository(originUrl, sourceRepository) ? githubRepositoryHttpsUrl(sourceRepository) : 'origin'
   const probe = await runGit(['ls-remote', '--exit-code', '--heads', remote, branch], { cwd: updateRoot })
 
   if (probe.code !== 2) {
@@ -3214,15 +3274,30 @@ async function checkUpdates() {
     }
   }
 
-  branch = await resolveHealedBranch(updateRoot, branch)
+  const updateRepository = resolveDesktopUpdateRepository()
+  const originReady = await ensureUpdateOriginRepository(updateRoot, updateRepository)
+
+  if (!originReady.ok) {
+    return {
+      supported: true,
+      branch,
+      error: 'fetch-failed',
+      message: originReady.message,
+      hermesRoot: updateRoot,
+      fetchedAt: Date.now()
+    }
+  }
+
+  branch = await resolveHealedBranch(updateRoot, branch, updateRepository)
   const originUrl = await getOriginUrl(updateRoot)
 
-  if (isOfficialSshRemote(originUrl)) {
+  if (isSshRemoteForRepository(originUrl, updateRepository)) {
     const git = args => runGit(args, { cwd: updateRoot }).then(r => r.stdout.trim())
+    const repositoryUrl = githubRepositoryHttpsUrl(updateRepository)
 
     const [currentSha, target, dirtyStr, currentBranch] = await Promise.all([
       git(['rev-parse', 'HEAD']),
-      runGit(['ls-remote', OFFICIAL_REPO_HTTPS_URL, `refs/heads/${branch}`], { cwd: updateRoot }),
+      runGit(['ls-remote', repositoryUrl, `refs/heads/${branch}`], { cwd: updateRoot }),
       git(['status', '--porcelain']),
       git(['rev-parse', '--abbrev-ref', 'HEAD'])
     ])
@@ -3251,7 +3326,7 @@ async function checkUpdates() {
 
     const sshBehind = tipsEqual
       ? 0
-      : await fetchCompareBehindCount({ currentSha, originUrl: OFFICIAL_REPO_HTTPS_URL, targetSha })
+      : await fetchCompareBehindCount({ currentSha, originUrl: repositoryUrl, sourceRepository: updateRepository, targetSha })
 
     const upToDate = tipsEqual || sshBehind === 0
 
@@ -3325,7 +3400,7 @@ async function checkUpdates() {
   // offline, rate-limited, or non-GitHub origins keep the honest null
   // ("update available", no fabricated number).
   if (behind === null) {
-    behind = await fetchCompareBehindCount({ currentSha, originUrl, targetSha })
+    behind = await fetchCompareBehindCount({ currentSha, originUrl, sourceRepository: updateRepository, targetSha })
   }
 
   // behind === null means "update available, exact count unknown" (shallow
@@ -3354,8 +3429,8 @@ async function checkUpdates() {
 // tested); this wrapper only does the bounded network call. Any failure —
 // offline, 4xx/5xx, rate limit, shape surprise — returns null so callers keep
 // the honest "update available, count unknown" state.
-async function fetchCompareBehindCount({ currentSha, originUrl, targetSha }) {
-  const url = compareApiUrl({ currentSha, originUrl, targetSha })
+async function fetchCompareBehindCount({ currentSha, originUrl, sourceRepository = null, targetSha }) {
+  const url = compareApiUrl({ currentSha, originUrl, sourceRepository, targetSha })
 
   if (!url) {
     return null
@@ -4055,11 +4130,13 @@ async function applyUpdates(opts: { stopSafeBlockers?: boolean } = {}) {
         let command = 'hermes update'
 
         try {
+          const updateRepository = resolveDesktopUpdateRepository()
+          await ensureUpdateOriginRepository(updateRoot, updateRepository)
           const head = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: updateRoot })
           const current = (head.stdout || '').trim()
 
           if (head.code === 0 && current && current !== 'HEAD') {
-            const branch = await resolveHealedBranch(updateRoot, current)
+            const branch = await resolveHealedBranch(updateRoot, current, updateRepository)
 
             if (branch !== 'main') {
               command = `hermes update --branch ${branch}`
@@ -4100,7 +4177,16 @@ async function applyUpdates(opts: { stopSafeBlockers?: boolean } = {}) {
 
     const updateRoot = resolveUpdateRoot()
     const { branch: configuredBranch } = readDesktopUpdateConfig()
-    const branch = await resolveHealedBranch(updateRoot, configuredBranch || DEFAULT_UPDATE_BRANCH)
+    const updateRepository = resolveDesktopUpdateRepository()
+    const originReady = await ensureUpdateOriginRepository(updateRoot, updateRepository)
+
+    if (!originReady.ok) {
+      emitUpdateProgress({ stage: 'error', message: originReady.message, percent: null })
+
+      return { ok: false, error: 'origin-config-failed', message: originReady.message }
+    }
+
+    const branch = await resolveHealedBranch(updateRoot, configuredBranch || DEFAULT_UPDATE_BRANCH, updateRepository)
     const updaterArgs = ['--update', '--branch', branch]
     const targetApp = IS_MAC ? runningAppBundle() : null
 
@@ -4388,8 +4474,20 @@ async function handOffWindowsBootstrapRecovery(reason) {
   const updateRoot = resolveUpdateRoot()
   const { branch: configuredBranch } = readDesktopUpdateConfig()
 
+  const updateRepository = resolveDesktopUpdateRepository()
+
+  if (directoryExists(path.join(updateRoot, '.git'))) {
+    const originReady = await ensureUpdateOriginRepository(updateRoot, updateRepository)
+
+    if (!originReady.ok) {
+      rememberLog(`[bootstrap] refusing recovery hand-off: ${originReady.message}`)
+
+      return false
+    }
+  }
+
   const branch = directoryExists(path.join(updateRoot, '.git'))
-    ? await resolveHealedBranch(updateRoot, configuredBranch || DEFAULT_UPDATE_BRANCH)
+    ? await resolveHealedBranch(updateRoot, configuredBranch || DEFAULT_UPDATE_BRANCH, updateRepository)
     : configuredBranch || DEFAULT_UPDATE_BRANCH
 
   const venvBin = path.join(updateRoot, 'venv', IS_WINDOWS ? 'Scripts' : 'bin')
@@ -4601,6 +4699,15 @@ async function applyUpdatesPosixHandoff(opts: any) {
   // ── Pre-flight state.db integrity guard (#68474) ──
   preflightStateDb(HERMES_HOME, rememberLog)
 
+  const updateRepository = resolveDesktopUpdateRepository()
+  const originReady = await ensureUpdateOriginRepository(updateRoot, updateRepository)
+
+  if (!originReady.ok) {
+    emitUpdateProgress({ stage: 'error', message: originReady.message, percent: null })
+
+    return { ok: false, error: 'origin-config-failed', message: originReady.message }
+  }
+
   // Branch-pin so a non-main checkout doesn't get switched to main (and
   // self-heal to main when the pinned branch no longer exists on origin).
   let branch = 'main'
@@ -4610,7 +4717,7 @@ async function applyUpdatesPosixHandoff(opts: any) {
     const current = (head.stdout || '').trim()
 
     if (head.code === 0 && current && current !== 'HEAD') {
-      branch = await resolveHealedBranch(updateRoot, current)
+      branch = await resolveHealedBranch(updateRoot, current, updateRepository)
     }
   } catch {
     // best effort

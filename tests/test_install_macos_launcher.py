@@ -87,3 +87,37 @@ def test_venv_launcher_bypasses_uv_console_script_that_requires_realpath(tmp_pat
         str(install_dir / "hermes"),
         "--version",
     ]
+
+
+def test_internal_launcher_exports_selected_update_repository(tmp_path: Path) -> None:
+    """A Lemon launcher must keep direct CLI updates on the Lemon repository."""
+    install_dir = tmp_path / "install"
+    venv_bin = install_dir / "venv" / "bin"
+    command_dir = tmp_path / "command"
+    venv_bin.mkdir(parents=True)
+    (install_dir / "hermes").write_text("# source entrypoint\n", encoding="utf-8")
+    _make_executable(venv_bin / "python", "#!/bin/sh\nexit 0\n")
+
+    harness = "\n".join(
+        [
+            "set -e",
+            'get_command_link_dir() { printf "%s" "$COMMAND_LINK_DIR"; }',
+            'get_command_link_display_dir() { printf "%s" "$COMMAND_LINK_DIR"; }',
+            "log_info() { :; }",
+            "log_success() { :; }",
+            _setup_path_function(),
+            "setup_path",
+        ]
+    )
+    env = os.environ | {
+        "USE_VENV": "true",
+        "INTERNAL_DESKTOP_BUILD": "true",
+        "INSTALL_DIR": str(install_dir),
+        "REPOSITORY": "DangLemon/hermes-agent",
+        "DISTRO": "macos",
+        "COMMAND_LINK_DIR": str(command_dir),
+    }
+    subprocess.run(["/bin/bash", "-c", harness], env=env, check=True)
+
+    launcher = (command_dir / "hermes").read_text(encoding="utf-8")
+    assert "export HERMES_UPDATE_REPOSITORY=DangLemon/hermes-agent" in launcher
