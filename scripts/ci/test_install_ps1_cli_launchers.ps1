@@ -73,7 +73,7 @@ try {
     # must not leave an empty destination for the caller to put on PATH.
     $missingThrew = $false
     try {
-        Install-HermesCommandLaunchers -Root $installRoot -Destination $binDir | Out-Null
+        Install-HermesCommandLaunchers -Root $installRoot -Destination $binDir -Repository 'DangLemon/hermes-agent' | Out-Null
     } catch {
         $missingThrew = $_.Exception.Message -like '*required launcher not found*'
     }
@@ -90,37 +90,37 @@ try {
     Set-Content -Path (Join-Path $installRoot 'venv\pyvenv.cfg') `
         -Value "home = X" -Encoding Ascii
 
-    $staged = Install-HermesCommandLaunchers -Root $installRoot -Destination $binDir
+    $staged = Install-HermesCommandLaunchers -Root $installRoot -Destination $binDir -Repository 'DangLemon/hermes-agent'
     Assert-True ($staged -eq $binDir) 'returns the destination it staged into'
-    Assert-BytesEqual $hermesV1 `
-        ([System.IO.File]::ReadAllBytes((Join-Path $binDir 'hermes.exe'))) `
-        'normal venv: exe copy lands in the destination'
-    Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir 'hermes-acp.exe'))) `
+    Assert-True (Test-Path -LiteralPath (Join-Path $binDir 'hermes.cmd')) `
+        'normal venv: repository-aware cmd wrapper lands in the destination'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir 'hermes.exe'))) `
+        'normal venv: no global exe copy is staged'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir 'hermes-acp.cmd'))) `
         'optional ACP launcher may be absent'
 
     [System.IO.File]::WriteAllBytes((Join-Path $scriptsDir 'hermes.exe'), $hermesV2)
     [System.IO.File]::WriteAllBytes((Join-Path $scriptsDir 'hermes-acp.exe'), $acp)
-    Install-HermesCommandLaunchers -Root $installRoot -Destination $binDir | Out-Null
-    Assert-BytesEqual $hermesV2 `
-        ([System.IO.File]::ReadAllBytes((Join-Path $binDir 'hermes.exe'))) `
-        'installer refreshes an existing Hermes launcher'
-    Assert-BytesEqual $acp `
-        ([System.IO.File]::ReadAllBytes((Join-Path $binDir 'hermes-acp.exe'))) `
-        'installer copies the optional ACP launcher when present'
+    Install-HermesCommandLaunchers -Root $installRoot -Destination $binDir -Repository 'DangLemon/hermes-agent' | Out-Null
+    $refreshedCmdBody = [System.IO.File]::ReadAllText((Join-Path $binDir 'hermes.cmd'))
+    Assert-True ($refreshedCmdBody.Contains((Join-Path $scriptsDir 'hermes.exe')) -and $refreshedCmdBody.Contains('HERMES_UPDATE_REPOSITORY=DangLemon/hermes-agent')) `
+        'installer refreshes the repository-aware Hermes wrapper'
+    $acpCmdBody = [System.IO.File]::ReadAllText((Join-Path $binDir 'hermes-acp.cmd'))
+    Assert-True ($acpCmdBody.Contains((Join-Path $scriptsDir 'hermes-acp.exe')) -and $acpCmdBody.Contains('HERMES_UPDATE_REPOSITORY=DangLemon/hermes-agent')) `
+        'installer stages the optional ACP wrapper when present'
 
-    # Relocatable venv: exe trampolines die when copied out of venv\Scripts
-    # ('uv trampoline failed to canonicalize script path'), so the stage
-    # must emit .cmd delegators and clear the stale exe copies.
+    # Relocatable venv: uses the same wrapper form; delegating to the in-venv
+    # executable avoids uv trampoline failures and keeps the update source scoped.
     Set-Content -Path (Join-Path $installRoot 'venv\pyvenv.cfg') `
         -Value "home = X`r`nrelocatable = true" -Encoding Ascii
-    Install-HermesCommandLaunchers -Root $installRoot -Destination $binDir | Out-Null
+    Install-HermesCommandLaunchers -Root $installRoot -Destination $binDir -Repository 'DangLemon/hermes-agent' | Out-Null
     Assert-True (Test-Path -LiteralPath (Join-Path $binDir 'hermes.cmd')) `
-        'relocatable venv: .cmd delegator staged'
+        'relocatable venv: .cmd wrapper staged'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $binDir 'hermes.exe'))) `
         'relocatable venv: stale exe copy removed'
     $cmdBody = [System.IO.File]::ReadAllText((Join-Path $binDir 'hermes.cmd'))
-    Assert-True ($cmdBody.Contains((Join-Path $scriptsDir 'hermes.exe')) -and $cmdBody.Contains('%*')) `
-        'delegator invokes the in-venv exe and forwards args'
+    Assert-True ($cmdBody.Contains((Join-Path $scriptsDir 'hermes.exe')) -and $cmdBody.Contains('%*') -and $cmdBody.Contains('HERMES_UPDATE_REPOSITORY=DangLemon/hermes-agent')) `
+        'wrapper invokes the in-venv exe, pins the update repository, and forwards args'
 } finally {
     if (Test-Path -LiteralPath $caseRoot) {
         $resolvedCase = [System.IO.Path]::GetFullPath($caseRoot)
