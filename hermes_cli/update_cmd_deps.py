@@ -958,6 +958,15 @@ def _refuse_update_if_venv_foreign_owned(project_root) -> None:
     sys.exit(1)
 
 
+def _dependency_reinstall_url_for_configured_repository() -> str:
+    from hermes_cli.update_cmd import _configured_update_repository, _is_default_update_repository, _m
+    if _is_default_update_repository():
+        return "https://hermes-agent.nousresearch.com"
+    repository = _configured_update_repository()
+    script_name = "install.ps1" if _m()._is_windows() else "install.sh"
+    return f"https://raw.githubusercontent.com/{repository}/main/scripts/{script_name}"
+
+
 def _sync_python_dependencies_after_pull(
     git_cmd, branch, pre_pull_sha, *, active_lazy_features, active_tool_dependencies,
     _windows_gateway_resume):
@@ -1049,4 +1058,4 @@ def _sync_python_dependencies_after_pull(
         print(f"  ⚠ {failing_module} still fails to import after updating:")
         print(f"      {import_error}")
         print("    Run `hermes update` again — if it persists, reinstall:")
-        print("    https://hermes-agent.nousresearch.com")
+        print(f"    {_dependency_reinstall_url_for_configured_repository()}")
