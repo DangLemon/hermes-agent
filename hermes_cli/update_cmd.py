@@ -167,6 +167,15 @@ def _capture_head_sha(git_cmd, cwd) -> str | None:
         return None
 
 
+def _reinstall_command_for_configured_repository() -> str:
+    """Shell command for non-git reinstall guidance."""
+    if _is_default_update_repository():
+        return "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
+    repository = _configured_update_repository()
+    installer_url = f"https://raw.githubusercontent.com/{repository}/main/scripts/install.sh"
+    return f"curl -fsSL {installer_url} | bash"
+
+
 def _validate_python_files_syntax(root, relpaths) -> tuple[bool, str | None, str | None]:
     """Compile *relpaths* under *root*; the .pyc goes to a temp dir, not ``__pycache__/`` (no
     race with test workers, no stale pyc for another interpreter)."""
@@ -1025,7 +1034,7 @@ def _prepare_git_command() -> tuple[bool, list, bool]:
     use_zip_update = not git_dir.exists()
     if use_zip_update and sys.platform != "win32":
         print("✗ Not a git repository. Please reinstall:")
-        print("  curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash")
+        print(f"  {_reinstall_command_for_configured_repository()}")
         sys.exit(1)
 
     git_cmd = _base_git_cmd()

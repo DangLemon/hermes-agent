@@ -96,6 +96,54 @@ def _patch_gateway_discovery():
         yield
 
 
+@pytest.mark.parametrize(
+    "repository",
+    ["DangLemon/hermes-agent", "ExampleOrg/runtime-agent"],
+)
+def test_prepare_git_command_reinstall_uses_configured_repository(
+    repository, tmp_path, monkeypatch, capsys
+):
+    from hermes_cli import main as hm
+
+    monkeypatch.setattr(hm, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(update_cmd.sys, "platform", "linux")
+    monkeypatch.setenv("HERMES_UPDATE_REPOSITORY", repository)
+
+    with pytest.raises(SystemExit) as exc_info:
+        update_cmd._prepare_git_command()
+
+    assert exc_info.value.code == 1
+    out = capsys.readouterr().out
+    assert (
+        "curl -fsSL "
+        f"https://raw.githubusercontent.com/{repository}/main/scripts/install.sh "
+        "| bash"
+    ) in out
+    assert "https://hermes-agent.nousresearch.com/install.sh" not in out
+
+
+def test_prepare_git_command_reinstall_keeps_public_installer(
+    tmp_path, monkeypatch, capsys
+):
+    from hermes_cli import main as hm
+
+    monkeypatch.setattr(hm, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(update_cmd.sys, "platform", "linux")
+    monkeypatch.delenv("HERMES_UPDATE_REPOSITORY", raising=False)
+    monkeypatch.delenv("HERMES_INSTALL_REPOSITORY", raising=False)
+    monkeypatch.delenv("LEMON_AI_DESKTOP_INTERNAL", raising=False)
+    monkeypatch.delenv("HERMES_DESKTOP_INTERNAL", raising=False)
+    monkeypatch.delenv("HERMES_DESKTOP_INTERNAL_PACKAGE", raising=False)
+
+    with pytest.raises(SystemExit) as exc_info:
+        update_cmd._prepare_git_command()
+
+    assert exc_info.value.code == 1
+    out = capsys.readouterr().out
+    assert "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash" in out
+    assert "raw.githubusercontent.com" not in out
+
+
 class TestCmdUpdateNpmLockfileCache:
     @staticmethod
     def _cache_file(hermes_root, project_root):
