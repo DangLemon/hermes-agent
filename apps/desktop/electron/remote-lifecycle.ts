@@ -46,6 +46,42 @@ const READY_POLL_INTERVAL_MS = 750
 // Keep startup portable: restricted hosts retain their existing limit.
 const REMOTE_NOFILE_SOFT_LIMIT = 65_536
 
+const DEFAULT_SOURCE_REPOSITORY = 'NousResearch/hermes-agent'
+
+const SOURCE_REPOSITORY_RE =
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/
+
+function validateSourceRepository(sourceRepository) {
+  if (sourceRepository === undefined || sourceRepository === null || sourceRepository === '') {
+    return DEFAULT_SOURCE_REPOSITORY
+  }
+
+  if (typeof sourceRepository !== 'string' || !SOURCE_REPOSITORY_RE.test(sourceRepository)) {
+    throw new Error('sourceRepository must be a GitHub owner/repo identity')
+  }
+
+  if (
+    sourceRepository.includes('..') ||
+    sourceRepository.endsWith('.git') ||
+    sourceRepository.startsWith('-') ||
+    /^(https?:|git@)/i.test(sourceRepository)
+  ) {
+    throw new Error('sourceRepository must be a safe GitHub owner/repo identity')
+  }
+
+  return sourceRepository
+}
+
+function remoteInstallCommand(sourceRepository = DEFAULT_SOURCE_REPOSITORY) {
+  const repository = validateSourceRepository(sourceRepository)
+
+  if (repository.toLowerCase() === DEFAULT_SOURCE_REPOSITORY.toLowerCase()) {
+    return 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | sh'
+  }
+
+  return `curl -fsSL https://raw.githubusercontent.com/${repository}/main/scripts/install.sh | sh -s -- --repo ${repository}`
+}
+
 function classifySshReuseProof(proof, spawnNonce) {
   return proof?.ok === true &&
     proof.sshOwnerNonce === spawnNonce &&
@@ -167,7 +203,7 @@ function expandRemotePath(p) {
 // (throws a path-naming error if not executable — never silently falls back to a
 // different install). A BLANK path auto-detects: login-shell `command -v` (a
 // non-login `ssh host cmd` PATH misses user installs), then known install paths.
-async function locateHermes(ssh, remoteHermesPath) {
+async function locateHermes(ssh, remoteHermesPath, sourceRepository = DEFAULT_SOURCE_REPOSITORY) {
   const resolveLauncher = async (candidate: string) => {
     // Return the candidate path directly. The hermes binary or wrapper script
     // is executable and handles argument forwarding (e.g. `exec <python> <script> "$@"`)
@@ -236,7 +272,7 @@ async function locateHermes(ssh, remoteHermesPath) {
 
   const err: any = new Error(
     'Hermes is not installed on the remote host (could not find a `hermes` executable). ' +
-      'Install it on the remote with:  curl -fsSL https://hermes-agent.nousresearch.com/install.sh | sh  ' +
+      `Install it on the remote with:  ${remoteInstallCommand(sourceRepository)}  ` +
       '— or set the Hermes path explicitly in the SSH connection settings.'
   )
 
@@ -1396,7 +1432,7 @@ async function connect(deps) {
   log(`remote platform ${platform.os}/${platform.arch}`)
   const hermesHome = await probeRemoteHermesHome(ssh)
   await assertRemoteInstallUpdateClear(ssh, hermesHome)
-  const hermesPath = await locateHermes(ssh, remoteHermesPath)
+  const hermesPath = await locateHermes(ssh, remoteHermesPath, deps.sourceRepository)
   log(`located hermes at ${hermesPath}`)
   const hermesVersion = await probeHermesVersion(ssh, hermesPath)
 
@@ -1674,6 +1710,7 @@ export {
   readLockfile,
   READY_RE,
   REMOTE_LOCK_DIR,
+  remoteInstallCommand,
   remotePidAlive,
   remoteProcessCreationTime,
   remoteSupportsSshOwnership,

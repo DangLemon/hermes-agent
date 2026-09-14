@@ -173,7 +173,7 @@ def _reinstall_command_for_configured_repository() -> str:
         return "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
     repository = _configured_update_repository()
     installer_url = f"https://raw.githubusercontent.com/{repository}/main/scripts/install.sh"
-    return f"curl -fsSL {installer_url} | bash"
+    return f"curl -fsSL {installer_url} | bash -s -- --repo {repository}"
 
 
 def _validate_python_files_syntax(root, relpaths) -> tuple[bool, str | None, str | None]:

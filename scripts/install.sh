@@ -484,6 +484,12 @@ ensure_managed_origin() {
         return 1
     fi
 
+    case "$current_url" in
+        git@github.com:*|ssh://git@github.com/*)
+            return 0
+            ;;
+    esac
+
     if [ "$current_url" != "$REPO_URL_HTTPS" ]; then
         log_info "Normalizing managed origin URL to $REPO_URL_HTTPS..."
         if ! git remote set-url origin "$REPO_URL_HTTPS"; then
@@ -494,11 +500,11 @@ ensure_managed_origin() {
     fi
 }
 
-powershell_installer_url() {
+powershell_installer_command() {
     if [ "$(repository_identity_key "$REPOSITORY")" = "$(repository_identity_key "$HERMES_DEFAULT_REPOSITORY")" ]; then
-        printf '%s\n' "https://hermes-agent.nousresearch.com/install.ps1"
+        printf '%s\n' "iex (irm https://hermes-agent.nousresearch.com/install.ps1)"
     else
-        printf '%s\n' "https://raw.githubusercontent.com/${REPOSITORY}/main/scripts/install.ps1"
+        printf '%s\n' "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/${REPOSITORY}/main/scripts/install.ps1))) -Repository '${REPOSITORY}'"
     fi
 }
 
@@ -892,7 +898,7 @@ detect_os() {
             OS="windows"
             DISTRO="windows"
             log_error "Windows detected. Please use the PowerShell installer:"
-            log_info "  iex (irm $(powershell_installer_url))"
+            log_info "  $(powershell_installer_command)"
             exit 1
             ;;
         *)
@@ -1842,7 +1848,9 @@ clone_repo() {
     fi
 
     if [ -d "$INSTALL_DIR" ]; then
-        if [ -d "$INSTALL_DIR/.git" ]; then
+        local fresh_clone_created=false
+
+    if [ -d "$INSTALL_DIR/.git" ]; then
             log_info "Existing installation found, updating..."
             cd "$INSTALL_DIR"
 
@@ -1960,6 +1968,7 @@ EOF
         log_info "Trying SSH clone..."
         if GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=5" \
            git clone --depth 1 --branch "$BRANCH" "$REPO_URL_SSH" "$INSTALL_DIR" 2>/dev/null; then
+            fresh_clone_created=true
             log_success "Cloned via SSH"
         else
             rm -rf "$INSTALL_DIR" 2>/dev/null  # Clean up partial SSH clone
@@ -2015,8 +2024,10 @@ EOF
                 fi
             fi
             if [ "$clone_ok" = true ]; then
+                fresh_clone_created=true
                 log_success "Cloned via HTTPS"
             elif download_archive_checkout; then
+                fresh_clone_created=true
                 clone_ok=true
             else
                 log_error "Failed to clone repository"
@@ -2026,6 +2037,9 @@ EOF
     fi
 
     cd "$INSTALL_DIR"
+    if [ "$fresh_clone_created" = true ]; then
+        git remote set-url origin "$REPO_URL_HTTPS" 2>/dev/null || true
+    fi
     ensure_managed_origin || return 1
 
     if [ -n "$INSTALL_COMMIT" ]; then

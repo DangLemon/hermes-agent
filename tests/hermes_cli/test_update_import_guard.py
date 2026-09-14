@@ -346,12 +346,12 @@ def test_import_guard_flags_missing_first_party_module(monkeypatch, tmp_path):
         (
             "DangLemon/hermes-agent",
             False,
-            "https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.sh",
+            "curl -fsSL https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.sh | bash -s -- --repo DangLemon/hermes-agent",
         ),
         (
             "DangLemon/hermes-agent",
             True,
-            "https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.ps1",
+            "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.ps1))) -Repository 'DangLemon/hermes-agent'",
         ),
     ],
 )

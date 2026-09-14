@@ -991,6 +991,18 @@ def _refresh_bootstrap_cache_scripts(branch: str = "main") -> None:
         if re.fullmatch(r"[0-9a-fA-F]{7,40}", safe_ref):  # install_script.rs::is_valid_commit(): immutable pin
             return
         refreshed = []
+        removed = []
+        from hermes_cli.update_cmd_git import _configured_update_repository
+
+        repo_cache_prefix = re.sub(r"[^0-9A-Za-z._-]", "__", _configured_update_repository())
+        repo_specific_prefix = re.compile(
+            r"^install-" + re.escape(repo_cache_prefix) + r"-" + re.escape(safe_ref) + r"\.(?:ps1|sh)$"
+        )
+        for cached in cache_dir.iterdir():
+            if not cached.is_file() or not repo_specific_prefix.match(cached.name):
+                continue
+            cached.unlink()
+            removed.append(cached.name)
         for kind, src_name in (("ps1", "install.ps1"), ("sh", "install.sh")):
             src = _m().PROJECT_ROOT / "scripts" / src_name
             cached = cache_dir / f"install-{safe_ref}.{kind}"
@@ -1006,6 +1018,7 @@ def _refresh_bootstrap_cache_scripts(branch: str = "main") -> None:
             tmp.write_bytes(data)
             os.replace(tmp, cached)
             refreshed.append(cached.name)
+        refreshed.extend(f"removed {name}" for name in removed)
         if refreshed:
             print("  ✓ Refreshed installer bootstrap-cache script(s): " + ", ".join(sorted(refreshed)))
 

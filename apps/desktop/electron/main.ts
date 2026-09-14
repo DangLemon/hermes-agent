@@ -212,6 +212,7 @@ import {
 } from './gateway-file-download'
 import { startGatewaysAfterUpdateAbort, stopGatewayBeforeUpdate } from './gateway-stop-before-update'
 import { probeGatewayWebSocket } from './gateway-ws-probe'
+import { resolveGitBinaryPath } from './git-binary'
 import { registerGitIpc } from './git-ipc'
 import { clearStaleGitLocks } from './gitlock'
 import { readAndConsumeHandoffResult } from './handoff-result'
@@ -405,7 +406,8 @@ import { readLiveUpdateMarker, updateHandoffConflict, writeUpdateMarker } from '
 import {
   githubRepositoryHttpsUrl,
   isNonDefaultRepository,
-  isSshRemoteForRepository
+  isSshRemoteForRepository,
+  remoteMatchesRepository
 } from './update-remote'
 import {
   collectRelaunchArgs,
@@ -2959,11 +2961,11 @@ function makeDashboardReadyFile() {
   return path.join(dir, `dashboard-${process.pid}-${Date.now()}-${crypto.randomBytes(6).toString('hex')}.json`)
 }
 
-// resolveGitBinary — locate git.exe on Windows. A fresh installer-driven
-// install only has PortableGit under %LOCALAPPDATA%\hermes\git (never on
-// PATH), so a bare spawn('git') ENOENTs and self-update checks fail with
-// "Couldn't check for updates". Mirror findGitBash: PortableGit first, then
-// standard Git-for-Windows locations, then PATH. Cached after first probe.
+// resolveGitBinary — locate git.exe for desktop update checks. A fresh
+// installer-driven Windows install may only have PortableGit under the selected
+// HERMES_HOME (Lemon AI uses %LOCALAPPDATA%\Lemon AI), so probe the active home
+// first, then legacy product dirs, standard Git-for-Windows, then PATH. Cached
+// after first probe.
 let _gitBinaryCache = null
 
 function resolveGitBinary() {
@@ -2971,28 +2973,17 @@ function resolveGitBinary() {
     return _gitBinaryCache
   }
 
-  if (!IS_WINDOWS) {
-    _gitBinaryCache = findOnPath('git') || 'git'
-
-    return _gitBinaryCache
-  }
-
-  const localAppData = process.env.LOCALAPPDATA || ''
-  const candidates = []
-
-  if (localAppData) {
-    candidates.push(path.join(localAppData, 'hermes', 'git', 'cmd', 'git.exe'))
-    candidates.push(path.join(localAppData, 'hermes', 'git', 'bin', 'git.exe'))
-  }
-
-  candidates.push(path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Git', 'cmd', 'git.exe'))
-  candidates.push(path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Git', 'cmd', 'git.exe'))
-
-  if (localAppData) {
-    candidates.push(path.join(localAppData, 'Programs', 'Git', 'cmd', 'git.exe'))
-  }
-
-  _gitBinaryCache = candidates.find(fileExists) || findOnPath('git') || 'git'
+  _gitBinaryCache = resolveGitBinaryPath({
+    isWindows: IS_WINDOWS,
+    env: process.env,
+    fileExists,
+    findOnPath,
+    hermesHome: HERMES_HOME,
+    localAppDataProductDirs: [
+      DESKTOP_RUNTIME_IDENTITY.windowsLocalAppDataDirName,
+      ...DESKTOP_RUNTIME_IDENTITY.legacyWindowsLocalAppDataDirNames
+    ]
+  })
 
   return _gitBinaryCache
 }
@@ -3197,7 +3188,7 @@ async function ensureUpdateOriginRepository(updateRoot, sourceRepository) {
   const expectedUrl = githubRepositoryHttpsUrl(repository)
   const originUrl = await getOriginUrl(updateRoot)
 
-  if (originUrl === expectedUrl) {
+  if (remoteMatchesRepository(originUrl, repository)) {
     return { ok: true, originUrl, repository }
   }
 
@@ -10893,6 +10884,7 @@ async function bootstrapSshConnectionInner(profile, sshConfig, reuseToken, sourc
       adoptServedToken: adoptServedDashboardToken,
       hostAppName: DESKTOP_RUNTIME_IDENTITY.appName,
       rememberLog: sshRememberLog,
+      sourceRepository: resolveDesktopUpdateRepository(),
       signal: lease.signal
     })
   } catch (error: any) {
@@ -11366,7 +11358,7 @@ async function testDesktopConnectionConfig(input: any = {}) {
             hermesVersion = inspection.version
             supported = inspection.supported
           } else {
-            hermesPath = await remoteLifecycle.locateHermes(ssh, sshConfig.remoteHermesPath || '')
+            hermesPath = await remoteLifecycle.locateHermes(ssh, sshConfig.remoteHermesPath || '', resolveDesktopUpdateRepository())
             hermesVersion = await remoteLifecycle.probeHermesVersion(ssh, hermesPath)
             supported = await remoteLifecycle.remoteSupportsSshOwnership(ssh, hermesPath)
           }
@@ -12319,7 +12311,7 @@ async function openManagedSshUpdateTransport(
       }
     }
 
-    const hermesPath = await remoteLifecycle.locateHermes(ssh, config.remoteHermesPath || '')
+    const hermesPath = await remoteLifecycle.locateHermes(ssh, config.remoteHermesPath || '', resolveDesktopUpdateRepository())
     const hermesHome = await remoteLifecycle.probeRemoteHermesHome(ssh)
 
     return {

@@ -30,6 +30,7 @@ import {
   PROTOCOL_VERSION,
   readLockfile,
   READY_RE,
+  remoteInstallCommand,
   remotePidAlive,
   remoteSupportsSshOwnership,
   scrapeReadyPort,
@@ -44,6 +45,23 @@ import {
 const OWNERSHIP_ID = '0123456789abcdef0123456789abcdef'
 const SPAWN_NONCE = '0123456789abcdef'
 const exec = promisify(execCallback)
+
+test('remoteInstallCommand carries configured source repository for Lemon remote hints', () => {
+  assert.equal(remoteInstallCommand(), 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | sh')
+  assert.equal(
+    remoteInstallCommand('DangLemon/hermes-agent'),
+    'curl -fsSL https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.sh | sh -s -- --repo DangLemon/hermes-agent'
+  )
+})
+
+test('main SSH lifecycle wiring passes the configured source repository into remote hints', async () => {
+  const source = await readFile(path.join(import.meta.dirname, 'main.ts'), 'utf8')
+  const callStart = source.indexOf('result = await lifecycle({')
+  const callEnd = source.indexOf('})', callStart)
+  const body = source.slice(callStart, callEnd)
+
+  assert.match(body, /sourceRepository: resolveDesktopUpdateRepository\(\)/)
+})
 
 test('SSH reuse proof rejects a backend whose runtime was replaced', () => {
   assert.equal(

@@ -563,6 +563,10 @@ function Ensure-ManagedOrigin {
         throw "Existing checkout origin $currentRepo does not match selected -Repository $Repository. No fetch was attempted, and local edits were left untouched. Use -Repository $currentRepo to update this checkout, or move it aside before installing $Repository."
     }
 
+    if ($currentUrl -match "^(git@github\.com:|ssh://git@github\.com/)") {
+        return
+    }
+
     if ($currentUrl -ne $RepoUrlHttps) {
         Write-Info "Normalizing managed origin URL to $RepoUrlHttps..."
         & git -c windows.appendAtomically=false remote set-url origin $RepoUrlHttps
@@ -5461,6 +5465,10 @@ try {
         # profile from, so carry the product choice into the retry command.
         Write-Host "  `$env:HERMES_INSTALLER_BRAND='lemon'" -ForegroundColor Yellow
     }
-    Write-Host "  .\install.ps1" -ForegroundColor Yellow
+    if ((Get-RepositoryIdentityKey $Repository) -ne (Get-RepositoryIdentityKey "NousResearch/hermes-agent")) {
+        Write-Host "  .\install.ps1 -Repository '$Repository'" -ForegroundColor Yellow
+    } else {
+        Write-Host "  .\install.ps1" -ForegroundColor Yellow
+    }
     Write-Host ""
 }

@@ -46,8 +46,10 @@ const HARNESS_RESOURCE_FILENAME = 'lemon-ai-harness.json'
 const LEGACY_HARNESS_RESOURCE_FILENAME = 'internal-desktop-harness.json'
 const DEFAULT_SOURCE_REPOSITORY = 'NousResearch/hermes-agent'
 const INTERNAL_SOURCE_REPOSITORY = 'DangLemon/hermes-agent'
+
 const SOURCE_REPOSITORY_RE =
   /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/
+
 const STAMP_COMMIT_RE = /^[0-9a-f]{7,40}$/i
 const FALLBACK_COMMIT_RE = /^0{7,40}$/
 const FALLBACK_BRANCH = 'main'
@@ -135,6 +137,12 @@ function resolveBootstrapSourceRepository({
 
   if (packaged) {
     return packaged
+  }
+
+  const explicitRepository = environ.HERMES_UPDATE_REPOSITORY || environ.HERMES_INSTALL_REPOSITORY
+
+  if (explicitRepository) {
+    return validateSourceRepository(explicitRepository)
   }
 
   const lemonSelected =

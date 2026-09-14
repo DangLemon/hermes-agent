@@ -1,6 +1,7 @@
 """Hermes Agent Uninstaller."""
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -731,7 +732,7 @@ def _perform_uninstall(
         print(f"  {hermes_home}/")
         print()
         print("To reinstall later with your existing settings:")
-        print(color(_REINSTALL_HINT[windows], Colors.DIM))
+        print(color(_reinstall_hint(windows), Colors.DIM))
         print()
 
     for line, col in _RELOAD_HINT[windows]:
@@ -741,9 +742,58 @@ def _perform_uninstall(
     print()
 
 
-_REINSTALL_HINT = {
-    True: "  iex (irm https://hermes-agent.nousresearch.com/install.ps1)",
-    False: "  curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"}
+_DEFAULT_UPDATE_REPOSITORY = "NousResearch/hermes-agent"
+_INTERNAL_UPDATE_REPOSITORY = "DangLemon/hermes-agent"
+_UPDATE_REPOSITORY_RE = re.compile(
+    r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/"
+    r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$"
+)
+_INTERNAL_UPDATE_ENV_VARS = (
+    "LEMON_AI_DESKTOP_INTERNAL",
+    "HERMES_DESKTOP_INTERNAL",
+    "HERMES_DESKTOP_INTERNAL_PACKAGE",
+)
+
+
+def _safe_update_repository(value: str | None) -> str | None:
+    value = (value or "").strip()
+    if (
+        not value
+        or not _UPDATE_REPOSITORY_RE.match(value)
+        or ".." in value
+        or value.endswith(".git")
+        or value.startswith("-")
+        or value.lower().startswith(("http:", "https:", "git@"))
+    ):
+        return None
+    return value
+
+
+def _configured_update_repository_for_reinstall() -> str:
+    explicit = (
+        _safe_update_repository(os.environ.get("HERMES_UPDATE_REPOSITORY"))
+        or _safe_update_repository(os.environ.get("HERMES_INSTALL_REPOSITORY"))
+    )
+    if explicit:
+        return explicit
+    if any(str(os.environ.get(name, "")).strip() == "1" for name in _INTERNAL_UPDATE_ENV_VARS):
+        return _INTERNAL_UPDATE_REPOSITORY
+    return _DEFAULT_UPDATE_REPOSITORY
+
+
+def _reinstall_hint(windows: bool) -> str:
+    repository = _configured_update_repository_for_reinstall()
+    if repository.lower() == _DEFAULT_UPDATE_REPOSITORY.lower():
+        if windows:
+            return "  iex (irm https://hermes-agent.nousresearch.com/install.ps1)"
+        return "  curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
+    script_name = "install.ps1" if windows else "install.sh"
+    installer_url = f"https://raw.githubusercontent.com/{repository}/main/scripts/{script_name}"
+    if windows:
+        return f"  & ([scriptblock]::Create((irm {installer_url}))) -Repository '{repository}'"
+    return f"  curl -fsSL {installer_url} | bash -s -- --repo {repository}"
+
+
 # windows -> [(line, color or None)]
 _RELOAD_HINT = {
     True: [("Open a new terminal (PowerShell / Windows Terminal) to pick up", Colors.YELLOW),

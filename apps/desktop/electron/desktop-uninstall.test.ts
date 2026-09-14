@@ -181,6 +181,7 @@ test('buildPosixCleanupScript carries validated Lemon identity into detached cle
       LEMON_AI_UPDATE_PRODUCT_NAME: 'Lemon AI',
       HERMES_DESKTOP_INTERNAL: '1',
       HERMES_UPDATE_PRODUCT_NAME: 'Lemon AI',
+      HERMES_UPDATE_REPOSITORY: 'DangLemon/hermes-agent',
       HERMES_HOME: '/should/not/override',
       'BAD-NAME': 'ignored'
     }
@@ -190,6 +191,7 @@ test('buildPosixCleanupScript carries validated Lemon identity into detached cle
   assert.match(script, /export LEMON_AI_UPDATE_PRODUCT_NAME='Lemon AI'/)
   assert.match(script, /export HERMES_DESKTOP_INTERNAL='1'/)
   assert.match(script, /export HERMES_UPDATE_PRODUCT_NAME='Lemon AI'/)
+  assert.match(script, /export HERMES_UPDATE_REPOSITORY='DangLemon\/hermes-agent'/)
   assert.doesNotMatch(script, /should\/not\/override/)
   assert.doesNotMatch(script, /BAD-NAME/)
 })
@@ -198,12 +200,14 @@ test('safeRuntimeEnvEntries preserves Lemon home and runtime overrides', () => {
   const entries = safeRuntimeEnvEntries({
     HERMES_DESKTOP_HOME_OVERRIDE: '/Users/dang/.lemon-ai',
     HERMES_DESKTOP_RUNTIME_DIR_NAME: 'lemon-agent',
+    HERMES_UPDATE_REPOSITORY: 'DangLemon/hermes-agent',
     HERMES_HOME: '/should/not/be duplicated'
   })
 
   assert.deepEqual(entries, [
     ['HERMES_DESKTOP_HOME_OVERRIDE', '/Users/dang/.lemon-ai'],
-    ['HERMES_DESKTOP_RUNTIME_DIR_NAME', 'lemon-agent']
+    ['HERMES_DESKTOP_RUNTIME_DIR_NAME', 'lemon-agent'],
+    ['HERMES_UPDATE_REPOSITORY', 'DangLemon/hermes-agent']
   ])
 })
 
@@ -310,6 +314,7 @@ test('buildWindowsCleanupScript carries validated Lemon identity into detached c
       LEMON_AI_UPDATE_PRODUCT_NAME: 'Lemon AI',
       HERMES_DESKTOP_INTERNAL: '1',
       HERMES_UPDATE_PRODUCT_NAME: 'Lemon AI',
+      HERMES_UPDATE_REPOSITORY: 'DangLemon/hermes-agent',
       PYTHONPATH: 'ignored',
       'BAD-NAME': 'ignored'
     }
@@ -319,6 +324,7 @@ test('buildWindowsCleanupScript carries validated Lemon identity into detached c
   assert.match(script, /set "LEMON_AI_UPDATE_PRODUCT_NAME=Lemon AI"/)
   assert.match(script, /set "HERMES_DESKTOP_INTERNAL=1"/)
   assert.match(script, /set "HERMES_UPDATE_PRODUCT_NAME=Lemon AI"/)
+  assert.match(script, /set "HERMES_UPDATE_REPOSITORY=DangLemon\/hermes-agent"/)
   assert.doesNotMatch(script, /PYTHONPATH=ignored/)
   assert.doesNotMatch(script, /BAD-NAME/)
 })

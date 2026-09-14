@@ -88,6 +88,7 @@ HERMES_CADUCEUS = """[#CD7F32]⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⡀⠀⣀⣀�
 _available_skills_cache: Optional[tuple] = None
 _git_banner_state_cache: Optional[tuple] = None
 _latest_release_cache: Optional[tuple] = None
+_ORIGIN_NORMALIZATION_LOCK = threading.Lock()
 
 _UNCACHED = object()  # compute() result that must not be memoized
 
@@ -179,17 +180,30 @@ def _is_default_update_repository() -> bool:
 
 
 def _ensure_local_origin_matches_configured_repository(repo_dir: Path) -> bool:
-    if _is_default_update_repository():
-        return True
-    repo_url = _configured_update_repository_url()
-    repo_canonical = _configured_update_repository_canonical()
-    if not repo_url or not repo_canonical:
+    with _ORIGIN_NORMALIZATION_LOCK:
+        if _is_default_update_repository():
+            return True
+        repo_url = _configured_update_repository_url()
+        repo_canonical = _configured_update_repository_canonical()
+        if not repo_url or not repo_canonical:
+            return False
+        origin_url = _git_stdout(["remote", "get-url", "origin"], cwd=repo_dir)
+        if _canonical_github_remote(origin_url) == repo_canonical:
+            return True
+        if not _invalidate_origin_main_ref(repo_dir):
+            return False
+        args = ["remote", "set-url", "origin", repo_url] if origin_url else ["remote", "add", "origin", repo_url]
+        return _git_ok(args, cwd=repo_dir)
+
+
+def _invalidate_origin_main_ref(repo_dir: Path) -> bool:
+    ref = "refs/remotes/origin/main"
+    exists = _git_run(["show-ref", "--verify", "--quiet", ref], cwd=repo_dir, text=False)
+    if exists is None:
         return False
-    origin_url = _git_stdout(["remote", "get-url", "origin"], cwd=repo_dir)
-    if _canonical_github_remote(origin_url) == repo_canonical:
+    if exists.returncode != 0:
         return True
-    args = ["remote", "set-url", "origin", repo_url] if origin_url else ["remote", "add", "origin", repo_url]
-    return _git_ok(args, cwd=repo_dir)
+    return _git_ok(["update-ref", "-d", ref], cwd=repo_dir)
 
 
 _GIT_TEXT_KW = {"text": True, "encoding": "utf-8", "errors": "replace"}
@@ -460,6 +474,8 @@ def _baked_banner_state() -> Optional[dict]:
 def _compute_git_banner_state(repo_dir: Optional[Path] = None) -> Optional[dict]:
     repo_dir = repo_dir or _resolve_repo_dir()
     if repo_dir is None:
+        return _baked_banner_state()
+    if not _ensure_local_origin_matches_configured_repository(repo_dir):
         return _baked_banner_state()
     upstream, local = (_git_stdout(["rev-parse", "--short=8", rev], cwd=repo_dir) for rev in ("origin/main", "HEAD"))
     if not upstream or not local:

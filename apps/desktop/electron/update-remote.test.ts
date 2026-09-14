@@ -111,3 +111,16 @@ test('repository identity rejects URLs and path traversal', () => {
   assert.throws(() => validateGitHubRepositoryIdentity('../hermes-agent'), /sourceRepository/)
   assert.throws(() => validateGitHubRepositoryIdentity('DangLemon/hermes-agent.git'), /sourceRepository/)
 })
+
+
+test('main update origin wiring preserves matching SSH origins', async () => {
+  const fs = await import('node:fs')
+  const path = await import('node:path')
+  const source = fs.readFileSync(path.join(import.meta.dirname, 'main.ts'), 'utf8')
+  const fnStart = source.indexOf('async function ensureUpdateOriginRepository')
+  const fnEnd = source.indexOf('function emitUpdateProgress', fnStart)
+  const body = source.slice(fnStart, fnEnd)
+
+  assert.match(body, /remoteMatchesRepository\(originUrl, repository\)/)
+  assert.doesNotMatch(body, /originUrl === expectedUrl/)
+})

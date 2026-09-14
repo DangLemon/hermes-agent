@@ -34,7 +34,7 @@ def _cpe(cmd, returncode=2, stderr="", stdout="") -> subprocess.CalledProcessErr
     [
         (
             "DangLemon/hermes-agent",
-            "https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.ps1",
+            "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.ps1))) -Repository 'DangLemon/hermes-agent'",
         ),
         (None, "https://hermes-agent.nousresearch.com"),
     ],

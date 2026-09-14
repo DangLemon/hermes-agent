@@ -964,7 +964,10 @@ def _dependency_reinstall_url_for_configured_repository() -> str:
         return "https://hermes-agent.nousresearch.com"
     repository = _configured_update_repository()
     script_name = "install.ps1" if _m()._is_windows() else "install.sh"
-    return f"https://raw.githubusercontent.com/{repository}/main/scripts/{script_name}"
+    installer_url = f"https://raw.githubusercontent.com/{repository}/main/scripts/{script_name}"
+    if _m()._is_windows():
+        return f"& ([scriptblock]::Create((irm {installer_url}))) -Repository '{repository}'"
+    return f"curl -fsSL {installer_url} | bash -s -- --repo {repository}"
 
 
 def _sync_python_dependencies_after_pull(

@@ -31,7 +31,8 @@ def _zip_reinstall_url_for_configured_repository() -> str:
     if _is_default_update_repository():
         return "https://hermes-agent.nousresearch.com"
     repository = _configured_update_repository()
-    return f"https://raw.githubusercontent.com/{repository}/main/scripts/install.ps1"
+    installer_url = f"https://raw.githubusercontent.com/{repository}/main/scripts/install.ps1"
+    return f"& ([scriptblock]::Create((irm {installer_url}))) -Repository '{repository}'"
 
 
 def _remove_path(path: str, *, ignore_errors: bool = False) -> None:

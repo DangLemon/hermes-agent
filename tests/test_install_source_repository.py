@@ -178,8 +178,9 @@ def test_install_sh_windows_handoff_uses_configured_powershell_installer(
 
     assert result.returncode == 1
     assert (
-        "iex (irm "
-        "https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.ps1)"
+        "& ([scriptblock]::Create((irm "
+        "https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.ps1))) "
+        "-Repository 'DangLemon/hermes-agent'"
     ) in result.stdout
     assert "https://hermes-agent.nousresearch.com/install.ps1" not in result.stdout
 
@@ -411,6 +412,26 @@ def test_install_sh_brand_lemon_overrides_raw_script_default(tmp_path: Path) -> 
     assert origin_url(install_dir) == "https://github.com/DangLemon/hermes-agent.git"
 
 
+def test_install_cmd_selects_configured_repository_for_powershell_handoff() -> None:
+    source = (REPO_ROOT / "scripts" / "install.cmd").read_text(encoding="utf-8")
+
+    assert "$env:HERMES_INSTALL_REPOSITORY" in source
+    assert "raw.githubusercontent.com/' + $repo + '/main/scripts/install.ps1" in source
+    assert "$installerArgs = @('-Repository', $repo)" in source
+    assert "[scriptblock]::Create" in source
+
+
+def test_install_cmd_validates_repository_before_powershell_handoff() -> None:
+    source = (REPO_ROOT / "scripts" / "install.cmd").read_text(encoding="utf-8")
+
+    assert "%HERMES_INSTALL_REPOSITORY%" not in source
+    assert "-notmatch '^[A-Za-z0-9]" in source
+    assert "$repo.Contains('..')" in source
+    assert "$repo.EndsWith('.git')" in source
+    assert "$repo.StartsWith('-')" in source
+    assert "$repo -match '^(https?:|git@)'" in source
+
+
 def test_install_ps1_windows_launcher_contracts_are_fail_closed() -> None:
     """Source-level guard for Windows-only launcher behavior.
 
@@ -552,6 +573,29 @@ def test_install_sh_custom_repo_clone_and_existing_update_use_selected_repo(tmp_
     assert '"ok":true' in second.stdout.replace(" ", "")
     assert (install_dir / "README.md").read_text(encoding="utf-8") == "internal\n"
     assert origin_url(install_dir) == "https://github.com/DangLemon/hermes-agent.git"
+
+
+def test_install_sh_existing_checkout_preserves_matching_ssh_origin(tmp_path: Path) -> None:
+    internal, _ = create_remote(tmp_path, "DangLemon/hermes-agent", marker="internal")
+    gitconfig = write_gitconfig(tmp_path, {"DangLemon/hermes-agent": internal})
+    install_dir = tmp_path / "install"
+    env = installer_env(tmp_path, gitconfig)
+    run(
+        [REAL_GIT or "git", "clone", "git@github.com:DangLemon/hermes-agent.git", str(install_dir)],
+        cwd=tmp_path,
+        env=env,
+    )
+
+    result = run_repository_stage(
+        tmp_path,
+        gitconfig=gitconfig,
+        install_dir=install_dir,
+        repository="DangLemon/hermes-agent",
+        check=True,
+    )
+
+    assert '"ok":true' in result.stdout.replace(" ", "")
+    assert origin_url(install_dir) == "git@github.com:DangLemon/hermes-agent.git"
 
 
 def test_install_sh_existing_checkout_mismatched_origin_fails_before_update_and_keeps_dirty_edits(tmp_path: Path) -> None:
@@ -707,9 +751,11 @@ def test_install_ps1_source_repository_contracts_are_bounded_and_repo_aware() ->
     assert 'function Get-GitHubRepositoryIdentity' in source
     assert 'function Ensure-ManagedOrigin' in source
     assert 'function Get-InstallerRecoveryUrl' in source
-    assert 'raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.ps1' in source
+    assert 'https://raw.githubusercontent.com/$Repository/main/scripts/install.ps1' in source
+    assert ".\\install.ps1 -Repository '$Repository'" in source
     assert 'does not match selected -Repository' in source
     assert 'git@github.com:$Repository.git' in source
+    assert 'ssh://git@github\\.com/' in source
     assert 'https://github.com/$Repository.git' in source
     assert 'https://github.com/$Repository/archive/$Commit.zip' in source
     assert 'https://github.com/$Repository/archive/refs/tags/$Tag.zip' in source

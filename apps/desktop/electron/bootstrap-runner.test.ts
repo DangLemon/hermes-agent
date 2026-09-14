@@ -281,6 +281,65 @@ test('resolveBootstrapSourceRepository reads packaged harness sourceRepository a
   }
 })
 
+test('resolveBootstrapSourceRepository honors explicit update repository without packaged harness', () => {
+  assert.equal(
+    resolveBootstrapSourceRepository({
+      resourcesPath: null,
+      env: { HERMES_UPDATE_REPOSITORY: 'ExampleOrg/runtime-agent' }
+    }),
+    'ExampleOrg/runtime-agent'
+  )
+  assert.equal(
+    resolveBootstrapSourceRepository({
+      resourcesPath: null,
+      env: { HERMES_INSTALL_REPOSITORY: 'InstallOrg/install-agent' }
+    }),
+    'InstallOrg/install-agent'
+  )
+  assert.equal(
+    resolveBootstrapSourceRepository({
+      resourcesPath: null,
+      env: {
+        HERMES_UPDATE_REPOSITORY: 'UpdateOrg/update-agent',
+        HERMES_INSTALL_REPOSITORY: 'InstallOrg/install-agent'
+      }
+    }),
+    'UpdateOrg/update-agent'
+  )
+  assert.throws(
+    () =>
+      resolveBootstrapSourceRepository({
+        resourcesPath: null,
+        env: { HERMES_UPDATE_REPOSITORY: 'https://github.com/DangLemon/hermes-agent' }
+      }),
+    /sourceRepository/
+  )
+})
+
+test('resolveBootstrapSourceRepository lets packaged harness beat explicit environment repository', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-source-repo-packaged-precedence-'))
+
+  try {
+    const resourcesPath = path.join(tempRoot, 'resources')
+    fs.mkdirSync(resourcesPath, { recursive: true })
+    fs.writeFileSync(
+      path.join(resourcesPath, 'lemon-ai-harness.json'),
+      JSON.stringify({ schemaVersion: 1, profile: 'internal', sourceRepository: 'DangLemon/hermes-agent', ui: { agents: false, cron: true, messaging: false, terminal: true, webhooks: false } }),
+      'utf8'
+    )
+
+    assert.equal(
+      resolveBootstrapSourceRepository({
+        resourcesPath,
+        env: { HERMES_UPDATE_REPOSITORY: 'ExampleOrg/runtime-agent' }
+      }),
+      'DangLemon/hermes-agent'
+    )
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
 test('resolveBootstrapSourceRepository defaults an internal harness to the Lemon repository', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lemon-source-repo-'))
 
