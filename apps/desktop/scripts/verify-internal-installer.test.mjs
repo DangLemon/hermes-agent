@@ -24,6 +24,7 @@ const require = createRequire(import.meta.url)
 const VALID_SHA = '18ae041373f413f4270057de1120e54f61ea2970'
 const VALID_REF = 'codex/internal-installer-ci'
 const VERSION = PACKAGE_JSON.version
+const RENDERER_HARNESS_MARKER_FILENAME = 'lemon-ai-renderer-harness.json'
 const WINDOWS_VERSION_INFO = {
   ProductName: 'Lemon AI',
   FileDescription: 'Lemon AI',
@@ -143,6 +144,14 @@ function validGeneratedConfig() {
   }
 }
 
+function rendererHarnessMarker(manifest = validManifest()) {
+  return {
+    schemaVersion: 1,
+    profile: 'internal',
+    ui: manifest.ui
+  }
+}
+
 function makeMachO(filePath, arch = 'arm64') {
   const cpu = arch === 'arm64' ? 0x0100000c : 0x01000007
   const buffer = Buffer.alloc(32)
@@ -216,6 +225,10 @@ function makeMacFixture(root) {
   makeMacCodeSignature(appPath)
   fs.mkdirSync(path.join(resources, 'app.asar.unpacked', 'dist'), { recursive: true })
   fs.writeFileSync(path.join(resources, 'app.asar.unpacked', 'dist', 'index.html'), '<div></div>')
+  writeJson(
+    path.join(resources, 'app.asar.unpacked', 'dist', RENDERER_HARNESS_MARKER_FILENAME),
+    rendererHarnessMarker()
+  )
   writeJson(path.join(nodePty, 'package.json'), { name: 'node-pty' })
   fs.mkdirSync(path.join(nodePty, 'lib'), { recursive: true })
   fs.writeFileSync(path.join(nodePty, 'lib', 'index.js'), 'module.exports = {}')
@@ -230,7 +243,11 @@ function makeMacFixture(root) {
   writeJson(path.join(resources, 'install-stamp.json'), validStamp())
   writeJson(path.join(root, 'apps', 'desktop', 'lemon-ai-desktop.config.json'), manifest)
   fs.mkdirSync(path.join(root, 'apps', 'desktop', 'electron'), { recursive: true })
-  fs.writeFileSync(path.join(root, 'apps', 'desktop', 'electron', 'lemon-ai-harness-seed.py'), '# seed helper\n', 'utf8')
+  fs.writeFileSync(
+    path.join(root, 'apps', 'desktop', 'electron', 'lemon-ai-harness-seed.py'),
+    '# seed helper\n',
+    'utf8'
+  )
   writeJson(path.join(root, 'apps', 'desktop', 'build', 'electron-builder.generated.json'), validGeneratedConfig())
   fs.writeFileSync(path.join(root, 'release', `Lemon-AI-${VERSION}-mac-arm64.dmg`), 'dmg-bytes')
 
@@ -255,6 +272,10 @@ function makeWindowsFixture(root) {
   makePE(path.join(appPath, 'Lemon AI.exe'))
   fs.mkdirSync(path.join(resources, 'app.asar.unpacked', 'dist'), { recursive: true })
   fs.writeFileSync(path.join(resources, 'app.asar.unpacked', 'dist', 'index.html'), '<div></div>')
+  writeJson(
+    path.join(resources, 'app.asar.unpacked', 'dist', RENDERER_HARNESS_MARKER_FILENAME),
+    rendererHarnessMarker()
+  )
   writeJson(path.join(nodePty, 'package.json'), { name: 'node-pty' })
   fs.mkdirSync(path.join(nodePty, 'lib'), { recursive: true })
   fs.writeFileSync(path.join(nodePty, 'lib', 'index.js'), 'module.exports = {}')
@@ -270,7 +291,11 @@ function makeWindowsFixture(root) {
   writeJson(path.join(resources, 'install-stamp.json'), validStamp())
   writeJson(path.join(root, 'apps', 'desktop', 'lemon-ai-desktop.config.json'), manifest)
   fs.mkdirSync(path.join(root, 'apps', 'desktop', 'electron'), { recursive: true })
-  fs.writeFileSync(path.join(root, 'apps', 'desktop', 'electron', 'lemon-ai-harness-seed.py'), '# seed helper\n', 'utf8')
+  fs.writeFileSync(
+    path.join(root, 'apps', 'desktop', 'electron', 'lemon-ai-harness-seed.py'),
+    '# seed helper\n',
+    'utf8'
+  )
   writeJson(path.join(root, 'apps', 'desktop', 'build', 'electron-builder.generated.json'), validGeneratedConfig())
   fs.writeFileSync(path.join(root, 'release', `Lemon-AI-${VERSION}-win-x64.exe`), 'exe-installer-bytes')
 
@@ -301,6 +326,14 @@ function fixturePackagedManifestPath(options) {
       ? path.join(options.appPath, 'Contents', 'Resources')
       : path.join(options.appPath, 'resources')
   return path.join(resourcesPath, 'lemon-ai-harness.json')
+}
+
+function fixtureRendererHarnessMarkerPath(options) {
+  const resourcesPath =
+    options.platform === 'darwin'
+      ? path.join(options.appPath, 'Contents', 'Resources')
+      : path.join(options.appPath, 'resources')
+  return path.join(resourcesPath, 'app.asar.unpacked', 'dist', RENDERER_HARNESS_MARKER_FILENAME)
 }
 
 function gitSpawn(expectedSha = VALID_SHA) {
@@ -428,6 +461,7 @@ test('verification accepts valid canonical model, UI, and MCP changes when packa
     const options = makeHostSuccessfulFixture(root)
     const manifest = changedCanonicalManifest()
     writeJson(fixturePackagedManifestPath(options), manifest)
+    writeJson(fixtureRendererHarnessMarkerPath(options), rendererHarnessMarker(manifest))
     writeJson(options.canonicalManifestPath, manifest)
 
     const result = verifyInternalInstaller({
@@ -697,7 +731,6 @@ test('verification ignores unused foreign native prebuilds and writes installer 
   })
 })
 
-
 test('assertCanonicalSeedHelperBytes rejects packaged seed helper drift', () => {
   withTempDir(root => {
     const source = path.join(root, 'source.py')
@@ -760,6 +793,56 @@ test('verification rejects packaged manifest byte drift from canonical input', (
           codeSignSpawn: codeSignSpawn()
         }),
       /manifest bytes differ/
+    )
+  })
+})
+
+test('verification rejects Lemon packages whose renderer was not compiled for the internal harness', () => {
+  withTempDir(root => {
+    const options = makeMacFixture(root)
+    fs.rmSync(
+      path.join(options.appPath, 'Contents', 'Resources', 'app.asar.unpacked', 'dist', RENDERER_HARNESS_MARKER_FILENAME)
+    )
+
+    assert.throws(
+      () =>
+        verifyInternalInstaller({
+          ...options,
+          expectedSha: VALID_SHA,
+          expectedRef: VALID_REF,
+          spawn: gitSpawn(),
+          codeSignSpawn: codeSignSpawn()
+        }),
+      /renderer harness/i
+    )
+  })
+})
+
+test('verification rejects Lemon packages whose renderer marker is upstream', () => {
+  withTempDir(root => {
+    const options = makeMacFixture(root)
+    writeJson(
+      path.join(
+        options.appPath,
+        'Contents',
+        'Resources',
+        'app.asar.unpacked',
+        'dist',
+        RENDERER_HARNESS_MARKER_FILENAME
+      ),
+      { schemaVersion: 1, profile: 'upstream', ui: validManifest().ui }
+    )
+
+    assert.throws(
+      () =>
+        verifyInternalInstaller({
+          ...options,
+          expectedSha: VALID_SHA,
+          expectedRef: VALID_REF,
+          spawn: gitSpawn(),
+          codeSignSpawn: codeSignSpawn()
+        }),
+      /renderer harness profile/
     )
   })
 })
@@ -832,8 +915,5 @@ test('validateGeneratedConfig requires Lemon product and executable identity', (
       }),
     /CFBundleExecutable/
   )
-  assert.throws(
-    () => validateGeneratedConfig({ ...validGeneratedConfig(), appId: 'com.nousresearch.hermes' }),
-    /appId/
-  )
+  assert.throws(() => validateGeneratedConfig({ ...validGeneratedConfig(), appId: 'com.nousresearch.hermes' }), /appId/)
 })

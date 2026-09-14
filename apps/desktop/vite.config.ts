@@ -44,6 +44,8 @@ const HARNESS_DEFINE_BY_UI_KEY = {
   webhooks: '__HERMES_HARNESS_SHOW_WEBHOOKS__'
 } as const
 
+export const RENDERER_HARNESS_MARKER_FILENAME = 'lemon-ai-renderer-harness.json'
+
 const DEFAULT_HARNESS_UI = {
   agents: false,
   cron: true,
@@ -95,6 +97,49 @@ export function harnessViteDefines(env: Record<string, string | undefined>) {
     return define
   } catch {
     return define
+  }
+}
+
+function decodeDefineString(define: Record<string, string>, key: string): string {
+  try {
+    const value = JSON.parse(define[key] ?? '""')
+
+    return typeof value === 'string' ? value : ''
+  } catch {
+    return ''
+  }
+}
+
+export function rendererHarnessMarkerFromDefines(define: Record<string, string>) {
+  if (decodeDefineString(define, '__HERMES_DESKTOP_HARNESS__') !== 'internal') {
+    return null
+  }
+
+  return {
+    schemaVersion: 1,
+    profile: 'internal',
+    ui: Object.fromEntries(
+      HARNESS_UI_KEYS.map(key => [key, decodeDefineString(define, HARNESS_DEFINE_BY_UI_KEY[key]) === 'true'])
+    )
+  }
+}
+
+export function rendererHarnessMarkerPlugin(define: Record<string, string>) {
+  return {
+    name: 'hermes:renderer-harness-marker',
+    generateBundle(this: { emitFile: (asset: { fileName: string; source: string; type: 'asset' }) => void }) {
+      const marker = rendererHarnessMarkerFromDefines(define)
+
+      if (!marker) {
+        return
+      }
+
+      this.emitFile({
+        type: 'asset',
+        fileName: RENDERER_HARNESS_MARKER_FILENAME,
+        source: `${JSON.stringify(marker, null, 2)}\n`
+      })
+    }
   }
 }
 
@@ -181,146 +226,151 @@ const emojibaseAssets = () => ({
   }
 })
 
-export default defineConfig(({ command }) => ({
-  base: './',
-  define: harnessViteDefines(process.env as Record<string, string | undefined>),
-  plugins: [
-    desktopHtmlTitlePlugin(process.env),
-    react(),
-    babel({ presets: [compilerPreset()] }),
-    tailwindcss(),
-    emojibaseAssets()
-  ],
-  css: {
-    // Pin an explicit (empty) PostCSS config. Tailwind is handled entirely by
-    // `@tailwindcss/vite`, so the renderer needs no PostCSS plugins — and
-    // without this, Vite's `postcss-load-config` walks UP the filesystem
-    // looking for a stray `postcss.config.*` / `tailwind.config.*`. The desktop
-    // build runs from inside the user's home tree (e.g.
-    // `C:\Users\<name>\AppData\Local\hermes\hermes-agent\apps\desktop`), so an
-    // unrelated Tailwind v3 config higher up the tree gets picked up and
-    // reprocesses our v4 stylesheet, failing the build with
-    // "`@layer base` is used but no matching `@tailwind base` directive is
-    // present." Pinning the config makes the build hermetic.
-    postcss: { plugins: [] }
-  },
-  build: {
-    // The renderer intentionally ships FEW chunks (not one, not thousands):
-    //   · `codeSplitting: false` (the old setup) inlines every `lazy()` /
-    //     dynamic import into the entry, so heavyweight lazy-only deps
-    //     (mermaid, shiki grammars, katex) are parsed + evaluated on every
-    //     cold start even though nothing rendered them. By the time the
-    //     bundle hit ~28 MB that eval was ~1s of launch on an M-series.
-    //   · Default splitting emits a chunk per shiki grammar/theme — thousands
-    //     of files, which electron-builder OOMs scanning (#38888).
-    // `advancedChunks` is the middle ground: heavyweight libraries merge into
-    // a handful of named vendor chunks loaded on first use, app-level dynamic
-    // imports stay lazy, and the file count stays in the tens.
-    chunkSizeWarningLimit: 25000,
-    rolldownOptions: {
-      output: {
-        advancedChunks: {
-          groups: [
-            // Shared foundations FIRST (first match wins): an unmatched
-            // module shared by the entry and a heavy chunk gets merged INTO
-            // the heavy chunk, and the entry then statically imports 19 MB of
-            // shiki just to reach react/hast utils — putting the heavy chunk
-            // right back on the boot path.
-            //
-            // @tanstack/react-query is here for the same reason react-router
-            // is: it carries MODULE-LEVEL context (QueryClientContext) that
-            // the entry's QueryClientProvider and every lazy chunk's useQuery
-            // must share. Left to rolldown's merge heuristics, an unmatched
-            // shared module can be inlined into a lazy chunk — the packaged
-            // app then runs TWO react-query runtimes, the provider's context
-            // is invisible to the other copy, and useQuery throws "No
-            // QueryClient set, use QueryClientProvider to set one" on the
-            // launch path (#95560). Grouping it forces one shared instance.
-            {
-              name: 'vendor-react',
-              test: /node_modules[\\/](react|react-dom|scheduler|react-router|@tanstack[\\/]react-query)[\\/]/
-            },
-            {
-              name: 'vendor-md',
-              test: /node_modules[\\/](property-information|hast-util-[^\\/]+|mdast-util-[^\\/]+|micromark[^\\/]*|unist-util-[^\\/]+|vfile[^\\/]*|unified|stringify-entities|space-separated-tokens|comma-separated-tokens|zwitch|html-void-elements|devlop|style-to-js|style-to-object|clsx)[\\/]/
-            },
-            // Shared utility packages the entry ALSO uses — kept out of the
-            // heavy groups for the same boot-path reason.
-            {
-              name: 'vendor-util',
-              test: /node_modules[\\/](lodash-es|es-toolkit|uuid|dayjs|d3-array|d3-color|d3-force|d3-interpolate|d3-time[^\\/]*|dompurify|stylis)[\\/]/
-            },
-            // One chunk per heavyweight, lazy-only library family.
-            // @streamdown/code lives WITH shiki because it statically imports
-            // the full shiki bundle.
-            {
-              name: 'mermaid',
-              test: /node_modules[\\/](mermaid|cytoscape|dagre|khroma|elkjs|d3|d3-[^\\/]+|@mermaid-js)[\\/]/
-            },
-            {
-              name: 'shiki',
-              test: /node_modules[\\/](shiki|@shikijs|react-shiki|@streamdown[\\/]code|oniguruma-to-es|oniguruma-parser|regex(-[^\\/]+)?)[\\/]/
-            },
-            { name: 'katex', test: /node_modules[\\/]katex[\\/]/ }
-          ]
+export default defineConfig(({ command }) => {
+  const harnessDefines = harnessViteDefines(process.env as Record<string, string | undefined>)
+
+  return {
+    base: './',
+    define: harnessDefines,
+    plugins: [
+      desktopHtmlTitlePlugin(process.env),
+      rendererHarnessMarkerPlugin(harnessDefines),
+      react(),
+      babel({ presets: [compilerPreset()] }),
+      tailwindcss(),
+      emojibaseAssets()
+    ],
+    css: {
+      // Pin an explicit (empty) PostCSS config. Tailwind is handled entirely by
+      // `@tailwindcss/vite`, so the renderer needs no PostCSS plugins — and
+      // without this, Vite's `postcss-load-config` walks UP the filesystem
+      // looking for a stray `postcss.config.*` / `tailwind.config.*`. The desktop
+      // build runs from inside the user's home tree (e.g.
+      // `C:\Users\<name>\AppData\Local\hermes\hermes-agent\apps\desktop`), so an
+      // unrelated Tailwind v3 config higher up the tree gets picked up and
+      // reprocesses our v4 stylesheet, failing the build with
+      // "`@layer base` is used but no matching `@tailwind base` directive is
+      // present." Pinning the config makes the build hermetic.
+      postcss: { plugins: [] }
+    },
+    build: {
+      // The renderer intentionally ships FEW chunks (not one, not thousands):
+      //   · `codeSplitting: false` (the old setup) inlines every `lazy()` /
+      //     dynamic import into the entry, so heavyweight lazy-only deps
+      //     (mermaid, shiki grammars, katex) are parsed + evaluated on every
+      //     cold start even though nothing rendered them. By the time the
+      //     bundle hit ~28 MB that eval was ~1s of launch on an M-series.
+      //   · Default splitting emits a chunk per shiki grammar/theme — thousands
+      //     of files, which electron-builder OOMs scanning (#38888).
+      // `advancedChunks` is the middle ground: heavyweight libraries merge into
+      // a handful of named vendor chunks loaded on first use, app-level dynamic
+      // imports stay lazy, and the file count stays in the tens.
+      chunkSizeWarningLimit: 25000,
+      rolldownOptions: {
+        output: {
+          advancedChunks: {
+            groups: [
+              // Shared foundations FIRST (first match wins): an unmatched
+              // module shared by the entry and a heavy chunk gets merged INTO
+              // the heavy chunk, and the entry then statically imports 19 MB of
+              // shiki just to reach react/hast utils — putting the heavy chunk
+              // right back on the boot path.
+              //
+              // @tanstack/react-query is here for the same reason react-router
+              // is: it carries MODULE-LEVEL context (QueryClientContext) that
+              // the entry's QueryClientProvider and every lazy chunk's useQuery
+              // must share. Left to rolldown's merge heuristics, an unmatched
+              // shared module can be inlined into a lazy chunk — the packaged
+              // app then runs TWO react-query runtimes, the provider's context
+              // is invisible to the other copy, and useQuery throws "No
+              // QueryClient set, use QueryClientProvider to set one" on the
+              // launch path (#95560). Grouping it forces one shared instance.
+              {
+                name: 'vendor-react',
+                test: /node_modules[\\/](react|react-dom|scheduler|react-router|@tanstack[\\/]react-query)[\\/]/
+              },
+              {
+                name: 'vendor-md',
+                test: /node_modules[\\/](property-information|hast-util-[^\\/]+|mdast-util-[^\\/]+|micromark[^\\/]*|unist-util-[^\\/]+|vfile[^\\/]*|unified|stringify-entities|space-separated-tokens|comma-separated-tokens|zwitch|html-void-elements|devlop|style-to-js|style-to-object|clsx)[\\/]/
+              },
+              // Shared utility packages the entry ALSO uses — kept out of the
+              // heavy groups for the same boot-path reason.
+              {
+                name: 'vendor-util',
+                test: /node_modules[\\/](lodash-es|es-toolkit|uuid|dayjs|d3-array|d3-color|d3-force|d3-interpolate|d3-time[^\\/]*|dompurify|stylis)[\\/]/
+              },
+              // One chunk per heavyweight, lazy-only library family.
+              // @streamdown/code lives WITH shiki because it statically imports
+              // the full shiki bundle.
+              {
+                name: 'mermaid',
+                test: /node_modules[\\/](mermaid|cytoscape|dagre|khroma|elkjs|d3|d3-[^\\/]+|@mermaid-js)[\\/]/
+              },
+              {
+                name: 'shiki',
+                test: /node_modules[\\/](shiki|@shikijs|react-shiki|@streamdown[\\/]code|oniguruma-to-es|oniguruma-parser|regex(-[^\\/]+)?)[\\/]/
+              },
+              { name: 'katex', test: /node_modules[\\/]katex[\\/]/ }
+            ]
+          }
         }
       }
-    }
-  },
-  // driver.js only enters the graph through the tour's DYNAMIC import chain
-  // (lib/tour/run-tour.ts), so the dep scanner never sees it at startup. Left
-  // alone, first use registers it as a missing dep at runtime — which (a)
-  // esbuild-prebundles the `?raw` IIFE import as a JS module, breaking the
-  // raw-text transform ("does not provide an export named 'default'"), and
-  // (b) triggers Vite's "new dependencies optimized" full page reload mid-
-  // session. It's pure ESM with no CJS deps, so serving it unoptimized is
-  // free. Query and bare forms all listed — exclusion matches exact ids.
-  optimizeDeps: {
-    exclude: [
-      'driver.js',
-      'driver.js/dist/driver.js.iife.js',
-      'driver.js/dist/driver.js.iife.js?raw',
-      'driver.js/dist/driver.css?raw'
-    ]
-  },
-  resolve: {
-    alias: {
-      '@/debug/dev-only': debugEntry(command, process.env as Record<string, string>),
-      '@': path.resolve(__dirname, './src'),
-      '@hermes/plugin-sdk': path.resolve(__dirname, './src/sdk/index.ts'),
-      '@hermes/shared/billing': path.resolve(__dirname, '../shared/src/billing-types.ts'),
-      '@hermes/shared': path.resolve(__dirname, '../shared/src'),
-      // The tour tool's preview surface injects driver.js's prebuilt IIFE into
-      // the pane's guest page as raw source; the package's exports map doesn't
-      // expose that dist file (nor ./package.json), so resolve the main entry
-      // (dist/driver.js.cjs) and point at its sibling. Both keys on purpose:
-      // alias matching is exact, and the id reaches it with the `?raw` query
-      // still attached in dev but stripped in some build paths.
-      'driver.js/dist/driver.js.iife.js?raw': `${path.join(
-        path.dirname(requireFromApp.resolve('driver.js')),
-        'driver.js.iife.js'
-      )}?raw`,
-      'driver.js/dist/driver.js.iife.js': path.join(
-        path.dirname(requireFromApp.resolve('driver.js')),
-        'driver.js.iife.js'
-      ),
-      react: reactDir,
-      'react-dom': reactDomDir,
-      'react/jsx-dev-runtime': path.join(reactDir, 'jsx-dev-runtime.js'),
-      'react/jsx-runtime': path.join(reactDir, 'jsx-runtime.js')
     },
-    dedupe: ['react', 'react-dom', 'react-router', '@tanstack/react-query']
-  },
-  server: {
-    host: '127.0.0.1',
-    port: 5174,
-    strictPort: true,
-    fs: {
-      allow: fsAllow
+    // driver.js only enters the graph through the tour's DYNAMIC import chain
+    // (lib/tour/run-tour.ts), so the dep scanner never sees it at startup. Left
+    // alone, first use registers it as a missing dep at runtime — which (a)
+    // esbuild-prebundles the `?raw` IIFE import as a JS module, breaking the
+    // raw-text transform ("does not provide an export named 'default'"), and
+    // (b) triggers Vite's "new dependencies optimized" full page reload mid-
+    // session. It's pure ESM with no CJS deps, so serving it unoptimized is
+    // free. Query and bare forms all listed — exclusion matches exact ids.
+    optimizeDeps: {
+      exclude: [
+        'driver.js',
+        'driver.js/dist/driver.js.iife.js',
+        'driver.js/dist/driver.js.iife.js?raw',
+        'driver.js/dist/driver.css?raw'
+      ]
+    },
+    resolve: {
+      alias: {
+        '@/debug/dev-only': debugEntry(command, process.env as Record<string, string>),
+        '@': path.resolve(__dirname, './src'),
+        '@hermes/plugin-sdk': path.resolve(__dirname, './src/sdk/index.ts'),
+        '@hermes/shared/billing': path.resolve(__dirname, '../shared/src/billing-types.ts'),
+        '@hermes/shared': path.resolve(__dirname, '../shared/src'),
+        // The tour tool's preview surface injects driver.js's prebuilt IIFE into
+        // the pane's guest page as raw source; the package's exports map doesn't
+        // expose that dist file (nor ./package.json), so resolve the main entry
+        // (dist/driver.js.cjs) and point at its sibling. Both keys on purpose:
+        // alias matching is exact, and the id reaches it with the `?raw` query
+        // still attached in dev but stripped in some build paths.
+        'driver.js/dist/driver.js.iife.js?raw': `${path.join(
+          path.dirname(requireFromApp.resolve('driver.js')),
+          'driver.js.iife.js'
+        )}?raw`,
+        'driver.js/dist/driver.js.iife.js': path.join(
+          path.dirname(requireFromApp.resolve('driver.js')),
+          'driver.js.iife.js'
+        ),
+        react: reactDir,
+        'react-dom': reactDomDir,
+        'react/jsx-dev-runtime': path.join(reactDir, 'jsx-dev-runtime.js'),
+        'react/jsx-runtime': path.join(reactDir, 'jsx-runtime.js')
+      },
+      dedupe: ['react', 'react-dom', 'react-router', '@tanstack/react-query']
+    },
+    server: {
+      host: '127.0.0.1',
+      port: 5174,
+      strictPort: true,
+      fs: {
+        allow: fsAllow
+      }
+    },
+    preview: {
+      host: '127.0.0.1',
+      port: 4174
     }
-  },
-  preview: {
-    host: '127.0.0.1',
-    port: 4174
   }
-}))
+})

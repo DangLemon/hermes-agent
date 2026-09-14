@@ -336,12 +336,18 @@ export function AiConnectionSettings({ onConfigSaved, onMainModelChanged }: AiCo
   return (
     <SettingsContent>
       <div className="mx-auto grid max-w-[35rem] gap-5 py-2">
-        <div className="grid gap-2">
-          <div className="flex items-center gap-2">
-            <Globe className="size-4 text-(--ui-text-tertiary)" />
-            <h2 className="text-[length:var(--conversation-title-font-size)] font-semibold text-(--ui-text-primary)">
-              {copy.title}
-            </h2>
+        <div className="grid gap-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <Globe className="size-4 text-(--ui-text-tertiary)" />
+              <h2 className="text-[length:var(--conversation-title-font-size)] font-semibold text-(--ui-text-primary)">
+                {copy.title}
+              </h2>
+            </div>
+            <Button disabled={controlsLocked} onClick={startNew} size="sm" type="button" variant="secondary">
+              <Plus />
+              {copy.addConnection}
+            </Button>
           </div>
           <p className="text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)">
             {copy.intro}
@@ -352,15 +358,9 @@ export function AiConnectionSettings({ onConfigSaved, onMainModelChanged }: AiCo
 
         {endpoints.length > 0 && (
           <section className="grid gap-2">
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="text-[length:var(--conversation-text-font-size)] font-medium text-(--ui-text-primary)">
-                {copy.savedConnections}
-              </h3>
-              <Button disabled={controlsLocked} onClick={startNew} size="sm" type="button" variant="secondary">
-                <Plus />
-                {copy.addConnection}
-              </Button>
-            </div>
+            <h3 className="text-[length:var(--conversation-text-font-size)] font-medium text-(--ui-text-primary)">
+              {copy.savedConnections}
+            </h3>
             <div className="grid gap-1">
               {endpoints.map(endpoint => (
                 <RowButton

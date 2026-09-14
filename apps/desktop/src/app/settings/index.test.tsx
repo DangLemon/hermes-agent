@@ -7,7 +7,18 @@ import { initialInternalCompanyCapabilities } from '@/app/internal-company/capab
 import { resetInternalCompanyCapabilitiesForTest, setInternalCompanyCapabilitiesForTest } from '@/app/internal-company/store'
 
 vi.mock('./about-settings', () => ({ AboutSettings: () => <div>About panel</div> }))
-vi.mock('./ai-connection-settings', () => ({ AiConnectionSettings: () => <div>AI connection panel</div> }))
+vi.mock('./ai-connection-settings', () => ({
+  AiConnectionSettings: () => (
+    <div>
+      <div>AI connection panel</div>
+      <button type="button">Add connection</button>
+      <label>
+        Server address
+        <input />
+      </label>
+    </div>
+  )
+}))
 vi.mock('./appearance-settings', () => ({ AppearanceSettings: () => <div>Appearance panel</div> }))
 vi.mock('./billing', () => ({ BillingSettings: () => <div>Billing panel</div> }))
 vi.mock('./config-settings', () => ({ ConfigSettings: ({ activeSectionId }: { activeSectionId: string }) => <div>Config {activeSectionId}</div> }))
@@ -42,6 +53,33 @@ afterEach(() => {
 })
 
 describe('SettingsView internal harness policy', () => {
+  it('leaves the upstream Settings default unchanged outside the internal harness', async () => {
+    await renderSettings('/settings')
+
+    expect(await screen.findByText('Config model')).not.toBeNull()
+    expect(screen.queryByText('AI connection panel')).toBeNull()
+  })
+
+  it('opens the friendly AI connection entry screen from Settings by default', async () => {
+    setInternalCompanyCapabilitiesForTest(initialInternalCompanyCapabilities(true))
+
+    await renderSettings('/settings')
+
+    expect(await screen.findByText('AI connection panel')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Add connection' })).not.toBeNull()
+    expect(screen.getByLabelText('Server address')).not.toBeNull()
+    expect(screen.queryByText('Appearance panel')).toBeNull()
+  })
+
+  it('keeps explicit allowed internal Settings tabs reachable', async () => {
+    setInternalCompanyCapabilitiesForTest(initialInternalCompanyCapabilities(true))
+
+    await renderSettings('/settings?tab=about')
+
+    expect(await screen.findByText('About panel')).not.toBeNull()
+    expect(screen.queryByText('AI connection panel')).toBeNull()
+  })
+
   it('routes providers to the friendly AI connection screen and hides managed settings surfaces', async () => {
     setInternalCompanyCapabilitiesForTest(initialInternalCompanyCapabilities(true))
 
@@ -67,5 +105,15 @@ describe('SettingsView internal harness policy', () => {
     expect(screen.queryByRole('button', { name: 'Export config' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Import config' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Reset to defaults' })).toBeNull()
+  })
+
+  it('keeps the old connections deep link inside the friendly AI connection screen for the harness', async () => {
+    setInternalCompanyCapabilitiesForTest(initialInternalCompanyCapabilities(true))
+
+    await renderSettings('/settings?tab=connections')
+
+    expect(await screen.findByText('AI connection panel')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Add connection' })).not.toBeNull()
+    expect(screen.queryByText('Gateway panel')).toBeNull()
   })
 })

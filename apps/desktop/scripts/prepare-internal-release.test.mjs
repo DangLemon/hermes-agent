@@ -88,6 +88,7 @@ async function createReleaseAssets(root, mutate = () => {}) {
         stamp: true,
         generatedConfig: true,
         platformIdentity: true,
+        rendererHarness: true,
         codeSignature: true,
         nativePayload: true
       }
@@ -207,6 +208,20 @@ test('rejects receipts that predate the code signature verification gate', async
       const receiptPath = path.join(fixture.dir, receiptNameForInstaller(fixture.installer))
       const checks = { ...fixture.receipt.checks }
       delete checks.codeSignature
+      writeJson(receiptPath, { ...fixture.receipt, checks })
+    })
+
+    assert.throws(() => runPrepare(root, assetsRoot), /checks/)
+  })
+})
+
+test('rejects receipts that predate the renderer harness verification gate', async () => {
+  await withTempDir(async root => {
+    const assetsRoot = await createReleaseAssets(root, ({ fixtures }) => {
+      const fixture = fixtures[0]
+      const receiptPath = path.join(fixture.dir, receiptNameForInstaller(fixture.installer))
+      const checks = { ...fixture.receipt.checks }
+      delete checks.rendererHarness
       writeJson(receiptPath, { ...fixture.receipt, checks })
     })
 
