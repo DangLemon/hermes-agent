@@ -60,6 +60,11 @@ export function createDesktopPackageConfig(baseBuild, { env = process.env, harne
   config.productName = 'Lemon AI'
   config.appId = 'com.lemondigital.lemonai'
   config.executableName = 'Lemon AI'
+  config.extraMetadata = {
+    ...(config.extraMetadata || {}),
+    name: 'lemon-ai',
+    productName: 'Lemon AI'
+  }
   config.artifactName = 'Lemon-AI-${version}-${os}-${arch}.${ext}'
   config.icon = 'assets/lemon-icon'
   config.extraResources = config.extraResources.map(entry =>

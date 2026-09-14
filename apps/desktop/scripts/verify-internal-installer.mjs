@@ -201,6 +201,9 @@ export function validateGeneratedConfig(config) {
   assertEqual(config.dmg?.title, 'Install Lemon AI', 'electron-builder dmg.title')
   assertEqual(config.productName, 'Lemon AI', 'electron-builder productName')
   assertEqual(config.executableName, 'Lemon AI', 'electron-builder executableName')
+  assertEqual(config.extraMetadata?.name, 'lemon-ai', 'electron-builder extraMetadata.name')
+  assertEqual(config.extraMetadata?.productName, 'Lemon AI', 'electron-builder extraMetadata.productName')
+  if (Object.hasOwn(config, 'publish')) fail('electron-builder config must not publish installers directly')
   assertEqual(config.mac?.executableName, 'Lemon AI', 'electron-builder mac.executableName')
   assertEqual(
     config.mac?.extendInfo?.CFBundleExecutable,
@@ -208,6 +211,12 @@ export function validateGeneratedConfig(config) {
     'electron-builder mac.extendInfo.CFBundleExecutable'
   )
   assertEqual(config.appId, 'com.lemondigital.lemonai', 'electron-builder appId')
+
+  const serializedConfig = JSON.stringify(config)
+  if (serializedConfig.includes('NousResearch/hermes-agent'))
+    fail('electron-builder config contains upstream Hermes repository')
+  if (serializedConfig.includes('hermes-updater'))
+    fail('electron-builder config contains upstream Hermes updater cache name')
 }
 
 export function validateRendererHarnessMarker({ markerPath, manifest }) {

@@ -58,10 +58,11 @@ import {
   Wrench,
   Zap
 } from '@/lib/icons'
+import { appBrandForEnv } from '@/lib/app-brand'
 import { getServers } from '@/lib/mcp-servers'
 import { normalize } from '@/lib/text'
 import { cn } from '@/lib/utils'
-import { resolveVersionStatus } from '@/lib/version-status'
+import { resolveVersionStatus, versionStatusCopyForBrand } from '@/lib/version-status'
 import { $repoWorktrees } from '@/store/coding-status'
 import {
   $commandPaletteOpen,
@@ -710,6 +711,7 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
   const clientApply = useStore($updateApply)
   const backendStatus = useStore($backendUpdateStatus)
   const backendApply = useStore($backendUpdateApply)
+  const versionCopy = useMemo(() => versionStatusCopyForBrand(t.shell.statusbar, appBrandForEnv()), [t])
 
   const updateVersionLabel = useMemo(() => {
     const backend = connection?.mode === 'remote'
@@ -719,7 +721,7 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
     return resolveVersionStatus({
       applying: apply.applying || apply.stage === 'restart',
       behind: status?.behind ?? 0,
-      copy: t.shell.statusbar,
+      copy: versionCopy,
       remote: backend,
       restarting: apply.stage === 'restart',
       sha: status?.currentSha?.slice(0, 7) ?? null,
@@ -727,7 +729,7 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
       updateAvailable: status?.updateAvailable,
       version: backend ? status?.currentVersion : desktopVersion?.appVersion
     }).label
-  }, [backendApply, backendStatus, clientApply, clientStatus, connection?.mode, desktopVersion?.appVersion, t])
+  }, [backendApply, backendStatus, clientApply, clientStatus, connection?.mode, desktopVersion?.appVersion, versionCopy])
 
   // cmdk's onSelect doesn't forward the triggering event — keep the last
   // click/keydown modifiers so session rows can honour ⌘-Enter / ⌘-click.
