@@ -46,6 +46,7 @@ export default function ProgressScreen({ bootstrap }: ProgressProps) {
   }, [bootstrap.status])
 
   const isUpdate = mode === 'update'
+
   const title =
     bootstrap.status === 'completed' ? 'Done' : isUpdate ? `Updating ${productName}` : `Setting up ${productName}`
 
