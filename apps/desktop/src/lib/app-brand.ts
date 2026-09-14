@@ -81,6 +81,19 @@ export function appBrandForEnv(env: BrandEnv = internalCompanyBuildEnv()): AppBr
 
 export const appBrand = appBrandForEnv
 
+export function replaceHermesBrandTerms(input: string, brand: AppBrand = appBrandForEnv()): string {
+  if (brand.mode === 'upstream') {
+    return input
+  }
+
+  const tokenized = input
+    .replaceAll('Hermes Desktop', '{appName}')
+    .replaceAll('Hermes Agent', '{appName}')
+    .replaceAll('Hermes', '{appName}')
+
+  return replaceAppBrandTokens(tokenized, brand)
+}
+
 export function replaceAppBrandTokens(input: string, brand: AppBrand = appBrandForEnv()): string {
   return input.replace(/\{(agentName|appName|chatGuiName)\}/g, (token, key: AppBrandToken) => brand[key] ?? token)
 }

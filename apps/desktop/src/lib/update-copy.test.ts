@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { resolveUpdateCopy } from './update-copy'
+import { lemonAppBrand, upstreamAppBrand } from './app-brand'
+import { brandUpdateCopy, resolveUpdateCopy } from './update-copy'
 
 const copy = {
   availableTitle: 'New update available',
@@ -34,5 +35,31 @@ describe('resolveUpdateCopy', () => {
     const r = resolveUpdateCopy({ target: 'client', shownItems: 0, copy })
     expect(r.title).toBe('New update available')
     expect(r.body).toBe(copy.availableBodyNoChangelog)
+  })
+
+  it('brands update copy for Lemon AI without changing upstream copy', () => {
+    expect(brandUpdateCopy(copy, upstreamAppBrand)).toBe(copy)
+
+    const branded = brandUpdateCopy(
+      {
+        ...copy,
+        applyingBody:
+          'The Hermes updater takes over in its own window and reopens Hermes automatically when it’s done.',
+        applyingClose: 'This window will close while the update runs, then Hermes reopens on its own.',
+        blockerTitle: 'Close local previews to update Hermes?',
+        stages: {
+          update: 'Updating Hermes…',
+          restart: 'Restarting Hermes…'
+        }
+      },
+      lemonAppBrand
+    )
+
+    expect(branded.availableBody).toBe('A new version of Lemon AI is ready to install.')
+    expect(branded.applyingBody).toContain('The Lemon AI updater takes over')
+    expect(branded.applyingClose).toContain('Lemon AI reopens')
+    expect(branded.blockerTitle).toBe('Close local previews to update Lemon AI?')
+    expect(branded.stages.update).toBe('Updating Lemon AI…')
+    expect(branded.stages.restart).toBe('Restarting Lemon AI…')
   })
 })
