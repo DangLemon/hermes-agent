@@ -458,6 +458,12 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
 
     git_cmd = _base_git_cmd()
 
+    if not _ensure_origin_matches_configured_repository(git_cmd, _m().PROJECT_ROOT):
+        print(
+            f"✗ Could not configure origin for {UPDATE_REPOSITORY_ENV}="
+            f"{_configured_update_repository()!r}.")
+        sys.exit(1)
+
     # Interrupted fetches leave .git/*.lock behind ("File exists" forever); self-heal first.
     from hermes_cli.gitlock import clear_stale_git_locks, clear_stale_tmp_packs
     for lock_path in clear_stale_git_locks(_m().PROJECT_ROOT):

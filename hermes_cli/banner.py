@@ -171,6 +171,27 @@ def _configured_update_repository_canonical() -> str:
     return f"github.com/{repo}".lower() if repo else ""
 
 
+def _is_default_update_repository() -> bool:
+    with suppress(Exception):
+        from hermes_cli.update_cmd_git import _is_default_update_repository as _is_default
+        return _is_default()
+    return True
+
+
+def _ensure_local_origin_matches_configured_repository(repo_dir: Path) -> bool:
+    if _is_default_update_repository():
+        return True
+    repo_url = _configured_update_repository_url()
+    repo_canonical = _configured_update_repository_canonical()
+    if not repo_url or not repo_canonical:
+        return False
+    origin_url = _git_stdout(["remote", "get-url", "origin"], cwd=repo_dir)
+    if _canonical_github_remote(origin_url) == repo_canonical:
+        return True
+    args = ["remote", "set-url", "origin", repo_url] if origin_url else ["remote", "add", "origin", repo_url]
+    return _git_ok(args, cwd=repo_dir)
+
+
 _GIT_TEXT_KW = {"text": True, "encoding": "utf-8", "errors": "replace"}
 
 
@@ -296,7 +317,7 @@ def _check_via_rev(local_rev: str) -> Optional[int]:
 def _check_via_local_git(repo_dir: Path) -> Optional[int]:
     """Count commits behind origin/main in a local checkout."""
     repository = _configured_update_repository()
-    if not repository:
+    if not repository or not _ensure_local_origin_matches_configured_repository(repo_dir):
         return None
     origin_url = _git_stdout(["remote", "get-url", "origin"], cwd=repo_dir)
     if _is_official_ssh_remote(origin_url):

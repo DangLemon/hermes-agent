@@ -1024,6 +1024,60 @@ class TestCmdUpdateCheckBranchFlag:
         assert any("origin/main" in c for c in rev_list_cmds), rev_list_cmds
 
 
+    @patch("hermes_cli.config.detect_install_method", return_value="git")
+    @patch("subprocess.run")
+    def test_check_main_with_internal_env_skips_upstream(
+        self, mock_run, _mock_method, monkeypatch
+    ):
+        """Internal Lemon installs infer DangLemon updates without Desktop child env."""
+        monkeypatch.delenv("HERMES_UPDATE_REPOSITORY", raising=False)
+        monkeypatch.delenv("HERMES_INSTALL_REPOSITORY", raising=False)
+        monkeypatch.setenv("LEMON_AI_DESKTOP_INTERNAL", "1")
+        check_side_effect = self._check_side_effect(
+            target_branch="main", verify_ok=True, commit_count="0"
+        )
+
+        def side_effect(cmd, **kwargs):
+            joined = " ".join(str(c) for c in cmd)
+            if "remote get-url origin" in joined:
+                return subprocess.CompletedProcess(
+                    cmd, 0, stdout="https://github.com/NousResearch/hermes-agent.git\n", stderr=""
+                )
+            if "remote set-url origin" in joined:
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            return check_side_effect(cmd, **kwargs)
+
+        mock_run.side_effect = side_effect
+        args = SimpleNamespace(check=True, branch=None)
+
+        cmd_update(args)
+
+        commands = [" ".join(str(a) for a in c.args[0]) for c in mock_run.call_args_list]
+        set_url_index = next(
+            (
+                index
+                for index, command in enumerate(commands)
+                if "remote set-url origin https://github.com/DangLemon/hermes-agent.git" in command
+            ),
+            None,
+        )
+        fetch_origin_index = next(
+            (
+                index
+                for index, command in enumerate(commands)
+                if "fetch" in command and "origin" in command
+            ),
+            None,
+        )
+        assert set_url_index is not None, commands
+        assert fetch_origin_index is not None, commands
+        assert set_url_index < fetch_origin_index, commands
+        assert not any("fetch" in c and "upstream" in c for c in commands), commands
+        rev_list_cmds = [c for c in commands if "rev-list" in c]
+        assert any("origin/main" in c for c in rev_list_cmds), rev_list_cmds
+
+
+
 class TestCmdUpdateZipBranchRefusal:
     """``hermes update --branch=<non-main>`` must refuse on the ZIP fallback path.
 

@@ -115,7 +115,22 @@ def test_check_via_rev_recovers_exact_count():
         "hermes_cli.banner.subprocess.run", return_value=_ls_remote_result(SHA_B)
     ), patch.object(banner, "_github_compare_behind", return_value=61) as compare:
         assert banner._check_via_rev(SHA_A) == 61
-    compare.assert_called_once_with(SHA_A, SHA_B)
+    compare.assert_called_once_with(SHA_A, SHA_B, repository="NousResearch/hermes-agent")
+
+
+def test_check_via_rev_uses_internal_repository(monkeypatch):
+    monkeypatch.delenv("HERMES_UPDATE_REPOSITORY", raising=False)
+    monkeypatch.delenv("HERMES_INSTALL_REPOSITORY", raising=False)
+    monkeypatch.setenv("LEMON_AI_DESKTOP_INTERNAL", "1")
+
+    with patch(
+        "hermes_cli.banner.subprocess.run", return_value=_ls_remote_result(SHA_B)
+    ) as run, patch.object(banner, "_github_compare_behind", return_value=7) as compare:
+        assert banner._check_via_rev(SHA_A) == 7
+
+    ls_remote_cmd = run.call_args.args[0]
+    assert "https://github.com/DangLemon/hermes-agent.git" in ls_remote_cmd
+    compare.assert_called_once_with(SHA_A, SHA_B, repository="DangLemon/hermes-agent")
 
 
 def test_check_via_rev_falls_back_to_sentinel_offline():
@@ -165,6 +180,46 @@ def _shallow_git(head_sha, fetch_head_sha):
         raise AssertionError(f"unexpected git command: {cmd!r}")
 
     return fake_run
+
+
+def _internal_shallow_git_with_upstream_origin(head_sha, fetch_head_sha):
+    origin = {"url": "https://github.com/NousResearch/hermes-agent.git"}
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:4] == ["git", "remote", "get-url", "origin"]:
+            return MagicMock(returncode=0, stdout=f"{origin['url']}\n")
+        if cmd[:4] == ["git", "remote", "set-url", "origin"]:
+            origin["url"] = cmd[4]
+            return MagicMock(returncode=0, stdout="")
+        if cmd[:3] == ["git", "rev-parse", "--is-shallow-repository"]:
+            return MagicMock(returncode=0, stdout="true\n")
+        if cmd[:2] == ["git", "fetch"]:
+            assert origin["url"] == "https://github.com/DangLemon/hermes-agent.git"
+            assert cmd[2:4] == ["origin", "main"]
+            return MagicMock(returncode=0, stdout="")
+        if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+            return MagicMock(returncode=0, stdout=f"{head_sha}\n")
+        if cmd[:3] == ["git", "rev-parse", "FETCH_HEAD"]:
+            return MagicMock(returncode=0, stdout=f"{fetch_head_sha}\n")
+        raise AssertionError(f"unexpected git command: {cmd!r}")
+
+    return fake_run
+
+
+def test_check_via_local_git_internal_env_repoints_upstream_origin(monkeypatch, tmp_path):
+    monkeypatch.delenv("HERMES_UPDATE_REPOSITORY", raising=False)
+    monkeypatch.delenv("HERMES_INSTALL_REPOSITORY", raising=False)
+    monkeypatch.setenv("LEMON_AI_DESKTOP_INTERNAL", "1")
+    repo_dir = tmp_path / "hermes-agent"
+    repo_dir.mkdir()
+
+    with patch(
+        "hermes_cli.banner.subprocess.run",
+        side_effect=_internal_shallow_git_with_upstream_origin(SHA_A, SHA_B),
+    ), patch.object(banner, "_github_compare_behind", return_value=7) as compare:
+        assert banner._check_via_local_git(repo_dir) == 7
+
+    compare.assert_called_once_with(SHA_A, SHA_B, repository="DangLemon/hermes-agent")
 
 
 def test_shallow_checkout_recovers_exact_count(tmp_path):
