@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import type { DesktopUninstallMode, DesktopUninstallSummary } from '@/global'
+import { type Translations, useI18n } from '@/i18n'
 import { TRANSLATIONS } from '@/i18n/catalog'
 import { type AppBrand, appBrandForEnv, replaceHermesBrandTerms } from '@/lib/app-brand'
 import { AlertTriangle, Loader2, Trash2 } from '@/lib/icons'
 import { cn } from '@/lib/utils'
-import { type Translations, useI18n } from '@/i18n'
 
 import { SectionHeading } from './primitives'
 
@@ -40,6 +40,7 @@ export function uninstallCopyForBrand(
 ): UninstallCopy {
   const copy = translations.uninstall
   const text = (value: string): string => replaceHermesBrandTerms(value, brand)
+
   const option = (mode: DesktopUninstallMode, value: (typeof copy.options)[keyof typeof copy.options]): ModeOption => ({
     mode,
     title: text(value.title),

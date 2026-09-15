@@ -347,9 +347,9 @@ function hasBareTechnicalContext(input: string, span: TextSpan): boolean {
   // "binary"). A lower-case standalone `hermes` at that boundary is the
   // executable name, while an English prose continuation such as `hermes is`
   // remains eligible for display branding.
-  const continuation = input.slice(span.end).trimStart()
+  const firstCodePoint = input.slice(span.end).trimStart().codePointAt(0)
 
-  return continuation.length === 0 || /^[^\x00-\x7F]/.test(continuation)
+  return firstCodePoint === undefined || firstCodePoint > 0x7f
 }
 
 function shouldProtectHermesCliSpan(input: string, span: TextSpan): boolean {
