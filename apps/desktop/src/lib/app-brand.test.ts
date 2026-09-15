@@ -163,6 +163,17 @@ describe('appBrandForEnv', () => {
     )
   })
 
+  it('preserves technical path and executable hints from the catalog', () => {
+    const locales = [TRANSLATIONS.en, TRANSLATIONS.zh, TRANSLATIONS['zh-hant'], TRANSLATIONS.ja, TRANSLATIONS.ar, TRANSLATIONS.ru]
+
+    for (const translations of locales) {
+      expect(replaceHermesBrandTerms(translations.settings.gateway.remoteUrlDesc, lemonAppBrand)).toContain('/hermes')
+      expect(replaceHermesBrandTerms(translations.settings.gateway.sshHermesPathDesc, lemonAppBrand)).toContain(
+        'hermes'
+      )
+    }
+  })
+
   it('leaves generic command and prose boundaries unchanged in upstream mode', () => {
     const source =
       'Run hermes gateway before opening Hermes Desktop. Try hermes project if Hermes Agent still fails. Hermes gateway is unavailable.'

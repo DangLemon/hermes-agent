@@ -87,7 +87,9 @@ const BRAND_SPAN_TOKEN_PREFIX = '\uE000lemon-span-'
 const HERMES_EXECUTABLE = /\bhermes\b/g
 
 const HERMES_TECHNICAL_CONTRACT =
-  /@hermes\/[A-Za-z0-9][A-Za-z0-9._/-]*|\bhermes:\/\/[^\s<>"'`,;)]*|\bhermes:(?!\/\/)[A-Za-z0-9][A-Za-z0-9._:-]*|\bhermes[._/-][A-Za-z0-9][A-Za-z0-9._/-]*/g
+  /\/hermes(?=\/|\b)|@hermes\/[A-Za-z0-9][A-Za-z0-9._/-]*|\bhermes:\/\/[^\s<>"'`,;)]*|\bhermes:(?!\/\/)[A-Za-z0-9][A-Za-z0-9._:-]*|\bhermes[._/-][A-Za-z0-9][A-Za-z0-9._/-]*/g
+
+const BARE_TECHNICAL_CONTEXT_WORDS = new Set(['binary', 'command', 'executable', 'path'])
 
 const CLI_CONTEXT_WORDS = new Set([
   'command',
@@ -325,12 +327,38 @@ function hasKnownCliCommandShape(input: string, span: TextSpan): boolean {
   return tokens.length >= 3 || hasShellCommandBoundaryAfter(input, span.end)
 }
 
+function hasBareTechnicalContext(input: string, span: TextSpan): boolean {
+  const tokens = input
+    .slice(span.start, span.end)
+    .trim()
+    .split(/\s+/)
+    .map(token => token.toLowerCase())
+
+  if (tokens.length === 2 && BARE_TECHNICAL_CONTEXT_WORDS.has(tokens[1] ?? '')) {
+    return true
+  }
+
+  if (tokens.length !== 1 || input.slice(span.start, span.end) !== 'hermes') {
+    return false
+  }
+
+  // In translated copy the word following the executable is often a
+  // non-ASCII noun (for example, the Chinese/Japanese equivalent of
+  // "binary"). A lower-case standalone `hermes` at that boundary is the
+  // executable name, while an English prose continuation such as `hermes is`
+  // remains eligible for display branding.
+  const continuation = input.slice(span.end).trimStart()
+
+  return continuation.length === 0 || /^[^\x00-\x7F]/.test(continuation)
+}
+
 function shouldProtectHermesCliSpan(input: string, span: TextSpan): boolean {
   return (
     hasCodeOrQuoteBoundary(input, span.start, span.end) ||
     hasCliContext(input, span.start) ||
     hasOnlyCommandPunctuationAfter(input, span.end) ||
-    hasKnownCliCommandShape(input, span)
+    hasKnownCliCommandShape(input, span) ||
+    hasBareTechnicalContext(input, span)
   )
 }
 
