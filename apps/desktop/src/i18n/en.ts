@@ -45,6 +45,36 @@ export const en: Translations = {
     off: 'Off'
   },
 
+  uninstall: {
+    cancel: 'Cancel',
+    confirm: 'Yes, uninstall',
+    confirmDescription: consequence => `This removes ${consequence}. This can't be undone.`,
+    confirmTitle: 'Confirm uninstall',
+    dangerTitle: 'Danger zone',
+    heading: 'Uninstall Hermes',
+    intro: 'Choose how much to remove. The app closes to finish the job; reopen the installer any time to come back.',
+    loading: "Checking what's installed…",
+    running: 'Uninstalling…',
+    startError: 'Uninstall could not start.',
+    options: {
+      gui: {
+        title: 'Uninstall Chat GUI only',
+        description: 'Remove this desktop app. The Hermes agent, your config, and chats all stay.',
+        consequence: 'the desktop Chat GUI (this app and its data)'
+      },
+      lite: {
+        title: 'Uninstall GUI + agent, keep my data',
+        description: 'Remove the app and the Hermes agent, but keep config, chats, and secrets for a future reinstall.',
+        consequence: 'the Chat GUI and the Hermes agent (config, chats, and secrets are kept)'
+      },
+      full: {
+        title: 'Uninstall everything',
+        description: 'Remove the app, the agent, and all user data — config, chats, scheduled jobs, secrets, logs.',
+        consequence: 'EVERYTHING — the Chat GUI, the Hermes agent, and all of your config, chats, secrets, and logs'
+      }
+    }
+  },
+
   fileMenu: {
     revealFinder: 'Reveal in Finder',
     revealExplorer: 'Reveal in File Explorer',

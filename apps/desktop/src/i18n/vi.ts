@@ -43,6 +43,36 @@ export const vi = defineLocale({
     off: 'Tắt'
   },
 
+  uninstall: {
+    cancel: 'Hủy',
+    confirm: 'Đồng ý gỡ',
+    confirmDescription: consequence => `Thao tác này sẽ gỡ ${consequence}. Không thể hoàn tác.`,
+    confirmTitle: 'Xác nhận gỡ cài đặt',
+    dangerTitle: 'Khu vực nhạy cảm',
+    heading: 'Gỡ Lemon AI',
+    intro: 'Chọn mức dữ liệu cần gỡ. Ứng dụng sẽ đóng để hoàn tất; bạn có thể cài lại bất cứ lúc nào.',
+    loading: 'Đang kiểm tra thành phần đã cài…',
+    running: 'Đang gỡ…',
+    startError: 'Không thể bắt đầu gỡ cài đặt.',
+    options: {
+      gui: {
+        title: 'Chỉ gỡ ứng dụng desktop',
+        description: 'Gỡ ứng dụng này. Agent Lemon AI, cấu hình và cuộc trò chuyện vẫn được giữ lại.',
+        consequence: 'ứng dụng desktop Lemon AI (ứng dụng này và dữ liệu của ứng dụng)'
+      },
+      lite: {
+        title: 'Gỡ ứng dụng và agent, giữ dữ liệu',
+        description: 'Gỡ ứng dụng và agent Lemon AI, nhưng giữ cấu hình, cuộc trò chuyện và khóa truy cập để cài lại sau.',
+        consequence: 'ứng dụng desktop Lemon AI và agent Lemon AI (giữ cấu hình, cuộc trò chuyện và khóa truy cập)'
+      },
+      full: {
+        title: 'Gỡ tất cả',
+        description: 'Gỡ ứng dụng, agent và toàn bộ dữ liệu người dùng: cấu hình, cuộc trò chuyện, lịch công việc, khóa truy cập, log.',
+        consequence: 'TOÀN BỘ: ứng dụng desktop Lemon AI, agent Lemon AI, cấu hình, cuộc trò chuyện, khóa truy cập và log'
+      }
+    }
+  },
+
   boot: {
     ready: 'Lemon AI đã sẵn sàng',
     desktopBootFailedWithMessage: message => `Khởi động desktop thất bại: ${message}`,

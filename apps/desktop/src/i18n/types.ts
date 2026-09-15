@@ -93,6 +93,36 @@ export interface Translations {
     off: string
   }
 
+  uninstall: {
+    cancel: string
+    confirm: string
+    confirmDescription: (consequence: string) => string
+    confirmTitle: string
+    dangerTitle: string
+    heading: string
+    intro: string
+    loading: string
+    running: string
+    startError: string
+    options: {
+      gui: {
+        title: string
+        description: string
+        consequence: string
+      }
+      lite: {
+        title: string
+        description: string
+        consequence: string
+      }
+      full: {
+        title: string
+        description: string
+        consequence: string
+      }
+    }
+  }
+
   fileMenu: {
     revealFinder: string
     revealExplorer: string
