@@ -34,7 +34,7 @@ export function archiveSkillDialogCopyForBrand(
     confirmLabel: text(t.skills.archive),
     description: text(t.skills.archiveSkillConfirmDescription),
     failureFallback: text(t.skills.archiveSkillFailed),
-    title: name => text(t.skills.archiveSkillConfirmTitle(name))
+    title: name => replaceHermesBrandTerms(t.skills.archiveSkillConfirmTitle(name), brand, [name])
   }
 }
 

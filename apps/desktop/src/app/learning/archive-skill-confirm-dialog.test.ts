@@ -28,6 +28,12 @@ describe('archiveSkillDialogCopyForBrand', () => {
     expect(combined).not.toContain('Archive')
   })
 
+  it('preserves the skill name when internal archive titles apply Lemon branding', () => {
+    const copy = archiveSkillDialogCopyForBrand(TRANSLATIONS.en, lemonAppBrand)
+
+    expect(copy.title('Hermes Research')).toBe('Archive Hermes Research?')
+  })
+
   it('uses the active Japanese locale for Lemon archive copy', () => {
     const copy = archiveSkillDialogCopyForBrand(TRANSLATIONS.ja, lemonAppBrand)
     const combined = [copy.confirmLabel, copy.description, copy.failureFallback, copy.title('research')].join('\n')
