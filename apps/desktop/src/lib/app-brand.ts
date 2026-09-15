@@ -81,21 +81,407 @@ export function appBrandForEnv(env: BrandEnv = internalCompanyBuildEnv()): AppBr
 
 export const appBrand = appBrandForEnv
 
-export function replaceHermesBrandTerms(input: string, brand: AppBrand = appBrandForEnv()): string {
+const BRAND_VALUE_TOKEN_PREFIX = '\uE000lemon-brand-'
+const BRAND_VALUE_TOKEN_SUFFIX = '\uE001'
+const BRAND_SPAN_TOKEN_PREFIX = '\uE000lemon-span-'
+const HERMES_EXECUTABLE = /\bhermes\b/g
+
+const CLI_CONTEXT_WORDS = new Set([
+  'command',
+  'execute',
+  'executing',
+  'launch',
+  'launched',
+  'run',
+  'running',
+  'start',
+  'started',
+  'try',
+  'type',
+  'typed',
+  'use',
+  'using',
+  'via'
+])
+
+const CLI_PROSE_BOUNDARY_WORDS = new Set([
+  'after',
+  'and',
+  'are',
+  'because',
+  'before',
+  'but',
+  'fails',
+  'failed',
+  'for',
+  'if',
+  'in',
+  'is',
+  'on',
+  'or',
+  'running',
+  'still',
+  'then',
+  'to',
+  'unavailable',
+  'was',
+  'were',
+  'when',
+  'while',
+  'with'
+])
+
+interface TextSpan {
+  end: number
+  start: number
+}
+
+interface CliToken {
+  end: number
+  start: number
+  value: string
+}
+
+interface ProtectedBrandText {
+  restore: (value: string) => string
+  text: string
+}
+
+function replaceValuesWithTokens(input: string, values: readonly string[], tokens: readonly string[]): string {
+  return values.reduce((next, original, index) => {
+    if (!original) {
+      return next
+    }
+
+    return next.split(original).join(tokens[index])
+  }, input)
+}
+
+function restoreTokens(input: string, values: readonly string[], tokens: readonly string[]): string {
+  return tokens.reduce((next, token, index) => next.split(token).join(values[index]), input)
+}
+
+function isWhitespace(char: string | undefined): boolean {
+  return char !== undefined && /\s/.test(char)
+}
+
+function isCliDelimiter(char: string | undefined): boolean {
+  return char === undefined || /[.,;:!?()[\]{}<>`]/.test(char)
+}
+
+function isWordChar(char: string | undefined): boolean {
+  return char !== undefined && /[A-Za-z0-9_]/.test(char)
+}
+
+function previousWord(input: string, index: number): string | null {
+  let cursor = index - 1
+
+  while (cursor >= 0 && !isWordChar(input[cursor])) {
+    cursor -= 1
+  }
+
+  if (cursor < 0) {
+    return null
+  }
+
+  const end = cursor + 1
+
+  while (cursor >= 0 && isWordChar(input[cursor])) {
+    cursor -= 1
+  }
+
+  return input.slice(cursor + 1, end).toLowerCase()
+}
+
+function hasCodeOrQuoteBoundary(input: string, start: number, end: number): boolean {
+  const before = input[start - 1]
+  const after = input[end]
+
+  return before === '`' || after === '`' || before === '"' || after === '"' || before === "'" || after === "'"
+}
+
+function hasCliContext(input: string, start: number): boolean {
+  const word = previousWord(input, start)
+
+  return word !== null && CLI_CONTEXT_WORDS.has(word)
+}
+
+function readCliToken(input: string, start: number): CliToken | null {
+  const quote = input[start]
+
+  if (quote === '"' || quote === "'") {
+    let cursor = start + 1
+
+    while (cursor < input.length && input[cursor] !== quote && input[cursor] !== '\n') {
+      cursor += 1
+    }
+
+    if (input[cursor] !== quote) {
+      return null
+    }
+
+    return { start, end: cursor + 1, value: input.slice(start, cursor + 1) }
+  }
+
+  if (isCliDelimiter(input[start]) || isWhitespace(input[start])) {
+    return null
+  }
+
+  let cursor = start
+
+  while (cursor < input.length && !isWhitespace(input[cursor]) && !isCliDelimiter(input[cursor])) {
+    cursor += 1
+  }
+
+  return { start, end: cursor, value: input.slice(start, cursor) }
+}
+
+function isCliTokenValue(token: string): boolean {
+  if (/^--?[A-Za-z0-9][A-Za-z0-9-]*(?:=.*)?$/.test(token)) {
+    return true
+  }
+
+  if (/^[A-Za-z0-9][A-Za-z0-9._:/@+=-]*$/.test(token)) {
+    return true
+  }
+
+  if (/^(?:"[^"\n]*"|'[^'\n]*')$/.test(token)) {
+    return true
+  }
+
+  return false
+}
+
+function scanHermesCliCommand(input: string, start: number): TextSpan {
+  let cursor = start + 'hermes'.length
+  let end = cursor
+  let consumedTokens = 0
+
+  while (cursor < input.length) {
+    const whitespaceStart = cursor
+
+    while (cursor < input.length && isWhitespace(input[cursor]) && input[cursor] !== '\n') {
+      cursor += 1
+    }
+
+    if (cursor === whitespaceStart) {
+      break
+    }
+
+    const token = readCliToken(input, cursor)
+
+    if (token === null) {
+      break
+    }
+
+    const normalized = token.value.toLowerCase()
+
+    if (CLI_PROSE_BOUNDARY_WORDS.has(normalized)) {
+      break
+    }
+
+    if (!isCliTokenValue(token.value)) {
+      break
+    }
+
+    consumedTokens += 1
+    end = token.end
+    cursor = token.end
+  }
+
+  return { start, end }
+}
+
+function hasOnlyCommandPunctuationAfter(input: string, end: number): boolean {
+  return /^[\s`'".,;:!?()[\]{}]*$/.test(input.slice(end))
+}
+
+function shouldProtectHermesCliSpan(input: string, span: TextSpan): boolean {
+  return (
+    hasCodeOrQuoteBoundary(input, span.start, span.end) ||
+    hasCliContext(input, span.start) ||
+    hasOnlyCommandPunctuationAfter(input, span.end)
+  )
+}
+
+function protectHermesCliSpans(input: string, protect: (original: string) => string): string {
+  let output = ''
+  let cursor = 0
+  HERMES_EXECUTABLE.lastIndex = 0
+
+  for (let match = HERMES_EXECUTABLE.exec(input); match !== null; match = HERMES_EXECUTABLE.exec(input)) {
+    const start = match.index
+    const span = scanHermesCliCommand(input, start)
+
+    output += input.slice(cursor, start)
+
+    if (shouldProtectHermesCliSpan(input, span)) {
+      output += protect(input.slice(span.start, span.end))
+      cursor = span.end
+      HERMES_EXECUTABLE.lastIndex = span.end
+    } else {
+      output += input.slice(start, span.end)
+      cursor = span.end
+      HERMES_EXECUTABLE.lastIndex = span.end
+    }
+  }
+
+  return output + input.slice(cursor)
+}
+
+function protectInterpolationValues(input: string, values: readonly unknown[]): ProtectedBrandText {
+  const replacements: Array<{ original: string; token: string }> = []
+  let text = input
+
+  const stringValues = values
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .sort((left, right) => right.length - left.length)
+
+  for (const original of stringValues) {
+    if (!text.includes(original)) {
+      continue
+    }
+
+    const token = `${BRAND_VALUE_TOKEN_PREFIX}${replacements.length}${BRAND_VALUE_TOKEN_SUFFIX}`
+    text = text.split(original).join(token)
+    replacements.push({ original, token })
+  }
+
+  return {
+    restore: value =>
+      replacements.reduce((next, replacement) => next.split(replacement.token).join(replacement.original), value),
+    text
+  }
+}
+
+function protectDisplaySpans(input: string): ProtectedBrandText {
+  const replacements: Array<{ original: string; token: string }> = []
+
+  const protect = (original: string): string => {
+    const token = `${BRAND_SPAN_TOKEN_PREFIX}${replacements.length}${BRAND_VALUE_TOKEN_SUFFIX}`
+    replacements.push({ original, token })
+
+    return token
+  }
+
+  // Keep URLs and lower-case executable CLI command spans intact. Product
+  // names inside quotes/backticks remain brandable display copy unless the
+  // span is the lower-case `hermes` executable.
+  const textWithProtectedUrls = input.replace(/https?:\/\/[^\s<>"'`]+/gi, protect)
+  const text = protectHermesCliSpans(textWithProtectedUrls, protect)
+
+  return {
+    restore: value =>
+      replacements.reduce((next, replacement) => next.split(replacement.token).join(replacement.original), value),
+    text
+  }
+}
+
+function replaceBrandText(input: string, brand: AppBrand): string {
+  const protectedSpans = protectDisplaySpans(input)
+
+  const tokenized = protectedSpans.text
+    .replace(/~\/\.hermes(?=\/|\b)/gi, '~/.lemon-ai')
+    .replace(/\bHermes Desktop\b/gi, '{appName}')
+    .replace(/\bHermes Agent\b/gi, '{appName}')
+    .replace(/\bHermes backend\b/gi, '{appName} backend')
+    .replace(/\bHermes gateway\b/gi, '{appName} gateway')
+    .replace(/\bHermes\b/gi, '{appName}')
+
+  return protectedSpans.restore(replaceAppBrandTokens(tokenized, brand))
+}
+
+function brandTranslationFunction(
+  translate: (...args: never[]) => unknown,
+  args: readonly unknown[],
+  brand: AppBrand
+): unknown {
+  const rendered = translate(...(args as never[]))
+
+  if (typeof rendered !== 'string') {
+    return brandTranslationTree(rendered, brand)
+  }
+
+  const stringArgs = args.filter((value): value is string => typeof value === 'string' && value.length > 0)
+
+  if (stringArgs.length === 0) {
+    return replaceBrandText(rendered, brand)
+  }
+
+  const tokens = stringArgs.map((_, index) => `${BRAND_VALUE_TOKEN_PREFIX}probe-${index}${BRAND_VALUE_TOKEN_SUFFIX}`)
+  const projected = replaceValuesWithTokens(rendered, stringArgs, tokens)
+
+  const probeArgs = args.map(value =>
+    typeof value === 'string' && value.length > 0 ? tokens[stringArgs.indexOf(value)] : value
+  )
+
+  try {
+    const probed = translate(...(probeArgs as never[]))
+
+    if (typeof probed === 'string' && probed === projected) {
+      return restoreTokens(replaceBrandText(probed, brand), stringArgs, tokens)
+    }
+  } catch {
+    // Some extension translators may validate their arguments. Fall back to
+    // the value-preserving path below when a sentinel probe is not accepted.
+  }
+
+  return replaceHermesBrandTerms(rendered, brand, args)
+}
+
+export function replaceHermesBrandTerms(
+  input: string,
+  brand: AppBrand = appBrandForEnv(),
+  preserveValues: readonly unknown[] = []
+): string {
   if (brand.mode === 'upstream') {
     return input
   }
 
-  const tokenized = input
-    .replaceAll('Hermes Desktop', '{appName}')
-    .replaceAll('Hermes Agent', '{appName}')
-    .replaceAll('Hermes', '{appName}')
+  const protectedValues = protectInterpolationValues(input, preserveValues)
 
-  return replaceAppBrandTokens(tokenized, brand)
+  return protectedValues.restore(replaceBrandText(protectedValues.text, brand))
 }
 
 export function replaceAppBrandTokens(input: string, brand: AppBrand = appBrandForEnv()): string {
   return input.replace(/\{(agentName|appName|chatGuiName)\}/g, (token, key: AppBrandToken) => brand[key] ?? token)
+}
+
+/**
+ * Apply internal branding to a translation tree without changing the
+ * upstream object. Translation functions are wrapped so interpolated values
+ * receive the same display-only rewrite as static strings.
+ */
+export function brandTranslationTree<T>(value: T, brand: AppBrand = appBrandForEnv()): T {
+  if (brand.mode === 'upstream') {
+    return value
+  }
+
+  if (typeof value === 'string') {
+    return replaceHermesBrandTerms(value, brand) as T
+  }
+
+  if (typeof value === 'function') {
+    return ((...args: unknown[]) => {
+      return brandTranslationFunction(value as (...args: never[]) => unknown, args, brand)
+    }) as T
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(item => brandTranslationTree(item, brand)) as T
+  }
+
+  if (value !== null && typeof value === 'object') {
+    const branded: Record<string, unknown> = {}
+
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      branded[key] = brandTranslationTree(item, brand)
+    }
+
+    return branded as T
+  }
+
+  return value
 }
 
 export function applyAppBrandRoot(
