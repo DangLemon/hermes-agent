@@ -1033,7 +1033,13 @@ export const ar = defineLocale({
     toolsetEnabled: 'تم تفعيل مجموعة الأدوات',
     toolsetDisabled: 'تم تعطيل مجموعة الأدوات',
     appliesToNewSessions: name => `ينطبق على الجلسات الجديدة في ${name}`,
-    failedToUpdate: name => `فشل تحديث ${name}`
+    failedToUpdate: name => `فشل تحديث ${name}`,
+    archive: 'أرشفة',
+    archiveSkillConfirmDescription: 'ستتم أرشفة المهارة ويمكن استعادتها عبر `hermes curator restore`.',
+    archiveSkillConfirmTitle: name => `أرشفة ${name}؟`,
+    archiveSkillFailed: 'فشلت الأرشفة',
+    skillArchivedTitle: 'تمت أرشفة المهارة',
+    skillArchivedMessage: 'يمكن استعادتها عبر hermes curator restore.'
   },
   agents: {
     close: 'إغلاق الوكلاء',

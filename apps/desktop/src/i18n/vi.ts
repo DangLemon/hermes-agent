@@ -491,7 +491,13 @@ export const vi = defineLocale({
 
   skills: {
     sortMostUsed: 'Dùng nhiều',
-    sortMostUsedDesc: '↓ Dùng nhiều'
+    sortMostUsedDesc: '↓ Dùng nhiều',
+    archive: 'Lưu trữ',
+    archiveSkillConfirmDescription: 'Kỹ năng sẽ được lưu trữ và có thể khôi phục bằng `hermes curator restore`.',
+    archiveSkillConfirmTitle: name => `Lưu trữ ${name}?`,
+    archiveSkillFailed: 'Không thể lưu trữ',
+    skillArchivedTitle: 'Đã lưu trữ kỹ năng',
+    skillArchivedMessage: 'Có thể khôi phục bằng hermes curator restore.'
   },
 
   composer: {

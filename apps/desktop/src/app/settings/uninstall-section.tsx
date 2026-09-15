@@ -64,8 +64,12 @@ export function uninstallCopyForBrand(
   }
 }
 
-export function uninstallOptionsForBrand(brand: AppBrand = appBrandForEnv(), agentInstalled: boolean): ModeOption[] {
-  return uninstallCopyForBrand(brand).options.filter(opt => agentInstalled || !opt.needsAgent)
+export function uninstallOptionsForBrand(
+  brand: AppBrand = appBrandForEnv(),
+  agentInstalled: boolean,
+  translations?: Translations
+): ModeOption[] {
+  return uninstallCopyForBrand(brand, translations).options.filter(opt => agentInstalled || !opt.needsAgent)
 }
 
 export function UninstallSection() {
@@ -118,7 +122,7 @@ export function UninstallSection() {
   // Gate the agent-removing options on whether an agent is actually present.
   // A future lite client that ships without the bundled agent shows GUI-only.
   const agentInstalled = summary?.agent_installed ?? false
-  const visibleOptions = uninstallOptionsForBrand(brand, agentInstalled)
+  const visibleOptions = uninstallOptionsForBrand(brand, agentInstalled, t)
 
   const handleConfirm = async () => {
     if (!pending) {

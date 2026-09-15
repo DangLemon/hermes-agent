@@ -1,11 +1,8 @@
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { deleteLearningNode, type ProfileScope } from '@/hermes'
 import { type Translations, useI18n } from '@/i18n'
-import { type AppBrand, appBrandForEnv } from '@/lib/app-brand'
+import { type AppBrand, appBrandForEnv, replaceHermesBrandTerms } from '@/lib/app-brand'
 import { notify } from '@/store/notifications'
-
-export const ARCHIVE_SKILL_DESCRIPTION = 'The skill is archived and can be restored with `hermes curator restore`.'
-const ARCHIVE_SKILL_INTERNAL_DESCRIPTION = 'Kỹ năng sẽ được lưu trữ và có thể khôi phục bằng `hermes curator restore`.'
 
 export function notifySkillArchived(t: Translations): void {
   notify({ kind: 'success', message: t.skills.skillArchivedMessage, title: t.skills.skillArchivedTitle })
@@ -22,20 +19,22 @@ export function archiveSkillDialogCopyForBrand(
   t: Translations,
   brand: AppBrand = appBrandForEnv()
 ): ArchiveSkillDialogCopy {
+  const text = (value: string): string => replaceHermesBrandTerms(value, brand)
+
   if (brand.mode === 'upstream') {
     return {
       confirmLabel: t.skills.archive,
-      description: ARCHIVE_SKILL_DESCRIPTION,
-      failureFallback: 'Archive failed',
-      title: name => `Archive ${name}?`
+      description: t.skills.archiveSkillConfirmDescription,
+      failureFallback: t.skills.archiveSkillFailed,
+      title: t.skills.archiveSkillConfirmTitle
     }
   }
 
   return {
-    confirmLabel: 'Lưu trữ',
-    description: ARCHIVE_SKILL_INTERNAL_DESCRIPTION,
-    failureFallback: 'Không thể lưu trữ',
-    title: name => `Lưu trữ ${name}?`
+    confirmLabel: text(t.skills.archive),
+    description: text(t.skills.archiveSkillConfirmDescription),
+    failureFallback: text(t.skills.archiveSkillFailed),
+    title: name => text(t.skills.archiveSkillConfirmTitle(name))
   }
 }
 

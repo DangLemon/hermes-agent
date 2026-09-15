@@ -27,6 +27,31 @@ describe('archiveSkillDialogCopyForBrand', () => {
     expect(copy.title('research')).toBe('Lưu trữ research?')
     expect(combined).not.toContain('Archive')
   })
+
+  it('uses the active Japanese locale for Lemon archive copy', () => {
+    const copy = archiveSkillDialogCopyForBrand(TRANSLATIONS.ja, lemonAppBrand)
+    const combined = [copy.confirmLabel, copy.description, copy.failureFallback, copy.title('research')].join('\n')
+
+    expect(copy.confirmLabel).toBe('アーカイブ')
+    expect(copy.description).toContain('hermes curator restore')
+    expect(copy.title('research')).toBe('research をアーカイブしますか？')
+    expect(combined).not.toContain('Lưu trữ')
+    expect(combined).not.toContain('Archive')
+  })
+
+  it.each([
+    ['zh-hant', '封存 demo？', '封存失敗'],
+    ['ru', 'Отправить demo в архив?', 'Не удалось отправить в архив'],
+    ['ar', 'أرشفة demo؟', 'فشلت الأرشفة']
+  ] as const)('keeps %s archive dialog copy localized', (locale, title, failureFallback) => {
+    const copy = archiveSkillDialogCopyForBrand(TRANSLATIONS[locale], lemonAppBrand)
+    const combined = [copy.confirmLabel, copy.description, copy.failureFallback, copy.title('demo')].join('\n')
+
+    expect(copy.title('demo')).toBe(title)
+    expect(copy.failureFallback).toBe(failureFallback)
+    expect(copy.description).toContain('hermes curator restore')
+    expect(combined).not.toContain('Archive')
+  })
 })
 
 describe('archiveLearningSkill', () => {

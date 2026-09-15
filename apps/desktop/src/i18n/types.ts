@@ -1344,6 +1344,9 @@ export interface Translations {
     skillUpdated: string
     edit: string
     archive: string
+    archiveSkillConfirmDescription: string
+    archiveSkillConfirmTitle: (name: string) => string
+    archiveSkillFailed: string
     skillArchivedTitle: string
     skillArchivedMessage: string
     officialCatalog: string

@@ -50,6 +50,13 @@ test('main Cloud auth errors use the runtime desktop product name', () => {
   assert.doesNotMatch(source, /Your Hermes Cloud session has expired\./)
 })
 
+test('main active backend label uses the runtime desktop product name', () => {
+  const source = mainSource()
+
+  assert.match(source, /label: `\$\{DESKTOP_RUNTIME_IDENTITY\.appName\} at \$\{ACTIVE_HERMES_ROOT\}`/)
+  assert.doesNotMatch(source, /label: `Hermes at \$\{ACTIVE_HERMES_ROOT\}`/)
+})
+
 test('legacy manual update path stops when the internal origin cannot be normalized', () => {
   const source = mainSource()
   const start = source.indexOf('if (!resolveUpdateScriptHandoff(updateRoot))')

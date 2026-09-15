@@ -1539,6 +1539,9 @@ export const ru = defineLocale({
     skillUpdated: 'Навык обновлён',
     edit: 'Изменить',
     archive: 'В архив',
+    archiveSkillConfirmDescription: 'Навык будет отправлен в архив, и его можно восстановить через `hermes curator restore`.',
+    archiveSkillConfirmTitle: name => `Отправить ${name} в архив?`,
+    archiveSkillFailed: 'Не удалось отправить в архив',
     skillArchivedTitle: 'Навык в архиве',
     skillArchivedMessage: 'Восстановить через hermes curator restore.',
     hub: {
