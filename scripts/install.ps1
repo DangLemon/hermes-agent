@@ -189,6 +189,8 @@ function Test-InternalHarnessConfig {
         return (Test-InternalHarnessResource $selected)
     }
 
+    if (Test-RepositorySelectsInternalBuild) { return $true }
+
     return (Test-CheckoutInternalHarnessConfig)
 }
 
@@ -256,6 +258,21 @@ function Test-InternalHarnessResource {
     } catch {
         return $false
     }
+}
+
+function Test-RepositorySelectsInternalBuild {
+    $selectedRepository = if (-not [string]::IsNullOrWhiteSpace([string]$Repository)) {
+        [string]$Repository
+    } elseif (-not [string]::IsNullOrWhiteSpace([string]$env:HERMES_INSTALL_REPOSITORY)) {
+        [string]$env:HERMES_INSTALL_REPOSITORY
+    } else {
+        ""
+    }
+    return [string]::Equals(
+        $selectedRepository.Trim(),
+        "DangLemon/hermes-agent",
+        [StringComparison]::OrdinalIgnoreCase
+    )
 }
 
 function Test-CheckoutInternalHarnessConfig {
