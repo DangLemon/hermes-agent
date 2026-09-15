@@ -59,6 +59,13 @@ test('main active backend label uses the runtime desktop product name', () => {
   assert.doesNotMatch(source, /backend\.label = `Hermes at \$\{ACTIVE_HERMES_ROOT\} \(venv:/)
 })
 
+test('main bootstrap-needed label uses the runtime desktop product name', () => {
+  const source = mainSource()
+
+  assert.match(source, /label: `\$\{DESKTOP_RUNTIME_IDENTITY\.appName\} not installed yet; bootstrap required`/)
+  assert.doesNotMatch(source, /label: 'Hermes Agent not installed yet; bootstrap required'/)
+})
+
 test('legacy manual update path stops when the internal origin cannot be normalized', () => {
   const source = mainSource()
   const start = source.indexOf('if (!resolveUpdateScriptHandoff(updateRoot))')
