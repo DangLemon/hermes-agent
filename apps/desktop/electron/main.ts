@@ -9284,7 +9284,11 @@ function applySecretStorageEncryption(on: boolean) {
 
     try {
       rewriteAllStoredSecrets(needsEncrypt, secret =>
-        needsEncrypt(secret) ? encryptDesktopSecretStrict(String(secret.value), safeStorage) : secret
+        needsEncrypt(secret)
+          ? encryptDesktopSecretStrict(String(secret.value), safeStorage, {
+              appName: DESKTOP_RUNTIME_IDENTITY.appName
+            })
+          : secret
       )
     } catch (error) {
       // Encryption failed midway: revert the policy so reads keep working
@@ -9323,7 +9327,10 @@ function encryptDesktopSecret(value, options = {}) {
     return raw ? { encoding: 'plain', value: raw } : null
   }
 
-  return encryptDesktopSecretStrict(value, safeStorage, options)
+  return encryptDesktopSecretStrict(value, safeStorage, {
+    ...options,
+    appName: DESKTOP_RUNTIME_IDENTITY.appName
+  })
 }
 
 function decryptDesktopSecret(secret) {
@@ -9664,7 +9671,7 @@ function readDesktopConnectionsRegistry() {
     // migration is deterministic over the v1 input, so even if two processes
     // race the first run (updater relaunch, second window), both derive the
     // same registry and the later atomic write is a no-op content-wise.
-    registry = migrateV1ToRegistry(readDesktopConnectionConfig())
+    registry = migrateV1ToRegistry(readDesktopConnectionConfig(), { appName: DESKTOP_RUNTIME_IDENTITY.appName })
 
     try {
       writeDesktopConnectionsRegistry(registry)
@@ -9705,7 +9712,9 @@ function readDesktopConnectionsRegistry() {
   // launch pick sends the window somewhere else. Persist so the repair is a
   // one-time event rather than a recomputation on every read; a failed write
   // still returns the healed registry for this session.
-  const reconciled = reconcileRegistryDrift(registry, readDesktopConnectionConfig())
+  const reconciled = reconcileRegistryDrift(registry, readDesktopConnectionConfig(), {
+    appName: DESKTOP_RUNTIME_IDENTITY.appName
+  })
 
   if (reconciled.changed) {
     registry = reconciled.registry
@@ -10868,7 +10877,7 @@ async function bootstrapSshConnectionInner(profile, sshConfig, reuseToken, sourc
       managedConnectionUpdateGate.assertCanDial(metadata.registryConnectionId, metadata.managedUpdateCorrelation || '')
     }
 
-    const platform = await detectRemotePlatform(ssh, sshConfig.remoteHermesPath || '')
+    const platform = await detectRemotePlatform(ssh, sshConfig.remoteHermesPath || '', DESKTOP_RUNTIME_IDENTITY.appName)
     const lifecycle = platform.os === 'Windows' ? connectWindowsRemote : remoteLifecycle.connect
     result = await lifecycle({
       ssh,
@@ -11346,7 +11355,11 @@ async function testDesktopConnectionConfig(input: any = {}) {
       for (;;) {
         try {
           await ssh.open()
-          const platform: any = await detectRemotePlatform(ssh, sshConfig.remoteHermesPath || '')
+          const platform: any = await detectRemotePlatform(
+            ssh,
+            sshConfig.remoteHermesPath || '',
+            DESKTOP_RUNTIME_IDENTITY.appName
+          )
           let hermesPath
           let hermesVersion
           let supported
@@ -11358,7 +11371,12 @@ async function testDesktopConnectionConfig(input: any = {}) {
             hermesVersion = inspection.version
             supported = inspection.supported
           } else {
-            hermesPath = await remoteLifecycle.locateHermes(ssh, sshConfig.remoteHermesPath || '', resolveDesktopUpdateRepository())
+            hermesPath = await remoteLifecycle.locateHermes(
+              ssh,
+              sshConfig.remoteHermesPath || '',
+              resolveDesktopUpdateRepository(),
+              DESKTOP_RUNTIME_IDENTITY.appName
+            )
             hermesVersion = await remoteLifecycle.probeHermesVersion(ssh, hermesPath)
             supported = await remoteLifecycle.remoteSupportsSshOwnership(ssh, hermesPath)
           }
@@ -11367,7 +11385,7 @@ async function testDesktopConnectionConfig(input: any = {}) {
             return {
               reachable: false,
               sshError: 'update-required',
-              error: 'Update Hermes on the remote host before connecting with Desktop SSH.'
+              error: `Update ${DESKTOP_RUNTIME_IDENTITY.appName} on the remote host before connecting with Desktop SSH.`
             }
           }
 
@@ -12294,10 +12312,16 @@ async function openManagedSshUpdateTransport(
   await ssh.open()
 
   try {
-    const platform: any = await detectRemotePlatform(ssh, config.remoteHermesPath || '')
+    const platform: any = await detectRemotePlatform(
+      ssh,
+      config.remoteHermesPath || '',
+      DESKTOP_RUNTIME_IDENTITY.appName
+    )
 
     if (platform.os === 'Windows') {
-      const runtime = platform.hermesPath ? platform : await probeWindowsRemote(ssh, config.remoteHermesPath || '')
+      const runtime = platform.hermesPath
+        ? platform
+        : await probeWindowsRemote(ssh, config.remoteHermesPath || '', DESKTOP_RUNTIME_IDENTITY.appName)
 
       return {
         close: () => ssh.close(),
@@ -12311,8 +12335,13 @@ async function openManagedSshUpdateTransport(
       }
     }
 
-    const hermesPath = await remoteLifecycle.locateHermes(ssh, config.remoteHermesPath || '', resolveDesktopUpdateRepository())
-    const hermesHome = await remoteLifecycle.probeRemoteHermesHome(ssh)
+    const hermesPath = await remoteLifecycle.locateHermes(
+      ssh,
+      config.remoteHermesPath || '',
+      resolveDesktopUpdateRepository(),
+      DESKTOP_RUNTIME_IDENTITY.appName
+    )
+    const hermesHome = await remoteLifecycle.probeRemoteHermesHome(ssh, DESKTOP_RUNTIME_IDENTITY.appName)
 
     return {
       close: () => ssh.close(),
@@ -15746,7 +15775,7 @@ async function probeSshProfileInventory(connection) {
 
   try {
     await ssh.open()
-    const profiles = await remoteLifecycle.listRemoteHermesProfiles(ssh)
+    const profiles = await remoteLifecycle.listRemoteHermesProfiles(ssh, DESKTOP_RUNTIME_IDENTITY.appName)
 
     if (profiles.length > 0) {
       sshRosterCache.set(connection.id, profiles)
@@ -16262,7 +16291,9 @@ ipcMain.handle('hermes:connection-config:apply', async (_event, payload) => {
 
   const key = connectionScopeKey(payload?.profile)
   const scope = key || ''
-  const nextRegistry = key ? previousRegistry : reconcileAppliedGlobalConnection(previousRegistry, config)
+  const nextRegistry = key
+    ? previousRegistry
+    : reconcileAppliedGlobalConnection(previousRegistry, config, { appName: DESKTOP_RUNTIME_IDENTITY.appName })
 
   await applyConnectionConfigAtomically({
     previousConfig,

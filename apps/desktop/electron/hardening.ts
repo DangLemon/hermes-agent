@@ -153,7 +153,7 @@ function resolveTimeoutMs(timeoutMs, fallbackMs = DEFAULT_FETCH_TIMEOUT_MS) {
   return fallback
 }
 
-function encryptDesktopSecret(value, safeStorageApi, options: { allowPlainText?: boolean } = {}) {
+function encryptDesktopSecret(value, safeStorageApi, options: { allowPlainText?: boolean; appName?: string } = {}) {
   const raw = String(value || '')
 
   if (!raw) {
@@ -181,8 +181,10 @@ function encryptDesktopSecret(value, safeStorageApi, options: { allowPlainText?:
       return { encoding: 'plain', value: raw }
     }
 
+    const appName = String(options?.appName || 'Hermes').trim() || 'Hermes'
+
     throw new Error(
-      'Secure token storage is unavailable (no OS keyring service was found), so Hermes Desktop cannot save remote gateway tokens. ' +
+      `Secure token storage is unavailable (no OS keyring service was found), so ${appName} cannot save remote gateway tokens. ` +
         'Either enable an OS keyring (e.g. GNOME Keyring or KWallet providing org.freedesktop.secrets) and try again, ' +
         'confirm the plain-text storage option when prompted in Settings → Gateway, ' +
         'or set HERMES_DESKTOP_REMOTE_URL and HERMES_DESKTOP_REMOTE_TOKEN in your environment.'

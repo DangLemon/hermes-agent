@@ -48,6 +48,10 @@ const REMOTE_NOFILE_SOFT_LIMIT = 65_536
 
 const DEFAULT_SOURCE_REPOSITORY = 'NousResearch/hermes-agent'
 
+function displayAppName(hostAppName = 'Hermes'): string {
+  return String(hostAppName || 'Hermes').trim() || 'Hermes'
+}
+
 const SOURCE_REPOSITORY_RE =
   /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/
 
@@ -203,7 +207,13 @@ function expandRemotePath(p) {
 // (throws a path-naming error if not executable — never silently falls back to a
 // different install). A BLANK path auto-detects: login-shell `command -v` (a
 // non-login `ssh host cmd` PATH misses user installs), then known install paths.
-async function locateHermes(ssh, remoteHermesPath, sourceRepository = DEFAULT_SOURCE_REPOSITORY) {
+async function locateHermes(
+  ssh,
+  remoteHermesPath,
+  sourceRepository = DEFAULT_SOURCE_REPOSITORY,
+  hostAppName = 'Hermes'
+) {
+  const appName = displayAppName(hostAppName)
   const resolveLauncher = async (candidate: string) => {
     // Return the candidate path directly. The hermes binary or wrapper script
     // is executable and handles argument forwarding (e.g. `exec <python> <script> "$@"`)
@@ -233,9 +243,9 @@ async function locateHermes(ssh, remoteHermesPath, sourceRepository = DEFAULT_SO
     }
 
     const err: any = new Error(
-      `The Hermes path you set is not an executable on the remote host: "${remoteHermesPath}". ` +
+      `The ${appName} path you set is not an executable on the remote host: "${remoteHermesPath}". ` +
         'Check the path (it must be the full path to the `hermes` binary on the remote, e.g. ' +
-        '~/hermes-agent/.venv/bin/hermes), or clear it to auto-detect.'
+        `~/hermes-agent/.venv/bin/hermes), or clear it to auto-detect.`
     )
 
     err.kind = 'hermes-not-found'
@@ -271,9 +281,9 @@ async function locateHermes(ssh, remoteHermesPath, sourceRepository = DEFAULT_SO
   }
 
   const err: any = new Error(
-    'Hermes is not installed on the remote host (could not find a `hermes` executable). ' +
+    `${appName} is not installed on the remote host (could not find a \`hermes\` executable). ` +
       `Install it on the remote with:  ${remoteInstallCommand(sourceRepository)}  ` +
-      '— or set the Hermes path explicitly in the SSH connection settings.'
+      `— or set the ${appName} path explicitly in the SSH connection settings.`
   )
 
   err.kind = 'hermes-not-found'
@@ -313,13 +323,15 @@ async function probeRemotePlatform(ssh, hostAppName = 'Hermes') {
 // The HERMES_HOME the remote dashboard will use (explicit env wins, else
 // ~/.hermes). Recorded in the lockfile so a future reuse can tell it's the same
 // state store; best-effort.
-async function probeRemoteHermesHome(ssh) {
+async function probeRemoteHermesHome(ssh, hostAppName = 'Hermes') {
+  const appName = displayAppName(hostAppName)
+
   try {
     const out = (await ssh.exec('echo "${HERMES_HOME:-$HOME/.hermes}"')).trim().split('\n').pop()
 
     return out || '~/.hermes'
   } catch (cause) {
-    const error: any = new Error('Could not resolve the remote Hermes home.')
+    const error: any = new Error(`Could not resolve the remote ${appName} home.`)
     error.kind = 'transient-transport-error'
     error.cause = cause
     throw error
@@ -372,8 +384,9 @@ else:
  * probe, or transport uncertainty fails closed so a Desktop relaunch cannot
  * start `serve` beside an updater that survived the old app process.
  */
-async function assertRemoteInstallUpdateClear(ssh, hermesHome) {
-  const home = assertSafeRemoteHome(hermesHome)
+async function assertRemoteInstallUpdateClear(ssh, hermesHome, hostAppName = 'Hermes') {
+  const appName = displayAppName(hostAppName)
+  const home = assertSafeRemoteHome(hermesHome, hostAppName)
   let observation = ''
 
   try {
@@ -383,7 +396,7 @@ async function assertRemoteInstallUpdateClear(ssh, hermesHome) {
         .split(/\r?\n/)
         .pop() || ''
   } catch (cause) {
-    const error: any = new Error('Could not prove that the remote Hermes install is clear for SSH startup.')
+    const error: any = new Error(`Could not prove that the remote ${appName} install is clear for SSH startup.`)
     error.kind = 'update-in-progress'
     error.cause = cause
     throw error
@@ -397,23 +410,24 @@ async function assertRemoteInstallUpdateClear(ssh, hermesHome) {
 
   const error: any = new Error(
     live
-      ? `Remote Hermes update process ${live[1]} is still running; SSH startup is paused.`
-      : 'The remote Hermes update marker is unreadable or malformed; refusing SSH startup.'
+      ? `Remote ${appName} update process ${live[1]} is still running; SSH startup is paused.`
+      : `The remote ${appName} update marker is unreadable or malformed; refusing SSH startup.`
   )
 
   error.kind = 'update-in-progress'
   throw error
 }
 
-async function listRemoteHermesProfiles(ssh) {
-  const home = assertSafeRemoteHome(await probeRemoteHermesHome(ssh))
+async function listRemoteHermesProfiles(ssh, hostAppName = 'Hermes') {
+  const appName = displayAppName(hostAppName)
+  const home = assertSafeRemoteHome(await probeRemoteHermesHome(ssh, hostAppName), hostAppName)
   const dir = expandRemotePath(`${home}/profiles`)
   let listing = ''
 
   try {
     listing = await ssh.exec(`if [ -d ${dir} ]; then ls -1 ${dir}; fi`)
   } catch (cause) {
-    const error: any = new Error('Could not list remote Hermes profiles.')
+    const error: any = new Error(`Could not list remote ${appName} profiles.`)
     error.kind = 'transient-transport-error'
     error.cause = cause
     throw error
@@ -422,11 +436,11 @@ async function listRemoteHermesProfiles(ssh) {
   return parseRemoteProfileListing(listing)
 }
 
-function assertSafeRemoteHome(home) {
+function assertSafeRemoteHome(home, hostAppName = 'Hermes') {
   const value = String(home || '').trim()
 
   if (!/^(\/|~\/)[A-Za-z0-9._/+-]+$/.test(value) || value.includes('..')) {
-    const error: any = new Error('Unsafe remote Hermes home.')
+    const error: any = new Error(`Unsafe remote ${displayAppName(hostAppName)} home.`)
     error.kind = 'unsafe-path'
     throw error
   }
@@ -1202,12 +1216,22 @@ async function scrapeReadyPort(ssh, logPath, { timeoutMs = DEFAULT_READY_TIMEOUT
 
 async function spawnRemoteDashboard(
   ssh,
-  { hermesPath, profile, token, ownershipId, hermesHome = '~/.hermes', assertInstallClear = async () => {} }
+  {
+    hermesPath,
+    profile,
+    token,
+    ownershipId,
+    hermesHome = '~/.hermes',
+    assertInstallClear = async () => {},
+    hostAppName = 'Hermes'
+  }
 ) {
+  const appName = displayAppName(hostAppName)
+
   if (!(await remoteSupportsSshOwnership(ssh, hermesPath))) {
     const err: any = new Error(
-      'The remote Hermes install does not support --ssh-session-token-file and --ssh-owner-nonce. ' +
-        'Update Hermes on the remote host to continue using Desktop SSH mode.'
+      `The remote ${appName} install does not support --ssh-session-token-file and --ssh-owner-nonce. ` +
+        `Update ${appName} on the remote host to continue using Desktop SSH mode.`
     )
 
     err.kind = 'update-required'
@@ -1430,9 +1454,9 @@ async function connect(deps) {
   assertBootstrapNotSuperseded(signal)
   const platform = await probeRemotePlatform(ssh, hostAppName)
   log(`remote platform ${platform.os}/${platform.arch}`)
-  const hermesHome = await probeRemoteHermesHome(ssh)
-  await assertRemoteInstallUpdateClear(ssh, hermesHome)
-  const hermesPath = await locateHermes(ssh, remoteHermesPath, deps.sourceRepository)
+  const hermesHome = await probeRemoteHermesHome(ssh, hostAppName)
+  await assertRemoteInstallUpdateClear(ssh, hermesHome, hostAppName)
+  const hermesPath = await locateHermes(ssh, remoteHermesPath, deps.sourceRepository, hostAppName)
   log(`located hermes at ${hermesPath}`)
   const hermesVersion = await probeHermesVersion(ssh, hermesPath)
 
@@ -1497,7 +1521,7 @@ async function connect(deps) {
       }
 
       assertBootstrapNotSuperseded(signal)
-      await assertRemoteInstallUpdateClear(ssh, hermesHome)
+      await assertRemoteInstallUpdateClear(ssh, hermesHome, hostAppName)
       const localPort = await openForward(deps, lock.port)
 
       try {
@@ -1516,7 +1540,7 @@ async function connect(deps) {
         if (reuseClassification === 'authenticated-stale') {
           assertBootstrapNotSuperseded(signal)
           await cancelForwardSafe(deps, localPort, lock.port)
-          await assertRemoteInstallUpdateClear(ssh, hermesHome)
+          await assertRemoteInstallUpdateClear(ssh, hermesHome, hostAppName)
           await cleanupStale(ssh, ownershipId, lock)
         } else if (reuseClassification === 'authenticated-ok') {
           const token = await adoptOwnedServedToken(
@@ -1560,13 +1584,13 @@ async function connect(deps) {
       }
     } else {
       assertBootstrapNotSuperseded(signal)
-      await assertRemoteInstallUpdateClear(ssh, hermesHome)
+      await assertRemoteInstallUpdateClear(ssh, hermesHome, hostAppName)
       await cleanupStale(ssh, ownershipId, lock, pidAlive)
     }
   }
 
   assertBootstrapNotSuperseded(signal)
-  await assertRemoteInstallUpdateClear(ssh, hermesHome)
+  await assertRemoteInstallUpdateClear(ssh, hermesHome, hostAppName)
   const spawnToken = mintToken()
 
   const spawned = await spawnRemoteDashboard(ssh, {
@@ -1575,7 +1599,8 @@ async function connect(deps) {
     token: spawnToken,
     ownershipId,
     hermesHome,
-    assertInstallClear: () => assertRemoteInstallUpdateClear(ssh, hermesHome)
+    assertInstallClear: () => assertRemoteInstallUpdateClear(ssh, hermesHome, hostAppName),
+    hostAppName
   })
 
   if (spawned.existing) {

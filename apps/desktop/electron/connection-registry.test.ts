@@ -1361,6 +1361,22 @@ test('migrate: v1 cloud keeps cloud provenance + org', () => {
   assert.equal(cloud.org, 'nous')
 })
 
+test('migrate: v1 cloud fallback labels use the active app name', () => {
+  const registry = migrateV1ToRegistry(
+    {
+      mode: 'cloud',
+      remote: { url: 'lemon-cloud', authMode: 'oauth', org: 'lemon' }
+    },
+    { appName: 'Lemon AI' }
+  )
+
+  const cloud = registry.connections.find(c => c.kind === 'cloud')
+
+  assert.ok(cloud)
+  assert.equal(cloud.label, 'Lemon AI Cloud')
+  assert.equal(cloud.url, 'lemon-cloud')
+})
+
 test('migrate: per-profile overrides become extra sources, deduped by URL', () => {
   const registry = migrateV1ToRegistry({
     mode: 'remote',

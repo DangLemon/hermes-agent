@@ -225,6 +225,38 @@ test('platform detection surfaces transport failures as themselves, not unsuppor
   )
 })
 
+test('platform detection uses the Lemon host label while preserving the hermes.exe probe contract', async () => {
+  const calls: string[] = []
+
+  await assert.rejects(
+    detectRemotePlatform(
+      sshWith(async command => {
+        calls.push(command)
+
+        if (command.startsWith('uname ')) {
+          throw new Error('not recognized')
+        }
+
+        throw new Error('Lemon AI is not installed on the remote Windows host.')
+      }),
+      '',
+      'Lemon AI'
+    ),
+    (err: any) => {
+      assert.equal(err.kind, 'unsupported-platform')
+      assert.match(err.message, /Lemon AI Desktop SSH/)
+      assert.match(err.message, /Lemon AI is not installed/)
+      assert.doesNotMatch(err.message, /Hermes is not installed/)
+
+      return true
+    }
+  )
+
+  const windowsProbe = calls.find(command => command.includes('-EncodedCommand')) || ''
+  const script = Buffer.from(windowsProbe.split(' ').pop() || '', 'base64').toString('utf16le')
+  assert.match(script, /Get-Command hermes\.exe/)
+})
+
 test('helper command uses the fixed remote Python entry point and quotes path data', () => {
   const command = helperCommand({ python: "C:\\Program Files\\Hermes's\\python.exe" }, 'inspect', [
     'C:\\x y\\hermes.exe'
@@ -297,6 +329,15 @@ test('Windows integrated terminal uses the Lemon host label when requested', () 
   const script = Buffer.from(command.split(' ').pop()!, 'base64').toString('utf16le')
   assert.match(script, /WindowTitle='Lemon AI SSH'/)
   assert.doesNotMatch(script, /Hermes SSH/)
+})
+
+test('Windows update marker errors use the Lemon host label', async () => {
+  const ssh = sshWith(async () => 'LIVE:4242')
+
+  await assert.rejects(
+    () => assertWindowsRemoteInstallUpdateClear(ssh, 'C:\\Users\\alice\\.hermes', 'Lemon AI'),
+    /Remote Lemon AI update process 4242 is still running/
+  )
 })
 
 test('managed update drain preserves a Windows owner when creation time does not match', async () => {

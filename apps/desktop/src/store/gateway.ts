@@ -3,6 +3,7 @@ import { atom } from 'nanostores'
 
 import type { HermesConnection } from '@/global'
 import { HermesGateway, setApiRequestConnection } from '@/hermes'
+import { replaceHermesBrandTerms } from '@/lib/app-brand'
 import { reconnectBackoffDelayMs } from '@/lib/reconnect-backoff'
 import { RECONNECT_ATTEMPT_TIMEOUT_MS, withTimeout } from '@/lib/with-timeout'
 import { markNativeNotifyBaseline } from '@/store/notify-baseline'
@@ -116,6 +117,10 @@ interface Secondary {
 // backend spawn + socket connect with margin, while still letting a leaked
 // lease expire quickly enough for the reaper to reclaim the entry.
 const ACTIVATION_LEASE_MS = 30_000
+
+function gatewayDisplayError(message: string, preserveValues: readonly unknown[] = []): string {
+  return replaceHermesBrandTerms(message, undefined, preserveValues)
+}
 
 // ── HMR-stable module state ─────────────────────────────────────────────────
 // All mutable singletons (live sockets, active-profile routing, the event
@@ -346,7 +351,7 @@ async function requestOnPrimaryGateway<T>(
   const gateway = g.primaryGateway
 
   if (!gateway || !isOpen(gateway)) {
-    throw new Error('Hermes gateway unavailable')
+    throw new Error(gatewayDisplayError('Hermes gateway unavailable'))
   }
 
   return timeoutMs === undefined && signal === undefined
@@ -866,7 +871,7 @@ export async function requestGatewayForProfile<T>(
 
   try {
     if (!route.gateway) {
-      throw new Error(`Hermes gateway unavailable for profile "${route.key}"`)
+      throw new Error(gatewayDisplayError(`Hermes gateway unavailable for profile "${route.key}"`, [route.key]))
     }
 
     const routedParams = route.scopeProfile ? { ...params, profile: route.key } : params
@@ -920,7 +925,7 @@ export async function requestGatewayForAgent<T>(
   }
 
   if (!window.hermesDesktop?.getConnectionFor) {
-    throw new Error('This Desktop build cannot dial registry connections. Update Hermes Desktop.')
+    throw new Error(gatewayDisplayError('This Desktop build cannot dial registry connections. Update Hermes Desktop.'))
   }
 
   const entry = g.secondaries.get(scope) ?? createSecondary(key, connectionId)
@@ -1331,14 +1336,14 @@ export async function openGatewayForAgent(
 
   if (await isAttachedSharedRemote(connectionId, profile)) {
     if (!isOpen(g.primaryGateway)) {
-      throw new Error('Hermes gateway unavailable')
+      throw new Error(gatewayDisplayError('Hermes gateway unavailable'))
     }
 
     return
   }
 
   if (!window.hermesDesktop?.getConnectionFor) {
-    throw new Error('This Desktop build cannot dial registry connections. Update Hermes Desktop.')
+    throw new Error(gatewayDisplayError('This Desktop build cannot dial registry connections. Update Hermes Desktop.'))
   }
 
   const entry = g.secondaries.get(scope) ?? createSecondary(profile, connectionId)
@@ -1388,7 +1393,7 @@ export async function ensureGatewayForAgent(
   }
 
   if (!window.hermesDesktop?.getConnectionFor) {
-    throw new Error('This Desktop build cannot dial registry connections. Update Hermes Desktop.')
+    throw new Error(gatewayDisplayError('This Desktop build cannot dial registry connections. Update Hermes Desktop.'))
   }
 
   const activationEpoch = beginGatewayActivation()
