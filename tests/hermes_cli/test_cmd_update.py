@@ -8,6 +8,7 @@ from unittest.mock import ANY, patch
 import pytest
 
 from hermes_cli.main import cmd_update, PROJECT_ROOT
+from hermes_cli import main as hermes_main
 from hermes_cli import main_web_build
 from hermes_cli import main_install_repair
 from hermes_cli import update_cmd
@@ -89,10 +90,16 @@ def _patch_gateway_discovery():
     conftest live-system guard and turns into a spurious ``sys.exit(1)``.
     Discovery returning nothing makes the phase a clean no-op for every test
     in this module (none of them assert on gateway restarts).
+
+    ``_purge_stale_hermes_modules`` must also be stubbed because the real
+    updater evicts ``hermes_cli.gateway`` after replacing the checkout. A
+    later function-local import would otherwise load a fresh, unpatched
+    module and let this test process inspect or signal unrelated gateways.
     """
     with patch("hermes_cli.gateway.find_gateway_pids", return_value=[]), \
          patch("hermes_cli.gateway.supports_systemd_services", return_value=False), \
-         patch("hermes_cli.gateway.find_profile_gateway_processes", return_value=[]):
+         patch("hermes_cli.gateway.find_profile_gateway_processes", return_value=[]), \
+         patch.object(hermes_main, "_purge_stale_hermes_modules", lambda *a, **kw: None):
         yield
 
 
