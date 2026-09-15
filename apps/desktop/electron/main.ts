@@ -803,6 +803,36 @@ const DESKTOP_RUNTIME_IDENTITY = resolveDesktopRuntimeIdentity({
   internalHarnessRequested: INTERNAL_DESKTOP_BUILD
 })
 
+function runtimeUserText(value: string): string {
+  const identity = DESKTOP_RUNTIME_IDENTITY
+
+  if (identity.appName === 'Hermes' && identity.posixHomeDirName === '.hermes') {
+    return value
+  }
+
+  const backendName = `${identity.appName} backend`
+  const gatewayName = `${identity.appName} gateway`
+  const homePath = `~/${identity.posixHomeDirName}/`
+
+  return value
+    .replaceAll('~/.hermes/', homePath)
+    .replaceAll('hermes backend', backendName)
+    .replaceAll('hermes gateway', gatewayName)
+    .replaceAll('Hermes backend', backendName)
+    .replaceAll('Hermes gateway', gatewayName)
+    .replaceAll('Hermes Desktop', identity.appName)
+    .replaceAll('Hermes Agent', identity.appName)
+    .replace(/\bHermes\b/g, identity.appName)
+}
+
+function runtimeUserTemplate(strings: TemplateStringsArray, ...values: unknown[]): string {
+  return strings.reduce((message, fragment, index) => {
+    const value = index < values.length ? String(values[index]) : ''
+
+    return `${message}${runtimeUserText(fragment)}${value}`
+  }, '')
+}
+
 // HERMES_HOME — the user-facing root for desktop runtime data. The env var
 // name stays HERMES_HOME because the Python backend and CLI use it as a public
 // contract, but internal Lemon AI builds choose Lemon-branded defaults.
@@ -1727,7 +1757,7 @@ let bootProgressState = {
   error: null,
   fakeMode: BOOT_FAKE_MODE,
   isCloudBackendDown: false,
-  message: 'Waiting to start Hermes backend',
+  message: runtimeUserText('Waiting to start Hermes backend'),
   phase: 'idle',
   progress: 0,
   retryable: false,
@@ -2474,20 +2504,22 @@ async function waitForUpdateToFinish() {
       // Update landed but the user must act (reopen/reinstall/sandbox). On
       // machines with no shim browser and no notifier this dialog is the
       // FIRST time the message is visible — it must not be a log line.
-      rememberLog(`[updates] detached update finished with manual action (branch ${result.branch}): ${result.message}`)
+      const userMessage = String(result.message || 'The update needs one more step.')
+      rememberLog(`[updates] detached update finished with manual action (branch ${result.branch}): ${userMessage}`)
       dialog.showMessageBox({
         type: 'warning',
         title: `${DESKTOP_RUNTIME_IDENTITY.appName} update`,
         message: 'The update finished, but needs one more step',
-        detail: result.message
+        detail: userMessage
       })
     } else if (result && result.ok) {
       rememberLog(`[updates] detached update finished OK (branch ${result.branch})`)
     } else if (result) {
-      rememberLog(`[updates] detached update FAILED (exit ${result.exitCode}): ${result.message}`)
+      const userMessage = String(result.message || 'The update failed.')
+      rememberLog(`[updates] detached update FAILED (exit ${result.exitCode}): ${userMessage}`)
       dialog.showErrorBox(
         `${DESKTOP_RUNTIME_IDENTITY.appName} update did not finish`,
-        `${result.message}\n\nDetails: ${path.join(HERMES_HOME, 'logs', DESKTOP_RUNTIME_IDENTITY.updateHandoffLogName)}`
+        `${userMessage}\n\nDetails: ${path.join(HERMES_HOME, 'logs', DESKTOP_RUNTIME_IDENTITY.updateHandoffLogName)}`
       )
     }
   } catch (err) {
@@ -4405,7 +4437,7 @@ async function applyUpdates(opts: { stopSafeBlockers?: boolean } = {}) {
     const handoffOutcome = await observeUpdaterHandoff(child, UPDATE_HANDOFF_DWELL_MS)
 
     if (!handoffOutcome.ok) {
-      const message = `Update failed to start: ${handoffOutcome.message}. ${DESKTOP_RUNTIME_IDENTITY.appName} will keep running — try again, or run \`hermes update\` from a terminal.`
+      const message = runtimeUserTemplate`Update failed to start: ${handoffOutcome.message}. Hermes will keep running — try again, or run \`hermes update\` from a terminal.`
 
       rememberLog(`[updates] hand-off not viable, aborting quit: ${handoffOutcome.message}`)
       emitUpdateProgress({ stage: 'error', message, percent: null })
@@ -4779,7 +4811,7 @@ async function applyUpdatesPosixHandoff(opts: any) {
   const handoffOutcome = await observeUpdaterHandoff(child, UPDATE_HANDOFF_DWELL_MS)
 
   if (!handoffOutcome.ok) {
-    const message = `Update failed to start: ${handoffOutcome.message}. ${DESKTOP_RUNTIME_IDENTITY.appName} will keep running — try again, or run \`hermes update\` from a terminal.`
+    const message = runtimeUserTemplate`Update failed to start: ${handoffOutcome.message}. Hermes will keep running — try again, or run \`hermes update\` from a terminal.`
 
     rememberLog(`[updates] posix hand-off not viable, aborting quit: ${handoffOutcome.message}`)
     emitUpdateProgress({ stage: 'error', message, percent: null })
@@ -5438,9 +5470,10 @@ async function ensureRuntime(backend) {
     }
 
     if (!bootstrapResult.ok) {
+      const bootstrapDetail = String(bootstrapResult.error || 'unknown error')
       const bootstrapError = new Error(
         `${DESKTOP_RUNTIME_IDENTITY.appName} bootstrap failed${bootstrapResult.failedStage ? ` at stage '${bootstrapResult.failedStage}'` : ''}: ` +
-          `${bootstrapResult.error || 'unknown error'}. ` +
+          `${bootstrapDetail}. ` +
           `Check ${DESKTOP_LOG_PATH} for the full transcript.`
       ) as any
 
@@ -5481,10 +5514,10 @@ async function ensureRuntime(backend) {
   // here via an external `hermes` on PATH, this check still helps.
   if (IS_WINDOWS && !findGitBash()) {
     throw new Error(
-      'Git for Windows is required for Hermes on Windows (provides Git Bash, ' +
+      runtimeUserText('Git for Windows is required for Hermes on Windows (provides Git Bash, ') +
         "which the agent's terminal tool uses). Install it from " +
         'https://git-scm.com/download/win or run `winget install -e --id Git.Git`, ' +
-        'then relaunch Hermes.'
+        `then relaunch ${DESKTOP_RUNTIME_IDENTITY.appName}.`
     )
   }
 
@@ -5499,7 +5532,7 @@ async function ensureRuntime(backend) {
     // If we hit this, the user (or a deleted venv) broke the invariant; tell
     // them to re-run the install.
     throw new Error(
-      `Hermes venv missing at ${VENV_ROOT}. Re-run the desktop installer or ` + '`scripts/install.ps1` to rebuild it.'
+      runtimeUserTemplate`Hermes venv missing at ${VENV_ROOT}. Re-run the desktop installer or \`scripts/install.ps1\` to rebuild it.`
     )
   }
 
@@ -5507,7 +5540,7 @@ async function ensureRuntime(backend) {
   backend.label = `Hermes at ${ACTIVE_HERMES_ROOT} (venv: ${VENV_ROOT})`
   updateBootProgress({
     phase: 'runtime.ready',
-    message: 'Hermes runtime is ready',
+    message: runtimeUserText('Hermes runtime is ready'),
     progress: 82,
     running: true,
     error: null
@@ -5556,7 +5589,7 @@ function fetchJson(url, token, options: any = {}) {
         const timeoutMs = resolveTimeoutMs(options.timeoutMs, DEFAULT_FETCH_TIMEOUT_MS)
 
         if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-          reject(new Error(`Unsupported Hermes backend URL protocol: ${parsed.protocol}`))
+          reject(new Error(runtimeUserTemplate`Unsupported Hermes backend URL protocol: ${parsed.protocol}`))
 
           return
         }
@@ -5628,7 +5661,7 @@ function fetchJson(url, token, options: any = {}) {
 
         req.on('error', reject)
         req.setTimeout(timeoutMs, () => {
-          req.destroy(new Error(`Timed out connecting to Hermes backend after ${timeoutMs}ms`))
+          req.destroy(new Error(runtimeUserTemplate`Timed out connecting to Hermes backend after ${timeoutMs}ms`))
         })
 
         // From here the request goes on the wire: a later transport error can no
@@ -5664,7 +5697,7 @@ function downloadViaTokenToFile(url, token, ctx, options: any = {}) {
     }
 
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      reject(new Error(`Unsupported Hermes backend URL protocol: ${parsed.protocol}`))
+      reject(new Error(runtimeUserTemplate`Unsupported Hermes backend URL protocol: ${parsed.protocol}`))
 
       return
     }
@@ -5699,7 +5732,7 @@ function downloadViaTokenToFile(url, token, ctx, options: any = {}) {
 
     req.on('error', reject)
     req.setTimeout(timeoutMs, () => {
-      req.destroy(new Error(`Timed out connecting to Hermes backend after ${timeoutMs}ms`))
+      req.destroy(new Error(runtimeUserTemplate`Timed out connecting to Hermes backend after ${timeoutMs}ms`))
     })
     req.end()
   })
@@ -5730,7 +5763,7 @@ function fetchPublicJson(url, options: any = {}) {
         const timeoutMs = resolveTimeoutMs(options.timeoutMs, DEFAULT_FETCH_TIMEOUT_MS)
 
         if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-          reject(new Error(`Unsupported Hermes backend URL protocol: ${parsed.protocol}`))
+          reject(new Error(runtimeUserTemplate`Unsupported Hermes backend URL protocol: ${parsed.protocol}`))
 
           return
         }
@@ -5790,7 +5823,7 @@ function fetchPublicJson(url, options: any = {}) {
 
         req.on('error', reject)
         req.setTimeout(timeoutMs, () => {
-          req.destroy(new Error(`Timed out connecting to Hermes backend after ${timeoutMs}ms`))
+          req.destroy(new Error(runtimeUserTemplate`Timed out connecting to Hermes backend after ${timeoutMs}ms`))
         })
 
         // Past this point the request is on the wire — see fetchJson.
@@ -7872,7 +7905,9 @@ function openOauthLoginWindow(baseUrl, { silent = false } = {}) {
       win = new BrowserWindow({
         width: 520,
         height: 720,
-        title: silent ? 'Connecting to Hermes Cloud agent…' : 'Sign in to Hermes gateway',
+        title: silent
+          ? `Connecting to ${DESKTOP_RUNTIME_IDENTITY.appName} Cloud agent…`
+          : `Sign in to ${DESKTOP_RUNTIME_IDENTITY.appName} gateway`,
         autoHideMenuBar: true,
         // Silent cascade: start HIDDEN. The auto-SSO 302 chain completes in
         // well under a second, so the window normally never needs to show. We
@@ -7967,7 +8002,7 @@ function fetchJsonViaOauthSession(url, options: any = {}) {
     }
 
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      reject(new Error(`Unsupported Hermes backend URL protocol: ${parsed.protocol}`))
+      reject(new Error(runtimeUserTemplate`Unsupported Hermes backend URL protocol: ${parsed.protocol}`))
 
       return
     }
@@ -8000,7 +8035,7 @@ function fetchJsonViaOauthSession(url, options: any = {}) {
         // already finished
       }
 
-      reject(new Error(`Timed out connecting to Hermes backend after ${timeoutMs}ms`))
+      reject(new Error(runtimeUserTemplate`Timed out connecting to Hermes backend after ${timeoutMs}ms`))
     }, timeoutMs)
 
     request.on('response', res => {
@@ -8218,7 +8253,7 @@ function downloadViaOauthSessionToFile(url, ctx, options: any = {}) {
     }
 
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      reject(new Error(`Unsupported Hermes backend URL protocol: ${parsed.protocol}`))
+      reject(new Error(runtimeUserTemplate`Unsupported Hermes backend URL protocol: ${parsed.protocol}`))
 
       return
     }
@@ -8248,7 +8283,7 @@ function downloadViaOauthSessionToFile(url, ctx, options: any = {}) {
         // already finished
       }
 
-      reject(new Error(`Timed out connecting to Hermes backend after ${timeoutMs}ms`))
+      reject(new Error(runtimeUserTemplate`Timed out connecting to Hermes backend after ${timeoutMs}ms`))
     }, timeoutMs)
 
     request.on('response', res => {
@@ -8750,7 +8785,7 @@ function renewPortalAccessSilently() {
           width: 520,
           height: 720,
           show: false,
-          title: 'Renewing Hermes Cloud session…',
+          title: `Renewing ${DESKTOP_RUNTIME_IDENTITY.appName} Cloud session…`,
           autoHideMenuBar: true,
           webPreferences: {
             contextIsolation: true,
@@ -8797,7 +8832,7 @@ function openPortalLoginWindow() {
 
   return new Promise((resolve, reject) => {
     if (!app.isReady()) {
-      reject(new Error('Desktop is not ready to start a Hermes Cloud sign-in.'))
+      reject(new Error(`Desktop is not ready to start a ${DESKTOP_RUNTIME_IDENTITY.appName} Cloud sign-in.`))
 
       return
     }
@@ -8855,7 +8890,7 @@ function openPortalLoginWindow() {
       win = new BrowserWindow({
         width: 520,
         height: 720,
-        title: 'Sign in to Hermes Cloud',
+        title: `Sign in to ${DESKTOP_RUNTIME_IDENTITY.appName} Cloud`,
         autoHideMenuBar: true,
         webPreferences: {
           contextIsolation: true,
@@ -8908,7 +8943,7 @@ async function discoverCloudAgents(org?: string) {
 
   if (!(await hasLivePortalSession())) {
     const err = new Error(
-      'You are not signed in to Hermes Cloud. Open Settings → Gateway, choose Hermes Cloud, and sign in.'
+      `You are not signed in to ${DESKTOP_RUNTIME_IDENTITY.appName} Cloud. Open Settings → Gateway, choose ${DESKTOP_RUNTIME_IDENTITY.appName} Cloud, and sign in.`
     ) as any
 
     err.needsCloudLogin = true
@@ -8955,7 +8990,7 @@ async function discoverCloudAgents(org?: string) {
       // recover it) — surface it as a re-login, not a generic failure.
       if (error && error.statusCode === 401) {
         const err = new Error(
-          'Your Hermes Cloud session has expired. Open Settings → Gateway and sign in again.'
+          `Your ${DESKTOP_RUNTIME_IDENTITY.appName} Cloud session has expired. Open Settings → Gateway and sign in again.`
         ) as any
 
         err.needsCloudLogin = true
@@ -9063,7 +9098,9 @@ async function cloudAgentSilentSignIn(dashboardUrl) {
   // interactive prompt rather than a silent cascade. Discovery already gates on
   // this, but a selection can arrive after the session lapsed.
   if (!(await hasLivePortalSession())) {
-    const err = new Error('Your Hermes Cloud session has expired. Sign in to Hermes Cloud again.') as any
+    const err = new Error(
+      `Your ${DESKTOP_RUNTIME_IDENTITY.appName} Cloud session has expired. Sign in to ${DESKTOP_RUNTIME_IDENTITY.appName} Cloud again.`
+    ) as any
     err.needsCloudLogin = true
     throw err
   }
@@ -13089,7 +13126,7 @@ async function startHermes() {
   // E2E: simulate a boot failure without breaking the real backend. The boot
   // progresses a few steps, then fails with the given error message.
   if (BOOT_FAKE_ERROR) {
-    await advanceBootProgress('backend.resolve', 'Resolving Hermes backend', 8)
+    await advanceBootProgress('backend.resolve', runtimeUserText('Resolving Hermes backend'), 8)
     const error = new Error(BOOT_FAKE_ERROR) as any
     error.isBootstrapFailure = true
     bootstrapFailure = error
@@ -13129,21 +13166,25 @@ async function startHermes() {
       // mint). If a newer attempt started meanwhile (e.g. the user switched
       // remotes and Apply invalidated this attempt), bail before probing.
       if (!backendConnectionState.isCurrentAttempt(connectionAttempt)) {
-        throw new Error('Hermes backend start was superseded by a newer connection attempt.')
+        throw new Error(runtimeUserText('Hermes backend start was superseded by a newer connection attempt.'))
       }
 
-      await advanceBootProgress('backend.remote', `Connecting to remote Hermes backend at ${remote.baseUrl}`, 24)
+      await advanceBootProgress(
+        'backend.remote',
+        runtimeUserTemplate`Connecting to remote Hermes backend at ${remote.baseUrl}`,
+        24
+      )
       await waitForHermes(remote.baseUrl, remote.token, undefined, remote.authMode, remote.headers)
 
       // Second async boundary: the health probe itself can outlive the
       // attempt. A late success here must not publish a stale descriptor.
       if (!backendConnectionState.isCurrentAttempt(connectionAttempt)) {
-        throw new Error('Hermes backend start was superseded by a newer connection attempt.')
+        throw new Error(runtimeUserText('Hermes backend start was superseded by a newer connection attempt.'))
       }
 
       updateBootProgress({
         phase: 'backend.ready',
-        message: 'Remote Hermes backend is ready',
+        message: runtimeUserText('Remote Hermes backend is ready'),
         progress: 94,
         running: true,
         error: null
@@ -13152,7 +13193,7 @@ async function startHermes() {
       return createPrimaryRemoteConnection(remote, hermesLog.slice(-80), getWindowState())
     }
 
-    await advanceBootProgress('backend.resolve', 'Resolving Hermes backend', 8)
+    await advanceBootProgress('backend.resolve', runtimeUserText('Resolving Hermes backend'), 8)
     // Resolve for the desktop's primary profile so a per-profile remote
     // override on the active profile is honored (falls back to env / global).
 
@@ -13192,7 +13233,7 @@ async function startHermes() {
       connectRemote,
       ensureLocalRuntime: ensureRuntime,
       prepareLocalBackend: async () => {
-        await advanceBootProgress('backend.runtime', 'Resolving Hermes runtime', 28)
+        await advanceBootProgress('backend.runtime', runtimeUserText('Resolving Hermes runtime'), 28)
 
         return resolveHermesBackend(backendArgs)
       },
@@ -13231,8 +13272,8 @@ async function startHermes() {
     const webDist = resolveWebDist()
     const readyFile = backend.readyFile ? makeDashboardReadyFile() : null
 
-    await advanceBootProgress('backend.spawn', `Starting Hermes backend via ${backend.label}`, 84)
-    rememberLog(`Starting Hermes backend via ${backend.label}`)
+    await advanceBootProgress('backend.spawn', runtimeUserTemplate`Starting Hermes backend via ${backend.label}`, 84)
+    rememberLog(runtimeUserTemplate`Starting Hermes backend via ${backend.label}`)
 
     const profile = launchScope.primaryProfile
     const parentStartMarker = await desktopParentStartMarker()
@@ -13297,7 +13338,7 @@ async function startHermes() {
       stopBackendChild(hermesProcess)
       await waitForBackendExit(hermesProcess)
       releaseBackendChild(hermesProcess)
-      throw new Error('Hermes backend start was superseded by a newer connection attempt.')
+      throw new Error(runtimeUserText('Hermes backend start was superseded by a newer connection attempt.'))
     }
 
     hermesProcess.stdout.on('data', rememberLog)
@@ -13314,16 +13355,18 @@ async function startHermes() {
 
       if (!backendConnectionState.clearForCurrentProcess(processOwner)) {
         rememberLog(`Ignoring stale Hermes backend error: ${error.message}`)
-        rejectBackendStart?.(new Error('Hermes backend start was superseded by a newer connection attempt.'))
+        rejectBackendStart?.(
+          new Error(runtimeUserText('Hermes backend start was superseded by a newer connection attempt.'))
+        )
 
         return
       }
 
-      rememberLog(`Hermes backend failed to start: ${error.message}`)
+      rememberLog(runtimeUserTemplate`Hermes backend failed to start: ${error.message}`)
       updateBootProgress(
         {
           error: error.message,
-          message: `Hermes backend failed to start: ${error.message}`,
+          message: runtimeUserTemplate`Hermes backend failed to start: ${error.message}`,
           phase: 'backend.error',
           running: false
         },
@@ -13339,17 +13382,19 @@ async function startHermes() {
         rememberLog(`Ignoring stale Hermes backend exit (${signal || code})`)
 
         if (!backendReady) {
-          rejectBackendStart?.(new Error('Hermes backend start was superseded by a newer connection attempt.'))
+          rejectBackendStart?.(
+            new Error(runtimeUserText('Hermes backend start was superseded by a newer connection attempt.'))
+          )
         }
 
         return
       }
 
-      rememberLog(`Hermes backend exited (${signal || code})`)
+      rememberLog(runtimeUserTemplate`Hermes backend exited (${signal || code})`)
       sendBackendExit({ code, signal })
 
       if (!backendReady) {
-        const message = `Hermes backend exited before it became ready (${signal || code}).${primaryOutputTail.describe()}`
+        const message = runtimeUserTemplate`Hermes backend exited before it became ready (${signal || code}).${primaryOutputTail.describe()}`
         updateBootProgress(
           {
             error: message,
@@ -13361,13 +13406,13 @@ async function startHermes() {
         )
         rejectBackendStart?.(
           new Error(
-            `Hermes backend exited before it became ready (${signal || code}). Log: ${DESKTOP_LOG_PATH}\n${recentHermesLog()}`
+            runtimeUserTemplate`Hermes backend exited before it became ready (${signal || code}). Log: ${DESKTOP_LOG_PATH}\n${recentHermesLog()}`
           )
         )
       }
     })
 
-    await advanceBootProgress('backend.port', 'Waiting for Hermes backend to launch', 86)
+    await advanceBootProgress('backend.port', runtimeUserText('Waiting for Hermes backend to launch'), 86)
 
     // Discover the ephemeral port the child bound to
     const port = await Promise.race([portAnnouncement, backendStartFailed])
@@ -13377,7 +13422,7 @@ async function startHermes() {
     }
 
     const baseUrl = `http://127.0.0.1:${port}`
-    await advanceBootProgress('backend.wait', 'Waiting for Hermes backend to become ready', 90)
+    await advanceBootProgress('backend.wait', runtimeUserText('Waiting for Hermes backend to become ready'), 90)
     await Promise.race([waitForHermes(baseUrl, token), backendStartFailed])
     backendReady = true
     backendStartFailure = null
@@ -13393,13 +13438,13 @@ async function startHermes() {
 
     if (!wsProbe.ok) {
       throw new Error(
-        `Local Hermes backend is HTTP-reachable but the WebSocket (/api/ws) rejected the session token: ${wsProbe.reason}`
+        runtimeUserTemplate`Local Hermes backend is HTTP-reachable but the WebSocket (/api/ws) rejected the session token: ${wsProbe.reason}`
       )
     }
 
     updateBootProgress({
       phase: 'backend.ready',
-      message: 'Hermes backend is ready. Finalizing desktop startup',
+      message: runtimeUserText('Hermes backend is ready. Finalizing desktop startup'),
       progress: 94,
       running: true,
       error: null
@@ -17958,7 +18003,7 @@ async function runDesktopUninstall(mode) {
     return {
       ok: false,
       error: 'agent-missing',
-      message: `Can't run the uninstaller: no Hermes agent venv at ${VENV_ROOT}.`
+      message: runtimeUserTemplate`Can't run the uninstaller: no Hermes agent venv at ${VENV_ROOT}.`
     }
   }
 
