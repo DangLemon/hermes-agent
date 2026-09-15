@@ -141,14 +141,14 @@ Assert-True ($publicSoul.StartsWith('You are Hermes Agent, built by Nous Researc
 $desktopRoot = 'C:\fixture\apps\desktop'
 $internalCandidates = @(Get-DesktopExecutableCandidates -DesktopDir $desktopRoot -InternalBuild $true)
 Assert-Equal 2 $internalCandidates.Count 'internal build probes both architecture output directories'
-Assert-True (($internalCandidates | Where-Object { [System.IO.Path]::GetFileName($_) -ne 'Lemon AI.exe' }).Count -eq 0) `
+Assert-True (@($internalCandidates | Where-Object { [System.IO.Path]::GetFileName($_) -ne 'Lemon AI.exe' }).Count -eq 0) `
     'internal build accepts only Lemon AI.exe'
-Assert-True (($internalCandidates | Where-Object { $_ -like '*Hermes.exe' }).Count -eq 0) `
+Assert-True (@($internalCandidates | Where-Object { $_ -like '*Hermes.exe' }).Count -eq 0) `
     'internal build has no Hermes.exe success fallback'
 
 $publicCandidates = @(Get-DesktopExecutableCandidates -DesktopDir $desktopRoot -InternalBuild $false)
 Assert-Equal 2 $publicCandidates.Count 'ordinary build probes both architecture output directories'
-Assert-True (($publicCandidates | Where-Object { [System.IO.Path]::GetFileName($_) -ne 'Hermes.exe' }).Count -eq 0) `
+Assert-True (@($publicCandidates | Where-Object { [System.IO.Path]::GetFileName($_) -ne 'Hermes.exe' }).Count -eq 0) `
     'ordinary build keeps Hermes.exe'
 
 $lemonExe = Join-Path (Join-Path $desktopRoot 'win-unpacked') 'Lemon AI.exe'
