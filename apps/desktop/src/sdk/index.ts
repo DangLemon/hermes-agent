@@ -43,6 +43,7 @@ import { onGatewayEvent } from '@/contrib/events'
 import { registry } from '@/contrib/registry'
 import type { WorkspaceMode } from '@/contrib/types'
 import { deleteProfile, getLogs, getStatus, hermesApi, type HermesGateway } from '@/hermes'
+import { replaceHermesBrandTerms } from '@/lib/app-brand'
 import {
   $gateway,
   activeGatewayConnectionId,
@@ -104,6 +105,7 @@ import { planPluginOpenSession } from './plugin-open-session-plan'
 // -- state: readonly views over the app's live atoms -------------------------
 
 const readonlyAtom = <T>(atomLike: ReadableAtom<T>): ReadableAtom<T> => atomLike
+const brandHostText = (value: string): string => replaceHermesBrandTerms(value)
 
 /**
  * Turn flag for the FOCUSED chat — same semantics as the statusbar's busy
@@ -768,7 +770,7 @@ export const host = {
     const bridge = window.hermesDesktop?.connections
 
     if (!bridge) {
-      throw new Error('This Desktop build has no connection registry. Update Hermes Desktop.')
+      throw new Error(brandHostText('This Desktop build has no connection registry. Update Hermes Desktop.'))
     }
 
     const registryPayload = await bridge.list()
@@ -785,7 +787,7 @@ export const host = {
     const roster = window.hermesDesktop?.getAgentRoster
 
     if (!roster) {
-      throw new Error('This Desktop build cannot enumerate multi-source agents. Update Hermes Desktop.')
+      throw new Error(brandHostText('This Desktop build cannot enumerate multi-source agents. Update Hermes Desktop.'))
     }
 
     return roster()
@@ -1189,7 +1191,7 @@ export const host = {
       const openTab = $newSessionTabAction.get()
 
       if (!openTab) {
-        notify({ kind: 'error', message: 'Update Hermes Desktop to open another Bot chat.' })
+        notify({ kind: 'error', message: brandHostText('Update Hermes Desktop to open another Bot chat.') })
 
         return
       }
@@ -1253,7 +1255,7 @@ export const host = {
     const getProfileRoutes = desktop?.getProfileRoutes
 
     if (!getProfileRoutes) {
-      throw new Error('Hermes Desktop connection routing unavailable')
+      throw new Error(brandHostText('Hermes Desktop connection routing unavailable'))
     }
 
     let profiles = $profiles.get()

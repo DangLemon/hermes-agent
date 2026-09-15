@@ -9,21 +9,36 @@ describe('uninstallCopyForBrand', () => {
     const copy = uninstallCopyForBrand(upstreamAppBrand)
 
     expect(copy.heading).toBe('Uninstall Hermes')
-    expect(copy.options[0].description).toBe('Remove this desktop app. The Hermes agent, your config, and chats all stay.')
+    expect(copy.options[0].description).toBe(
+      'Remove this desktop app. The Hermes agent, your config, and chats all stay.'
+    )
   })
 
   it('replaces Hermes user-visible nouns for Lemon AI', () => {
     const copy = uninstallCopyForBrand(lemonAppBrand)
 
     const combined = [
+      copy.cancelLabel,
+      copy.confirmButtonLabel,
+      copy.confirmDescription(copy.options[0].consequence),
+      copy.confirmTitle,
+      copy.dangerTitle,
       copy.heading,
       copy.intro,
+      copy.loadingLabel,
+      copy.runningLabel,
+      copy.startError,
       ...copy.options.flatMap(option => [option.title, option.description, option.consequence])
     ].join('\n')
 
-    expect(copy.heading).toBe('Uninstall Lemon AI')
-    expect(combined).toContain('the Lemon AI agent')
+    expect(copy.heading).toBe('Gỡ Lemon AI')
+    expect(copy.dangerTitle).toBe('Khu vực nhạy cảm')
+    expect(copy.cancelLabel).toBe('Hủy')
+    expect(combined).toContain('agent Lemon AI')
     expect(combined).not.toContain('Hermes')
+    expect(combined).not.toContain('Uninstall')
+    expect(combined).not.toContain('Danger zone')
+    expect(combined).not.toContain('Checking')
   })
 })
 

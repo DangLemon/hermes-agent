@@ -403,12 +403,7 @@ import {
 } from './update-count'
 import { waitForUpdateClearance } from './update-gate'
 import { readLiveUpdateMarker, updateHandoffConflict, writeUpdateMarker } from './update-marker'
-import {
-  githubRepositoryHttpsUrl,
-  isNonDefaultRepository,
-  isSshRemoteForRepository,
-  remoteMatchesRepository
-} from './update-remote'
+import { githubRepositoryHttpsUrl, isSshRemoteForRepository, planUpdateOriginRepository } from './update-remote'
 import {
   collectRelaunchArgs,
   observeUpdaterHandoff,
@@ -969,11 +964,7 @@ function resolveActiveHermesRoot(hermesHome) {
     readRegistry: readWindowsUserEnvVar
   })
 
-  return resolveDesktopRuntimeRoot(
-    hermesHome,
-    DESKTOP_RUNTIME_IDENTITY,
-    runtimeDirNameOverride
-  )
+  return resolveDesktopRuntimeRoot(hermesHome, DESKTOP_RUNTIME_IDENTITY, runtimeDirNameOverride)
 }
 
 const ACTIVE_HERMES_ROOT = resolveActiveHermesRoot(HERMES_HOME)
@@ -1062,9 +1053,7 @@ const BOOT_FAKE_STEP_MS = (() => {
 
 const APP_NAME = process.env['HERMES_DESKTOP_APP_NAME'] || DESKTOP_RUNTIME_IDENTITY.appName
 
-const APP_COPYRIGHT = INTERNAL_DESKTOP_BUILD
-  ? 'Copyright © 2026 Lemon Digital'
-  : 'Copyright © 2026 Nous Research'
+const APP_COPYRIGHT = INTERNAL_DESKTOP_BUILD ? 'Copyright © 2026 Lemon Digital' : 'Copyright © 2026 Nous Research'
 
 const HUD_WINDOW_TITLE = `${APP_NAME} HUD`
 const TITLEBAR_HEIGHT = 34
@@ -3212,36 +3201,33 @@ function resolveDesktopUpdateRepository() {
 
 async function ensureUpdateOriginRepository(updateRoot, sourceRepository) {
   const repository = sourceRepository || resolveDesktopUpdateRepository()
-
-  if (!repository || !isNonDefaultRepository(repository) || !directoryExists(path.join(updateRoot, '.git'))) {
-    return { ok: true, originUrl: await getOriginUrl(updateRoot), repository }
-  }
-
-  const expectedUrl = githubRepositoryHttpsUrl(repository)
   const originUrl = await getOriginUrl(updateRoot)
 
-  if (remoteMatchesRepository(originUrl, repository)) {
-    return { ok: true, originUrl, repository }
+  const decision = planUpdateOriginRepository({
+    originUrl,
+    sourceRepository: repository,
+    updateRootHasGit: directoryExists(path.join(updateRoot, '.git'))
+  })
+
+  if (decision.action === 'none') {
+    return { ok: true, originUrl: decision.originUrl, repository: decision.repository }
   }
 
-  const args = originUrl ? ['remote', 'set-url', 'origin', expectedUrl] : ['remote', 'add', 'origin', expectedUrl]
-  const result = await runGit(args, { cwd: updateRoot })
+  const result = await runGit(decision.args, { cwd: updateRoot })
 
   if (result.code !== 0) {
-    const action = originUrl ? 'set-url' : 'add'
-
     return {
       ok: false,
       originUrl,
-      repository,
-      message: firstLine(result.stderr) || `git remote ${action} origin failed.`
+      repository: decision.repository,
+      message: firstLine(result.stderr) || `git remote ${decision.action} origin failed.`
     }
   }
 
   const previous = originUrl || '<missing>'
-  rememberLog(`[updates] normalized update origin from ${previous} to ${expectedUrl}`)
+  rememberLog(`[updates] normalized update origin from ${previous} to ${decision.expectedUrl}`)
 
-  return { ok: true, originUrl: expectedUrl, repository }
+  return { ok: true, originUrl: decision.expectedUrl, repository: decision.repository }
 }
 
 function emitUpdateProgress(payload) {
@@ -3265,7 +3251,9 @@ async function resolveHealedBranch(updateRoot, branch, sourceRepository = resolv
   }
 
   const originUrl = await getOriginUrl(updateRoot)
-  const remote = isSshRemoteForRepository(originUrl, sourceRepository) ? githubRepositoryHttpsUrl(sourceRepository) : 'origin'
+  const remote = isSshRemoteForRepository(originUrl, sourceRepository)
+    ? githubRepositoryHttpsUrl(sourceRepository)
+    : 'origin'
   const probe = await runGit(['ls-remote', '--exit-code', '--heads', remote, branch], { cwd: updateRoot })
 
   if (probe.code !== 2) {
@@ -3349,7 +3337,12 @@ async function checkUpdates() {
 
     const sshBehind = tipsEqual
       ? 0
-      : await fetchCompareBehindCount({ currentSha, originUrl: repositoryUrl, sourceRepository: updateRepository, targetSha })
+      : await fetchCompareBehindCount({
+          currentSha,
+          originUrl: repositoryUrl,
+          sourceRepository: updateRepository,
+          targetSha
+        })
 
     const upToDate = tipsEqual || sshBehind === 0
 
@@ -4151,10 +4144,26 @@ async function applyUpdates(opts: { stopSafeBlockers?: boolean } = {}) {
         // button's contract: append --branch <current> for non-main
         // checkouts, keep it bare for main so the card stays clean.
         let command = 'hermes update'
+        const updateRepository = resolveDesktopUpdateRepository()
+
+        let originReady
 
         try {
-          const updateRepository = resolveDesktopUpdateRepository()
-          await ensureUpdateOriginRepository(updateRoot, updateRepository)
+          originReady = await ensureUpdateOriginRepository(updateRoot, updateRepository)
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          emitUpdateProgress({ stage: 'error', message, percent: null })
+
+          return { ok: false, error: 'origin-config-failed', message }
+        }
+
+        if (!originReady.ok) {
+          emitUpdateProgress({ stage: 'error', message: originReady.message, percent: null })
+
+          return { ok: false, error: 'origin-config-failed', message: originReady.message }
+        }
+
+        try {
           const head = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: updateRoot })
           const current = (head.stdout || '').trim()
 
@@ -16244,11 +16253,15 @@ ipcMain.handle('hermes:connection-config:oauth-login', async (_event, rawUrl) =>
 
   if (strategy === 'native') {
     try {
-      const tokens = await runNativeLogin(baseUrl, {
-        openExternal: url => shell.openExternal(url),
-        postJson: (url, body, opts) => postJsonNoAuth(url, body, opts),
-        rememberLog
-      })
+      const tokens = await runNativeLogin(
+        baseUrl,
+        {
+          openExternal: url => shell.openExternal(url),
+          postJson: (url, body, opts) => postJsonNoAuth(url, body, opts),
+          rememberLog
+        },
+        { appName: DESKTOP_RUNTIME_IDENTITY.appName }
+      )
 
       _storeNativeTokens(baseUrl, tokens)
       // Confirmed sign-in — release the reauth latch so the next
@@ -17768,7 +17781,7 @@ registerGitIpc({ resolveGitBinary, resolveGhBinary })
 
 // Client-side loopback callback for MCP OAuth against remote backends — see
 // mcp-oauth-callback-ipc.ts.
-registerMcpOauthCallbackIpc()
+registerMcpOauthCallbackIpc({ appName: DESKTOP_RUNTIME_IDENTITY.appName })
 
 // Embedded terminal PTY host (hermes:terminal:*) — see terminal-ipc.ts.
 const terminalIpc = registerTerminalIpc({
@@ -18397,7 +18410,12 @@ function heldQuitForActiveWork(event: Electron.Event): boolean {
     return false
   }
 
-  const prompt = quitPromptFor(mergeActiveWork(activeWorkByWebContents.values()), isQuittingForHandoff)
+  const prompt = quitPromptFor(
+    mergeActiveWork(activeWorkByWebContents.values()),
+    isQuittingForHandoff,
+    DESKTOP_RUNTIME_IDENTITY.appName
+  )
+
   const parent = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
 
   if (!prompt || !parent || parent.isDestroyed()) {

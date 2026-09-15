@@ -50,6 +50,14 @@ describe('desktop git facade', () => {
     expect(desktopGit()).toBeUndefined()
   })
 
+  it('brands missing bridge errors for internal builds without changing remote git routing', async () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+    vi.stubGlobal('window', {})
+    $connection.set({ mode: 'remote' } as never)
+
+    await expect(desktopGit()?.repoStatus('/work')).rejects.toThrow('Lemon AI bridge is unavailable')
+  })
+
   it('uses Electron git locally', async () => {
     $connection.set({ mode: 'local' } as never)
 

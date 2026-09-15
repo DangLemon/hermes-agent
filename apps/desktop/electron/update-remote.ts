@@ -108,6 +108,28 @@ function isNonDefaultRepository(sourceRepository) {
   return githubRepositoryCanonical(sourceRepository) !== OFFICIAL_REPO_CANONICAL
 }
 
+function planUpdateOriginRepository({ originUrl = '', sourceRepository, updateRootHasGit = true }) {
+  const repository = validateGitHubRepositoryIdentity(sourceRepository)
+
+  if (!isNonDefaultRepository(repository) || !updateRootHasGit) {
+    return { action: 'none', originUrl, repository }
+  }
+
+  if (remoteMatchesRepository(originUrl, repository)) {
+    return { action: 'none', originUrl, repository }
+  }
+
+  const expectedUrl = githubRepositoryHttpsUrl(repository)
+
+  return {
+    action: originUrl ? 'set-url' : 'add',
+    args: originUrl ? ['remote', 'set-url', 'origin', expectedUrl] : ['remote', 'add', 'origin', expectedUrl],
+    expectedUrl,
+    originUrl,
+    repository
+  }
+}
+
 export {
   canonicalGitHubRemote,
   githubRepositoryCanonical,
@@ -118,6 +140,7 @@ export {
   isSshRemoteForRepository,
   OFFICIAL_REPO_CANONICAL,
   OFFICIAL_REPO_HTTPS_URL,
+  planUpdateOriginRepository,
   remoteMatchesRepository,
   validateGitHubRepositoryIdentity
 }

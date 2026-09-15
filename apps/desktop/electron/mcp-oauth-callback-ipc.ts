@@ -31,12 +31,31 @@ import { ipcMain } from 'electron'
 const DEFAULT_WAIT_TIMEOUT_MS = 5 * 60 * 1000
 const MAX_PENDING_LISTENERS = 8
 
-const DONE_HTML =
-  '<!doctype html><meta charset="utf-8"><title>Authorization received</title>' +
-  '<body style="font:15px system-ui;margin:3rem;text-align:center">' +
-  '<h2>&#10003; Authorization received</h2>' +
-  '<p>You can close this window and return to Hermes.</p>' +
-  '<script>setTimeout(()=>window.close(),800)</script>'
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, character => {
+    const entities: Record<string, string> = {
+      '&': '&amp;',
+      "'": '&#39;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;'
+    }
+
+    return entities[character] || character
+  })
+}
+
+export function mcpOauthDoneHtml(appName = 'Hermes'): string {
+  const safeAppName = escapeHtml(appName.trim() || 'Hermes')
+
+  return (
+    '<!doctype html><meta charset="utf-8"><title>Authorization received</title>' +
+    '<body style="font:15px system-ui;margin:3rem;text-align:center">' +
+    '<h2>&#10003; Authorization received</h2>' +
+    `<p>You can close this window and return to ${safeAppName}.</p>` +
+    '<script>setTimeout(()=>window.close(),800)</script>'
+  )
+}
 
 interface CallbackResult {
   code: null | string
@@ -149,7 +168,9 @@ function dispose(id: string) {
   pending.delete(id)
 }
 
-export function registerMcpOauthCallbackIpc() {
+export function registerMcpOauthCallbackIpc({ appName = 'Hermes' }: { appName?: string } = {}) {
+  const doneHtml = mcpOauthDoneHtml(appName)
+
   // Bind a one-shot loopback listener; resolves { id, redirectUri }.
   ipcMain.handle('hermes:mcp-oauth:listen', async (_event, options?: ListenOptions) => {
     if (pending.size >= MAX_PENDING_LISTENERS) {
@@ -178,7 +199,7 @@ export function registerMcpOauthCallbackIpc() {
 
       if (parsed.pathname !== parsedOptions.path) {
         res.writeHead(parsedOptions.redirectUri ? 404 : 200, { 'content-type': 'text/html; charset=utf-8' })
-        res.end(parsedOptions.redirectUri ? '<h1>OAuth callback not found</h1>' : DONE_HTML)
+        res.end(parsedOptions.redirectUri ? '<h1>OAuth callback not found</h1>' : doneHtml)
 
         return
       }
@@ -186,7 +207,7 @@ export function registerMcpOauthCallbackIpc() {
       // Ignore right-path noise — wait for the ?code= / ?error= hit.
       if (!parsed.searchParams.has('code') && !parsed.searchParams.has('error')) {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-        res.end(DONE_HTML)
+        res.end(doneHtml)
 
         return
       }
@@ -203,7 +224,7 @@ export function registerMcpOauthCallbackIpc() {
       }
 
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-      res.end(DONE_HTML)
+      res.end(doneHtml)
       settle(id, { code, error, state })
     })
 

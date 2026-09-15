@@ -16,7 +16,7 @@ import { Loader } from '@/components/ui/loader'
 import { Progress } from '@/components/ui/progress'
 import type { DesktopUpdateBlocker, DesktopUpdateCommit, DesktopUpdateStage, DesktopUpdateStatus } from '@/global'
 import { useI18n } from '@/i18n'
-import { appBrandForEnv } from '@/lib/app-brand'
+import { appBrandForEnv, replaceHermesBrandTerms } from '@/lib/app-brand'
 import { buildCommitChangelog, type CommitGroup } from '@/lib/commit-changelog'
 import { AlertCircle, Check, Copy, Terminal } from '@/lib/icons'
 import { brandUpdateCopy, resolveUpdateCopy, type UpdateTarget } from '@/lib/update-copy'
@@ -47,6 +47,15 @@ function useBrandedUpdatesCopy() {
   const { t } = useI18n()
 
   return brandUpdateCopy(t.updates, appBrandForEnv())
+}
+
+/** Backend/Electron update text is data, not a translation key. Keep a final
+ * renderer boundary here so a raw message cannot leak upstream branding when a
+ * future caller bypasses the store normalizer. */
+function brandRuntimeUpdateText(value: unknown, preserveValues: readonly unknown[] = []): string {
+  const text = typeof value === 'string' ? value : String(value ?? '')
+
+  return replaceHermesBrandTerms(text, appBrandForEnv(), preserveValues)
 }
 
 export function UpdatesOverlay() {
@@ -121,10 +130,16 @@ export function UpdatesOverlay() {
         {phase === 'applying' && <ApplyingView apply={apply} isBackend={isBackend} />}
 
         {phase === 'manual' && (
-          <ManualView command={apply.command ?? null} message={apply.message} onDone={() => handleClose(false)} />
+          <ManualView
+            command={apply.command ?? null}
+            message={brandRuntimeUpdateText(apply.message)}
+            onDone={() => handleClose(false)}
+          />
         )}
 
-        {phase === 'guiSkew' && <GuiSkewView message={apply.message} onDone={() => handleClose(false)} />}
+        {phase === 'guiSkew' && (
+          <GuiSkewView message={brandRuntimeUpdateText(apply.message)} onDone={() => handleClose(false)} />
+        )}
 
         {phase === 'error' && updateBlockers ? (
           <BlockerView
@@ -135,7 +150,11 @@ export function UpdatesOverlay() {
         ) : null}
 
         {phase === 'error' && !updateBlockers ? (
-          <ErrorView message={apply.message} onDismiss={() => handleClose(false)} onRetry={handleInstall} />
+          <ErrorView
+            message={brandRuntimeUpdateText(apply.message)}
+            onDismiss={() => handleClose(false)}
+            onRetry={handleInstall}
+          />
         ) : null}
 
         {phase === 'idle' && (
@@ -205,7 +224,7 @@ function IdleView({
   if (!status.supported) {
     return (
       <CenteredStatus
-        body={status.message ?? u.unsupportedMessage}
+        body={status.message ? brandRuntimeUpdateText(status.message) : u.unsupportedMessage}
         icon={<AlertCircle className="size-6 text-muted-foreground" />}
         title={u.notAvailableTitle}
       />
@@ -390,8 +409,8 @@ function ApplyingView({ apply, isBackend }: { apply: UpdateApplyState; isBackend
   const u = useBrandedUpdatesCopy()
   const label = u.stages[apply.stage as DesktopUpdateStage] ?? u.stages.idle
   const body = isBackend ? u.applyingBodyBackend : u.applyingBody
-  const currentMessage = apply.message.trim()
-  const recentLog = apply.log.slice(-4)
+  const currentMessage = brandRuntimeUpdateText(apply.message).trim()
+  const recentLog = apply.log.slice(-4).map(entry => ({ ...entry, message: brandRuntimeUpdateText(entry.message) }))
 
   const percent =
     typeof apply.percent === 'number' && Number.isFinite(apply.percent)

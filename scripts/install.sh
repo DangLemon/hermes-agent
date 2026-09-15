@@ -1,12 +1,12 @@
 #!/bin/bash
 # ============================================================================
-# Hermes Agent Installer
+# Lemon AI Installer
 # ============================================================================
 # Installation script for Linux, macOS, and Android/Termux.
 # Uses uv for desktop/server installs and Python's stdlib venv + pip on Termux.
 #
 # Usage:
-#   curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.sh | bash
 #
 # Or with options:
 #   curl -fsSL ... | bash -s -- --no-venv --skip-setup
@@ -48,6 +48,33 @@ LEMON_DEFAULT_REPOSITORY="DangLemon/hermes-agent"
 REPOSITORY="${HERMES_INSTALL_REPOSITORY:-}"
 REPO_URL_SSH=""
 REPO_URL_HTTPS=""
+early_repository_arg() {
+    local arg
+
+    while [ "$#" -gt 0 ]; do
+        arg="$1"
+        case "$arg" in
+            --repo|--repository|-Repository)
+                if [ "$#" -ge 2 ]; then
+                    printf '%s' "$2"
+                    return 0
+                fi
+                return 0
+                ;;
+        esac
+        shift
+    done
+}
+
+repository_identity_key_early() {
+    printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+EARLY_REPOSITORY="$(early_repository_arg "$@")"
+if [ -n "$EARLY_REPOSITORY" ]; then
+    REPOSITORY="$EARLY_REPOSITORY"
+fi
+
 valid_runtime_root() {
     [ -e "$1/.git" ] && [ -f "$1/hermes_cli/main.py" ]
 }
@@ -129,14 +156,20 @@ is_internal_desktop_build() {
         return 0
     fi
 
+    if [ -n "$REPOSITORY" ] \
+        && [ "$(repository_identity_key_early "$REPOSITORY")" = "$(repository_identity_key_early "$LEMON_DEFAULT_REPOSITORY")" ]; then
+        return 0
+    fi
+
     local selected
     selected="$(selected_internal_harness_config)"
     if [ -n "$selected" ]; then
-        valid_internal_harness_config "$selected"
-        return $?
+        valid_internal_harness_config "$selected" && return 0
+        return 0
     fi
 
-    checkout_internal_harness_config
+    checkout_internal_harness_config && return 0
+    return 0
 }
 
 INTERNAL_DESKTOP_BUILD=false

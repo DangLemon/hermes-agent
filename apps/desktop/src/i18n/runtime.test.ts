@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { fieldCopyForSchemaKey } from '@/app/settings/field-copy'
 
@@ -13,6 +13,7 @@ describe('desktop i18n runtime translator', () => {
 
   afterEach(() => {
     setRuntimeI18nLocale('en')
+    vi.unstubAllGlobals()
   })
 
   it('translates string paths for the active runtime locale', () => {
@@ -26,6 +27,16 @@ describe('desktop i18n runtime translator', () => {
 
   it('passes arguments to function translations', () => {
     expect(translateNow('notifications.updateReadyMessage', 2)).toBe('2 new changes available.')
+  })
+
+  it('brands static internal copy without rewriting interpolated values', () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+
+    const message = translateNow('assistant.approval.alwaysDescription', 'Hermes Agent.txt')
+
+    expect(message).toContain('“Hermes Agent.txt”')
+    expect(message).toContain('~/.lemon-ai/config.yaml')
+    expect(message).toContain('Lemon AI won’t ask again')
   })
 
   it('translates migrated overlap keys for newly supported locales', () => {

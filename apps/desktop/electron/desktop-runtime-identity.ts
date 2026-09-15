@@ -77,6 +77,32 @@ export function resolveDesktopRuntimeIdentity({
   return internalHarnessRequested ? LEMON_AI_IDENTITY : HERMES_IDENTITY
 }
 
+export function runtimeDisplayCopy(identity: DesktopRuntimeIdentity) {
+  const backendName = `${identity.appName} backend`
+  const envPath = `~/${identity.posixHomeDirName}/.env`
+  const homePath = `~/${identity.posixHomeDirName}/`
+  const gatewayName = `${identity.appName} gateway`
+  const isHermes = identity.appName === 'Hermes' && identity.posixHomeDirName === '.hermes'
+
+  function rewriteUserText(value: string): string {
+    if (isHermes) {
+      return value
+    }
+
+    return value
+      .replaceAll('~/.hermes/', homePath)
+      .replaceAll('hermes backend', backendName)
+      .replaceAll('hermes gateway', gatewayName)
+      .replaceAll('Hermes backend', backendName)
+      .replaceAll('Hermes gateway', gatewayName)
+      .replaceAll('Hermes Desktop', identity.appName)
+      .replaceAll('Hermes Agent', identity.appName)
+      .replace(/\bHermes\b/g, identity.appName)
+  }
+
+  return { backendName, envPath, gatewayName, rewriteUserText }
+}
+
 export function resolveInternalDesktopBuild({
   internalPackage = false,
   internalHarnessRequested = false

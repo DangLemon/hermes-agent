@@ -134,6 +134,14 @@ const CLI_PROSE_BOUNDARY_WORDS = new Set([
   'with'
 ])
 
+// Some translated catalog strings place a bare CLI command between
+// non-English words, so the English context/boundary heuristic below cannot
+// identify it. Keep the command heads that are shipped in user-facing copy
+// here; requiring a subcommand/argument after the head prevents ordinary
+// product prose such as "Hermes gateway is unavailable" from being treated as
+// an executable command.
+const CLI_COMMAND_HEADS = new Set(['curator', 'debug', 'desktop', 'gateway', 'mcp', 'model', 'pets', 'project'])
+
 interface TextSpan {
   end: number
   start: number
@@ -299,11 +307,30 @@ function hasOnlyCommandPunctuationAfter(input: string, end: number): boolean {
   return /^[\s`'".,;:!?()[\]{}]*$/.test(input.slice(end))
 }
 
+function hasShellCommandBoundaryAfter(input: string, end: number): boolean {
+  return /^\s*(?:&&|\|\||[|>]|\r?\n)/.test(input.slice(end))
+}
+
+function hasKnownCliCommandShape(input: string, span: TextSpan): boolean {
+  const tokens = input
+    .slice(span.start, span.end)
+    .trim()
+    .split(/\s+/)
+    .map(token => token.replace(/^['"]|['"]$/g, '').toLowerCase())
+
+  if (!CLI_COMMAND_HEADS.has(tokens[1] ?? '')) {
+    return false
+  }
+
+  return tokens.length >= 3 || hasShellCommandBoundaryAfter(input, span.end)
+}
+
 function shouldProtectHermesCliSpan(input: string, span: TextSpan): boolean {
   return (
     hasCodeOrQuoteBoundary(input, span.start, span.end) ||
     hasCliContext(input, span.start) ||
-    hasOnlyCommandPunctuationAfter(input, span.end)
+    hasOnlyCommandPunctuationAfter(input, span.end) ||
+    hasKnownCliCommandShape(input, span)
   )
 }
 

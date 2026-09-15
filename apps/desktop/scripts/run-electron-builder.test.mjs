@@ -40,10 +40,10 @@ function withTempHarness(resource, fn) {
 function assertPhysicalIdentity(
   config,
   {
-    expectedProductName = 'Hermes',
-    expectedAppId = 'com.nousresearch.hermes',
-    expectedExecutableName = 'Hermes',
-    expectedProtocolName = 'Hermes Protocol'
+    expectedProductName = 'Lemon AI',
+    expectedAppId = 'com.lemondigital.lemonai',
+    expectedExecutableName = 'Lemon AI',
+    expectedProtocolName = 'Lemon AI Protocol'
   } = {}
 ) {
   assert.equal(config.appId, expectedAppId)
@@ -61,8 +61,8 @@ function productFilenameFor(config, platformSpecificOptions = null) {
   return new AppInfo(
     {
       metadata: {
-        name: 'hermes',
-        productName: 'Hermes',
+        name: 'lemon-ai',
+        productName: 'Lemon AI',
         version: '0.17.0',
         description: ''
       },
@@ -106,7 +106,7 @@ test('package build script generates harness resource before Vite reads harness 
   )
 })
 
-test('ordinary package config keeps Hermes installer metadata and assets for compatibility', async () => {
+test('ordinary package config uses Lemon installer metadata and assets in this fork', async () => {
   const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
   const config = createElectronBuilderConfig(pkg.build, {
     env: { CSC_IDENTITY_AUTO_DISCOVERY: 'false' },
@@ -115,30 +115,31 @@ test('ordinary package config keeps Hermes installer metadata and assets for com
 
   assertPhysicalIdentity(config)
   assert.equal(config.mac.identity, undefined)
-  assert.equal(config.artifactName, 'Hermes-${version}-${os}-${arch}.${ext}')
-  assert.equal(config.icon, 'assets/icon')
-  assert.equal(config.mac.extendInfo.CFBundleDisplayName, 'Hermes')
-  assert.equal(config.mac.extendInfo.CFBundleName, 'Hermes')
+  assert.equal(config.artifactName, 'Lemon-AI-${version}-${os}-${arch}.${ext}')
+  assert.equal(config.icon, 'assets/lemon-icon')
+  assert.equal(config.mac.extendInfo.CFBundleDisplayName, 'Lemon AI')
+  assert.equal(config.mac.extendInfo.CFBundleExecutable, 'Lemon AI')
+  assert.equal(config.mac.extendInfo.CFBundleName, 'Lemon AI')
   assert.equal(
     config.mac.extendInfo.NSMicrophoneUsageDescription,
-    'Hermes uses the microphone for voice input and voice conversations.'
+    'Lemon AI uses the microphone for voice input and voice conversations.'
   )
   assert.equal(
     config.mac.extendInfo.NSCalendarsUsageDescription,
-    'Hermes needs access to Calendar to provide requested meeting and scheduling support.'
+    'Lemon AI needs access to Calendar to provide requested meeting and scheduling support.'
   )
   assert.equal(
     config.mac.extendInfo.NSRemindersUsageDescription,
-    'Hermes needs access to Reminders to provide requested personal-assistant and scheduling support.'
+    'Lemon AI needs access to Reminders to provide requested personal-assistant and scheduling support.'
   )
-  assert.equal(config.dmg.title, 'Install Hermes')
-  assert.equal(config.win.legalTrademarks, 'Hermes')
-  assert.equal(config.linux.maintainer, 'Nous Research <support@nousresearch.com>')
-  assert.equal(config.linux.synopsis, 'Native desktop shell for Hermes Agent.')
-  assert.equal(config.nsis.shortcutName, 'Hermes')
-  assert.equal(config.nsis.uninstallDisplayName, 'Hermes')
+  assert.equal(config.dmg.title, 'Install Lemon AI')
+  assert.equal(config.win.legalTrademarks, 'Lemon AI')
+  assert.equal(config.linux.maintainer, 'Lemon Digital')
+  assert.equal(config.linux.synopsis, 'Native desktop shell for Lemon AI.')
+  assert.equal(config.nsis.shortcutName, 'Lemon AI')
+  assert.equal(config.nsis.uninstallDisplayName, 'Lemon AI')
   assert.deepEqual(config.extraResources[1], {
-    from: 'assets/icon.ico',
+    from: 'assets/lemon-icon.ico',
     to: 'icon.ico'
   })
   await validateConfiguration(structuredClone(config))
@@ -154,9 +155,18 @@ test('Hermes installer brand keeps the package config on the Hermes identity', a
     }
   })
 
-  assertPhysicalIdentity(config)
+  assertPhysicalIdentity(config, {
+    expectedProductName: 'Hermes',
+    expectedAppId: 'com.nousresearch.hermes',
+    expectedExecutableName: 'Hermes',
+    expectedProtocolName: 'Hermes Protocol'
+  })
   assert.equal(config.artifactName, 'Hermes-${version}-${os}-${arch}.${ext}')
   assert.equal(config.dmg.title, 'Install Hermes')
+  assert.deepEqual(config.extraResources[1], {
+    from: 'assets/icon.ico',
+    to: 'icon.ico'
+  })
   await validateConfiguration(structuredClone(config))
 })
 
@@ -202,9 +212,23 @@ test('validated internal package config applies Lemon physical identity while pr
     assert.equal(config.linux.synopsis, 'Native desktop shell for Lemon AI.')
     assert.equal(config.nsis.shortcutName, 'Lemon AI')
     assert.equal(config.nsis.uninstallDisplayName, 'Lemon AI')
+    assert.equal(config.copyright, 'Copyright © 2026 Lemon Digital')
+    assert.equal(config.mac.extendInfo.NSHumanReadableCopyright, 'Copyright © 2026 Lemon Digital')
     assert.deepEqual(config.extraMetadata, {
       name: 'lemon-ai',
-      productName: 'Lemon AI'
+      productName: 'Lemon AI',
+      author: {
+        name: 'Lemon Digital'
+      },
+      description: 'Native desktop shell for Lemon AI.',
+      homepage: 'https://github.com/DangLemon/hermes-agent',
+      bugs: {
+        url: 'https://github.com/DangLemon/hermes-agent/issues'
+      },
+      repository: {
+        type: 'git',
+        url: 'git+https://github.com/DangLemon/hermes-agent.git'
+      }
     })
     assert.deepEqual(config.extraResources[1], {
       from: 'assets/lemon-icon.ico',
@@ -329,7 +353,7 @@ test('builder writes a fresh ordinary config after an internal config', () => {
     })
     assert.equal(
       JSON.parse(fs.readFileSync(ordinaryPath, 'utf8')).artifactName,
-      'Hermes-${version}-${os}-${arch}.${ext}'
+      'Lemon-AI-${version}-${os}-${arch}.${ext}'
     )
   })
 })

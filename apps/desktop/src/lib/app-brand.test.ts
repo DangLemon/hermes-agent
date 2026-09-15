@@ -150,6 +150,19 @@ describe('appBrandForEnv', () => {
     ).toBe('Lemon AI gateway is not connected. See https://example.com/hermes/help.')
   })
 
+  it('keeps a bare command intact across shell operators and line breaks', () => {
+    expect(replaceHermesBrandTerms('hermes gateway && echo ok', lemonAppBrand)).toBe('hermes gateway && echo ok')
+    expect(replaceHermesBrandTerms('hermes gateway | tee gateway.log', lemonAppBrand)).toBe(
+      'hermes gateway | tee gateway.log'
+    )
+    expect(replaceHermesBrandTerms('hermes gateway > gateway.log', lemonAppBrand)).toBe(
+      'hermes gateway > gateway.log'
+    )
+    expect(replaceHermesBrandTerms('hermes gateway\nHermes Agent is ready.', lemonAppBrand)).toBe(
+      'hermes gateway\nLemon AI is ready.'
+    )
+  })
+
   it('leaves generic command and prose boundaries unchanged in upstream mode', () => {
     const source =
       'Run hermes gateway before opening Hermes Desktop. Try hermes project if Hermes Agent still fails. Hermes gateway is unavailable.'
@@ -166,6 +179,21 @@ describe('appBrandForEnv', () => {
     )
     expect(replaceHermesBrandTerms(BOT_ATTENTION_HINTS.missing_config, lemonAppBrand)).toBe(
       'Provider not configured — run hermes model'
+    )
+  })
+
+  it('preserves bare CLI commands embedded in localized catalog copy', () => {
+    expect(replaceHermesBrandTerms(TRANSLATIONS.zh.skills.skillArchivedMessage, lemonAppBrand)).toBe(
+      '可通过 hermes curator restore 恢复。'
+    )
+    expect(replaceHermesBrandTerms(TRANSLATIONS['zh-hant'].skills.skillArchivedMessage, lemonAppBrand)).toBe(
+      '可透過 hermes curator restore 還原。'
+    )
+    expect(replaceHermesBrandTerms(TRANSLATIONS.ja.skills.skillArchivedMessage, lemonAppBrand)).toBe(
+      'hermes curator restore で復元できます。'
+    )
+    expect(replaceHermesBrandTerms(TRANSLATIONS.ru.skills.skillArchivedMessage, lemonAppBrand)).toBe(
+      'Восстановить через hermes curator restore.'
     )
   })
 

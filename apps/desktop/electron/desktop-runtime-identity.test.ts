@@ -18,6 +18,7 @@ import {
   resolveDesktopRuntimeIdentity,
   resolveDesktopRuntimeRoot,
   resolveInternalDesktopBuild,
+  runtimeDisplayCopy,
   shouldPreferWindowsDesktopRegistry,
   shouldReadWindowsHermesHomeRegistry
 } from './desktop-runtime-identity'
@@ -52,6 +53,23 @@ test('desktop runtime child env carries Lemon identity and compatibility variabl
       HERMES_UPDATE_RESULT_NAME: '.lemon-ai-update-result.json'
     }
   )
+})
+
+
+test('runtime display copy rewrites Lemon-visible Hermes terms without changing upstream copy', () => {
+  const upstream = runtimeDisplayCopy(HERMES_IDENTITY)
+  const lemon = runtimeDisplayCopy(LEMON_AI_IDENTITY)
+  const source = "Hermes backend failed. Re-run 'hermes model' or edit ~/.hermes/config.yaml for the Hermes Agent."
+
+  assert.equal(upstream.rewriteUserText(source), source)
+  assert.equal(
+    lemon.rewriteUserText(source),
+    "Lemon AI backend failed. Re-run 'hermes model' or edit ~/.lemon-ai/config.yaml for the Lemon AI."
+  )
+  assert.equal(lemon.backendName, 'Lemon AI backend')
+  assert.equal(lemon.gatewayName, 'Lemon AI gateway')
+  assert.equal(lemon.envPath, '~/.lemon-ai/.env')
+  assert.equal(lemon.rewriteUserText('Hermes is ready.'), 'Lemon AI is ready.')
 })
 
 test('ordinary desktop runtime identity keeps the Hermes filesystem contract', () => {

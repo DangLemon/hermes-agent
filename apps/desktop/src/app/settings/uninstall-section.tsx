@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import type { DesktopUninstallMode, DesktopUninstallSummary } from '@/global'
-import { type AppBrand, appBrandForEnv, replaceAppBrandTokens } from '@/lib/app-brand'
+import { type AppBrand, appBrandForEnv } from '@/lib/app-brand'
 import { AlertTriangle, Loader2, Trash2 } from '@/lib/icons'
 import { cn } from '@/lib/utils'
 
@@ -17,34 +17,6 @@ interface ModeOption {
   /** True when the option removes the Python agent (hidden if no agent). */
   needsAgent: boolean
 }
-
-const OPTION_TEMPLATES: ModeOption[] = [
-  {
-    mode: 'gui',
-    title: 'Uninstall Chat GUI only',
-    description: 'Remove this desktop app. {agentName}, your config, and chats all stay.',
-    consequence: '{chatGuiName} (this app and its data)',
-    needsAgent: false
-  },
-  {
-    mode: 'lite',
-    title: 'Uninstall GUI + agent, keep my data',
-    description: 'Remove the app and {agentName}, but keep config, chats, and secrets for a future reinstall.',
-    consequence: '{chatGuiName} and {agentName} (config, chats, and secrets are kept)',
-    needsAgent: true
-  },
-  {
-    mode: 'full',
-    title: 'Uninstall everything',
-    description: 'Remove the app, the agent, and all user data — config, chats, scheduled jobs, secrets, logs.',
-    consequence: 'EVERYTHING — {chatGuiName}, {agentName}, and all of your config, chats, secrets, and logs',
-    // full removes the agent (and user data), so it's an agent-removing option:
-    // hide it on a lite client with no local agent, same as lite. A lite client
-    // connecting to a remote backend has no local agent OR local user data the
-    // GUI installed, so gui-only is the correct (and only) option there.
-    needsAgent: true
-  }
-]
 
 const UPSTREAM_OPTIONS: ModeOption[] = [
   {
@@ -71,30 +43,73 @@ const UPSTREAM_OPTIONS: ModeOption[] = [
 ]
 
 interface UninstallCopy {
+  cancelLabel: string
+  confirmButtonLabel: string
+  confirmDescription: (consequence: string) => string
+  confirmTitle: string
+  dangerTitle: string
   heading: string
   intro: string
+  loadingLabel: string
   options: ModeOption[]
+  runningLabel: string
+  startError: string
 }
 
 export function uninstallCopyForBrand(brand: AppBrand = appBrandForEnv()): UninstallCopy {
   if (brand.mode === 'upstream') {
     return {
+      cancelLabel: 'Cancel',
+      confirmButtonLabel: 'Yes, uninstall',
+      confirmDescription: consequence => `This removes ${consequence}. This can't be undone.`,
+      confirmTitle: 'Confirm uninstall',
+      dangerTitle: 'Danger zone',
       heading: 'Uninstall Hermes',
       intro: 'Choose how much to remove. The app closes to finish the job; reopen the installer any time to come back.',
-      options: UPSTREAM_OPTIONS
+      loadingLabel: "Checking what's installed…",
+      options: UPSTREAM_OPTIONS,
+      runningLabel: 'Uninstalling…',
+      startError: 'Uninstall could not start.'
     }
   }
 
-  const replace = (value: string) => replaceAppBrandTokens(value, brand)
-
   return {
-    heading: replace('Uninstall {appName}'),
-    intro: 'Choose how much to remove. The app closes to finish the job; reopen the installer any time to come back.',
-    options: OPTION_TEMPLATES.map(option => ({
-      ...option,
-      description: replace(option.description),
-      consequence: replace(option.consequence)
-    }))
+    cancelLabel: 'Hủy',
+    confirmButtonLabel: 'Đồng ý gỡ',
+    confirmDescription: consequence => `Thao tác này sẽ gỡ ${consequence}. Không thể hoàn tác.`,
+    confirmTitle: 'Xác nhận gỡ cài đặt',
+    dangerTitle: 'Khu vực nhạy cảm',
+    heading: 'Gỡ Lemon AI',
+    intro: 'Chọn mức dữ liệu cần gỡ. Ứng dụng sẽ đóng để hoàn tất; bạn có thể cài lại bất cứ lúc nào.',
+    loadingLabel: 'Đang kiểm tra thành phần đã cài…',
+    options: [
+      {
+        mode: 'gui',
+        title: 'Chỉ gỡ ứng dụng desktop',
+        description: 'Gỡ ứng dụng này. Agent Lemon AI, cấu hình và cuộc trò chuyện vẫn được giữ lại.',
+        consequence: 'ứng dụng desktop Lemon AI (ứng dụng này và dữ liệu của ứng dụng)',
+        needsAgent: false
+      },
+      {
+        mode: 'lite',
+        title: 'Gỡ ứng dụng và agent, giữ dữ liệu',
+        description:
+          'Gỡ ứng dụng và agent Lemon AI, nhưng giữ cấu hình, cuộc trò chuyện và khóa truy cập để cài lại sau.',
+        consequence: 'ứng dụng desktop Lemon AI và agent Lemon AI (giữ cấu hình, cuộc trò chuyện và khóa truy cập)',
+        needsAgent: true
+      },
+      {
+        mode: 'full',
+        title: 'Gỡ tất cả',
+        description:
+          'Gỡ ứng dụng, agent và toàn bộ dữ liệu người dùng: cấu hình, cuộc trò chuyện, lịch công việc, khóa truy cập, log.',
+        consequence:
+          'TOÀN BỘ: ứng dụng desktop Lemon AI, agent Lemon AI, cấu hình, cuộc trò chuyện, khóa truy cập và log',
+        needsAgent: true
+      }
+    ],
+    runningLabel: 'Đang gỡ…',
+    startError: 'Không thể bắt đầu gỡ cài đặt.'
   }
 }
 
@@ -165,7 +180,7 @@ export function UninstallSection() {
       const result = await bridge.run(pending)
 
       if (!result.ok) {
-        setError(result.message || result.error || 'Uninstall could not start.')
+        setError(result.message || result.error || copy.startError)
         setRunning(false)
         setPending(null)
       }
@@ -181,20 +196,18 @@ export function UninstallSection() {
 
   return (
     <div className="mx-auto mt-8 w-full max-w-2xl">
-      <SectionHeading icon={AlertTriangle} title="Danger zone" />
+      <SectionHeading icon={AlertTriangle} title={copy.dangerTitle} />
 
       <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3">
         {loading ? (
           <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
             <Loader2 className="size-3.5 animate-spin" />
-            Checking what&apos;s installed…
+            {copy.loadingLabel}
           </div>
         ) : pendingOption ? (
           <div>
-            <p className="text-sm font-medium text-destructive">Confirm uninstall</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              This removes {pendingOption.consequence}. This can&apos;t be undone.
-            </p>
+            <p className="text-sm font-medium text-destructive">{copy.confirmTitle}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{copy.confirmDescription(pendingOption.consequence)}</p>
             {summary?.running_app_path && (
               <p className="mt-1 font-mono text-[0.68rem] text-muted-foreground/60">App: {summary.running_app_path}</p>
             )}
@@ -202,10 +215,10 @@ export function UninstallSection() {
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <Button disabled={running} onClick={() => void handleConfirm()} size="sm" variant="destructive">
                 {running && <Loader2 className="size-3 animate-spin" />}
-                {running ? 'Uninstalling…' : 'Yes, uninstall'}
+                {running ? copy.runningLabel : copy.confirmButtonLabel}
               </Button>
               <Button disabled={running} onClick={() => setPending(null)} size="sm" variant="text">
-                Cancel
+                {copy.cancelLabel}
               </Button>
             </div>
           </div>

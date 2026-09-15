@@ -29,6 +29,7 @@ import {
   isSshRemoteForRepository,
   OFFICIAL_REPO_CANONICAL,
   OFFICIAL_REPO_HTTPS_URL,
+  planUpdateOriginRepository,
   remoteMatchesRepository,
   validateGitHubRepositoryIdentity
 } from './update-remote'
@@ -113,14 +114,56 @@ test('repository identity rejects URLs and path traversal', () => {
 })
 
 
-test('main update origin wiring preserves matching SSH origins', async () => {
-  const fs = await import('node:fs')
-  const path = await import('node:path')
-  const source = fs.readFileSync(path.join(import.meta.dirname, 'main.ts'), 'utf8')
-  const fnStart = source.indexOf('async function ensureUpdateOriginRepository')
-  const fnEnd = source.indexOf('function emitUpdateProgress', fnStart)
-  const body = source.slice(fnStart, fnEnd)
+test('update origin plan preserves matching SSH origins', () => {
+  assert.deepEqual(
+    planUpdateOriginRepository({
+      originUrl: 'git@github.com:DangLemon/hermes-agent.git',
+      sourceRepository: 'DangLemon/hermes-agent',
+      updateRootHasGit: true
+    }),
+    {
+      action: 'none',
+      originUrl: 'git@github.com:DangLemon/hermes-agent.git',
+      repository: 'DangLemon/hermes-agent'
+    }
+  )
+})
 
-  assert.match(body, /remoteMatchesRepository\(originUrl, repository\)/)
-  assert.doesNotMatch(body, /originUrl === expectedUrl/)
+test('update origin plan remaps mismatched origins to the configured repository', () => {
+  assert.deepEqual(
+    planUpdateOriginRepository({
+      originUrl: 'https://github.com/NousResearch/hermes-agent.git',
+      sourceRepository: 'DangLemon/hermes-agent',
+      updateRootHasGit: true
+    }),
+    {
+      action: 'set-url',
+      args: [
+        'remote',
+        'set-url',
+        'origin',
+        'https://github.com/DangLemon/hermes-agent.git'
+      ],
+      expectedUrl: 'https://github.com/DangLemon/hermes-agent.git',
+      originUrl: 'https://github.com/NousResearch/hermes-agent.git',
+      repository: 'DangLemon/hermes-agent'
+    }
+  )
+})
+
+test('update origin plan adds a missing origin for a configured repository checkout', () => {
+  assert.deepEqual(
+    planUpdateOriginRepository({
+      originUrl: '',
+      sourceRepository: 'DangLemon/hermes-agent',
+      updateRootHasGit: true
+    }),
+    {
+      action: 'add',
+      args: ['remote', 'add', 'origin', 'https://github.com/DangLemon/hermes-agent.git'],
+      expectedUrl: 'https://github.com/DangLemon/hermes-agent.git',
+      originUrl: '',
+      repository: 'DangLemon/hermes-agent'
+    }
+  )
 })

@@ -89,6 +89,7 @@ describe('refreshOnboarding', () => {
     window.localStorage.clear()
     $desktopOnboarding.set(baseState())
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it('refreshes OAuth providers again when onboarding was explicitly requested', async () => {
@@ -165,6 +166,7 @@ describe('refreshOnboarding', () => {
 
   it('shows a non-blocking notification when preserving configured on fallback', async () => {
     const notifySpy = vi.spyOn(notifications, 'notify')
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
 
     installApiMock(vi.fn())
     $desktopOnboarding.set(
@@ -181,10 +183,41 @@ describe('refreshOnboarding', () => {
     expect(notifySpy).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'runtime-not-ready',
-        kind: 'error'
+        kind: 'error',
+        message:
+          'Lemon AI could not verify the running backend on startup. Some features may be unavailable until the gateway is reachable.'
       })
     )
     expect($desktopOnboarding.get().configured).toBe(true)
+  })
+
+  it('brands backend readiness reasons before storing the onboarding overlay reason', async () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+    const sourceEnvPath = ['~/.hermes/', 'env'].join('.')
+    const brandedEnvPath = ['~/.lemon-ai/', 'env'].join('.')
+    installApiMock(vi.fn())
+
+    const ready = await refreshOnboarding(
+      onboardingContext(async method => {
+        if (method === 'setup.status') {
+          return { provider_configured: false } as never
+        }
+
+        if (method === 'setup.runtime_check') {
+          return {
+            ok: false,
+            error: `Run 'hermes model', then check ${sourceEnvPath} because Hermes backend failed.`
+          } as never
+        }
+
+        throw new Error(`unexpected gateway method: ${method}`)
+      })
+    )
+
+    expect(ready).toBe(false)
+    expect($desktopOnboarding.get().reason).toContain(
+      `Run 'hermes model', then check ${brandedEnvPath} because Lemon AI backend failed.`
+    )
   })
 
   it('enters setup when the selected OpenRouter credential is genuinely empty', async () => {
@@ -642,6 +675,33 @@ describe('saveOnboardingLocalEndpoint', () => {
     expect(result.ok).toBe(false)
     expect(result.message).toContain('No provider can serve the selected model.')
     expect($desktopOnboarding.get().configured).not.toBe(true)
+  })
+
+  it('brands local endpoint backend failure messages before returning them to the overlay', async () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+    const sourceEnvPath = ['~/.hermes/', 'env'].join('.')
+    const brandedEnvPath = ['~/.lemon-ai/', 'env'].join('.')
+    installApiMock(async ({ path }: { path: string }) => {
+      if (path === '/api/providers/validate') {
+        return {
+          ok: false,
+          reachable: true,
+          message: `Run 'hermes model', then check ${sourceEnvPath} because Hermes backend failed.`,
+          models: []
+        }
+      }
+
+      throw new Error(`unexpected api path: ${path}`)
+    })
+
+    const result = await saveOnboardingLocalEndpoint('http://127.0.0.1:8000/v1', '', {
+      requestGateway: readyGateway()
+    })
+
+    expect(result).toEqual({
+      ok: false,
+      message: `Run 'hermes model', then check ${brandedEnvPath} because Lemon AI backend failed.`
+    })
   })
 })
 

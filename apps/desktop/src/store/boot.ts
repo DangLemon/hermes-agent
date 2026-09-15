@@ -2,6 +2,7 @@ import { atom } from 'nanostores'
 
 import type { DesktopBootProgress } from '@/global'
 import { translateNow } from '@/i18n'
+import { appBrand, type AppBrand, replaceHermesBrandTerms } from '@/lib/app-brand'
 
 export interface DesktopBootState extends DesktopBootProgress {
   visible: boolean
@@ -18,6 +19,11 @@ const INITIAL_BOOT_STATE: DesktopBootState = {
   visible: true
 }
 
+/** Normalize backend boot copy at the renderer store boundary. */
+export function brandBootMessage(message: string, brand: AppBrand = appBrand()): string {
+  return replaceHermesBrandTerms(message, brand)
+}
+
 export const $desktopBoot = atom<DesktopBootState>(INITIAL_BOOT_STATE)
 
 function clampProgress(value: number) {
@@ -32,15 +38,18 @@ export function applyDesktopBootProgress(progress: DesktopBootProgress) {
   const current = $desktopBoot.get()
   const nextProgress = clampProgress(progress.progress)
   const mergedProgress = progress.running ? Math.max(current.progress, nextProgress) : nextProgress
+  const message = brandBootMessage(progress.message)
+  const progressError = progress.error === null ? null : progress.error ? brandBootMessage(progress.error) : null
 
   // Don't let a late progress event (error: null) clobber a previously-set
   // boot failure — failDesktopBoot is terminal for this boot cycle.
-  const error = progress.error ?? (current.running ? null : current.error)
+  const error = progressError ?? (current.running ? null : current.error)
 
   $desktopBoot.set({
     ...current,
     ...progress,
     error,
+    message,
     progress: mergedProgress,
     visible: progress.running || mergedProgress < 100 || Boolean(error)
   })
@@ -79,7 +88,7 @@ export function resumeDesktopBootForRetry(message: string) {
   $desktopBoot.set({
     ...current,
     error: null,
-    message,
+    message: brandBootMessage(message),
     phase: 'renderer.boot.retry',
     running: true,
     timestamp: Date.now(),
@@ -92,7 +101,7 @@ export function completeDesktopBoot(message = translateNow('boot.ready')) {
   $desktopBoot.set({
     ...current,
     error: null,
-    message,
+    message: brandBootMessage(message),
     phase: 'renderer.ready',
     progress: 100,
     running: false,
@@ -101,12 +110,14 @@ export function completeDesktopBoot(message = translateNow('boot.ready')) {
   })
 }
 
-export function failDesktopBoot(message: string) {
+export function failDesktopBoot(message: string, brand: AppBrand = appBrand()) {
   const current = $desktopBoot.get()
+  const brandedMessage = brandBootMessage(message, brand)
+
   $desktopBoot.set({
     ...current,
-    error: message,
-    message: translateNow('boot.desktopBootFailedWithMessage', message),
+    error: brandedMessage,
+    message: translateNow('boot.desktopBootFailedWithMessage', brandedMessage),
     phase: 'renderer.error',
     progress: clampProgress(current.progress),
     running: false,

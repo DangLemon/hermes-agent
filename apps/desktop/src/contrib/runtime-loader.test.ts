@@ -352,6 +352,29 @@ describe('plugin source reads (512 KiB preview-cap bug)', () => {
     }
   })
 
+  it('brands the truncated-source recovery hint for internal builds', async () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+    desktopPluginsRoot.mockResolvedValue('/local/.hermes/desktop-plugins')
+    agentPluginsRoot.mockResolvedValue('')
+    standaloneRootWith('huge-internal')
+    readFileText.mockResolvedValue({
+      text: 'export default { id: "huge-internal", register: () => { throw new Error("must never evaluate") } }',
+      truncated: true
+    })
+    watchPreviewFile.mockResolvedValue({ id: 'w-huge-internal' })
+
+    const restore = blobToDataUrl()
+
+    try {
+      await discoverRuntimePlugins()
+
+      expect($pluginRecords.get()['huge-internal'].error).toContain('update Lemon AI to load larger plugins')
+    } finally {
+      restore()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('older shell, small plugin (not truncated): still loads through readFileText', async () => {
     desktopPluginsRoot.mockResolvedValue('/local/.hermes/desktop-plugins')
     agentPluginsRoot.mockResolvedValue('')

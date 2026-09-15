@@ -8,7 +8,7 @@ import {
   type ProfileScope,
   saveHermesConfig
 } from '@/hermes'
-import { appBrandForEnv } from '@/lib/app-brand'
+import { type AppBrand, appBrandForEnv, brandTranslationTree } from '@/lib/app-brand'
 import type { HermesRawConfigResponse } from '@/types/hermes'
 
 import { TRANSLATIONS } from './catalog'
@@ -57,6 +57,10 @@ const defaultConfigClient: I18nConfigClient = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+export function translationsForBrand(translations: Translations, brand: AppBrand = appBrandForEnv()): Translations {
+  return brandTranslationTree(translations, brand)
 }
 
 export function getConfigDisplayLanguage(config: HermesConfigRecord): unknown {
@@ -239,6 +243,8 @@ export function I18nProvider({ children, configClient = defaultConfigClient, ini
     [configClient]
   )
 
+  const t = useMemo(() => translationsForBrand(TRANSLATIONS[locale]), [locale])
+
   const value = useMemo<I18nContextValue>(
     () => ({
       configLoadError,
@@ -247,9 +253,9 @@ export function I18nProvider({ children, configClient = defaultConfigClient, ini
       locale,
       saveError,
       setLocale,
-      t: TRANSLATIONS[locale]
+      t
     }),
-    [configLoadError, isLoadingConfig, isSavingLocale, locale, saveError, setLocale]
+    [configLoadError, isLoadingConfig, isSavingLocale, locale, saveError, setLocale, t]
   )
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>

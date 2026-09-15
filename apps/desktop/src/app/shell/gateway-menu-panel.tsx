@@ -8,7 +8,7 @@ import { Tip } from '@/components/ui/tooltip'
 import { getLogs } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { LayoutDashboard, Power, RefreshCw } from '@/lib/icons'
-import type { RuntimeReadinessResult } from '@/lib/runtime-readiness'
+import { runtimeReadinessForBrand, type RuntimeReadinessResult } from '@/lib/runtime-readiness'
 import { cn } from '@/lib/utils'
 import { reconnectGateway } from '@/store/gateway-reconnect'
 import { notifyError } from '@/store/notifications'
@@ -137,11 +137,13 @@ export function GatewayMenuPanel({
     onOpenAiConnection?.()
   }
 
+  const displayInferenceStatus = runtimeReadinessForBrand(inferenceStatus)
+
   const gatewayOpen = gatewayState === 'open'
   const showAdminChrome = !harnessMode
   const showProvisioningNotice = harnessMode && harnessProvisioning?.state && harnessProvisioning.state !== 'complete'
   const gatewayConnecting = gatewayState === 'connecting'
-  const inferenceReady = gatewayOpen && inferenceStatus?.ready === true
+  const inferenceReady = gatewayOpen && displayInferenceStatus?.ready === true
   const provisioningAlreadyOffersAiConnection =
     harnessProvisioning?.state === 'incomplete' && harnessProvisioning.missing.includes('inference')
 
@@ -154,9 +156,9 @@ export function GatewayMenuPanel({
       : prettyState(gatewayState || copy.offline)
 
   const inferenceLabel = gatewayOpen
-    ? inferenceStatus?.ready
+    ? displayInferenceStatus?.ready
       ? copy.inferenceReady
-      : inferenceStatus
+      : displayInferenceStatus
         ? copy.inferenceNotReady
         : copy.checkingInference
     : copy.disconnected
@@ -248,9 +250,9 @@ export function GatewayMenuPanel({
         </Section>
       )}
 
-      {inferenceStatus?.reason && (
+      {displayInferenceStatus?.reason && (
         <Section className="text-xs text-muted-foreground">
-          <div className="line-clamp-3">{inferenceStatus.reason}</div>
+          <div className="line-clamp-3">{displayInferenceStatus.reason}</div>
         </Section>
       )}
 

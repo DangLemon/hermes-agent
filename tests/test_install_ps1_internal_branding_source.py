@@ -70,3 +70,31 @@ def test_internal_shortcut_creation_never_targets_legacy_hermes_exe() -> None:
     assert "'Hermes.lnk'" in identity
     assert "$legacyTargets = @(" in shortcuts
     assert "Test-ShortcutOwnsTarget -Shortcut $legacy -TargetExe $TargetExe -WorkDir $workDir" in shortcuts
+
+
+def test_internal_windows_diagnostics_do_not_hardcode_hermes_product_copy() -> None:
+    source = _source()
+
+    stale_display_literals = (
+        "Then rerun Hermes setup.",
+        "bash-dependent Hermes features",
+        "Hermes needs Git Bash on Windows",
+        "-- Hermes may not find Git Bash.",
+        "non-Hermes python.exe",
+        "close Hermes processes",
+        "Close Hermes processes",
+    )
+
+    for literal in stale_display_literals:
+        assert literal not in source
+
+    for expected_reference in (
+        "$InstallerProductName setup",
+        "$InstallerProductName features",
+        "$InstallerProductName needs Git Bash",
+        "-- $InstallerProductName may not find Git Bash.",
+        "outside the $InstallerProductName ",
+        "close $InstallerProductName processes",
+        "Close $InstallerProductName processes",
+    ):
+        assert expected_reference in source

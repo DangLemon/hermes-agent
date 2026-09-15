@@ -352,10 +352,10 @@ $rawScript = Join-Path ([System.IO.Path]::GetTempPath()) "raw-install-$PID.ps1"
 Copy-Item -LiteralPath $installScript -Destination $rawScript -Force
 $result = Invoke-Normalization -ScriptPath $rawScript
 Assert-Equal -Expected 0 -Actual $result.ExitCode -Label "raw script: install.ps1 still reaches its early exit"
-Assert-Equal -Expected "NousResearch/hermes-agent" -Actual $result.Repository -Label "raw script keeps the Hermes repository"
-Assert-Equal -Expected "hermes-agent" -Actual $result.RuntimeDirName -Label "raw script keeps the Hermes runtime directory"
-Assert-Equal -Expected ".hermes-bootstrap-complete" -Actual $result.BootstrapMarker -Label "raw script keeps the Hermes bootstrap marker"
-Assert-Equal -Expected "$($longRoot)${sep}AppData${sep}Local\hermes" -Actual $result.HermesHome -Label "raw script keeps the Hermes home"
+Assert-Equal -Expected "DangLemon/hermes-agent" -Actual $result.Repository -Label "raw script chooses the Lemon repository"
+Assert-Equal -Expected "lemon-agent" -Actual $result.RuntimeDirName -Label "raw script chooses the Lemon runtime directory"
+Assert-Equal -Expected ".lemon-ai-bootstrap-complete" -Actual $result.BootstrapMarker -Label "raw script chooses the Lemon bootstrap marker"
+Assert-Equal -Expected $expectedLemonHome -Actual $result.HermesHome -Label "raw script chooses the Lemon home"
 
 $result = Invoke-Normalization -ScriptPath $rawScript -Environment @{ HERMES_INSTALLER_BRAND = 'lemon' }
 Assert-Equal -Expected "DangLemon/hermes-agent" -Actual $result.Repository -Label "brand=lemon overrides raw script default"

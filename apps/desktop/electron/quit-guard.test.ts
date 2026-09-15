@@ -60,3 +60,10 @@ test('quitPromptFor speaks singular for one chat', () => {
   assert.equal(prompt.message, 'Hermes is still working on 1 chat.')
   assert.ok(prompt.detail.includes('mid-turn'))
 })
+
+test('quitPromptFor can use the active desktop app name', () => {
+  const prompt = quitPromptFor({ count: 2, titles: ['Fix login'] }, false, 'Lemon AI')
+
+  assert.ok(prompt)
+  assert.equal(prompt.message, 'Lemon AI is still working on 2 chats.')
+})

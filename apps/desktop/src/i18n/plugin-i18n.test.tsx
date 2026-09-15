@@ -1,5 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import { BOTS_LOCALES } from '@/plugins/hermes-bots/i18n'
 
 import { I18nProvider, useI18n } from './context'
 import { createPluginI18n, registerPluginLocales, translatePlugin, usePluginI18n } from './plugin-i18n'
@@ -10,6 +12,7 @@ const noopTrack = (dispose: () => void) => dispose
 afterEach(() => {
   cleanup()
   setRuntimeI18nLocale('en')
+  vi.unstubAllGlobals()
 })
 
 describe('plugin locale registry', () => {
@@ -63,6 +66,38 @@ describe('plugin locale registry', () => {
 
     setRuntimeI18nLocale('ja')
     expect(i18n.t('greet')).toBe('こんにちは')
+  })
+
+  it('brands plugin translations while preserving interpolation values', () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+
+    const sourceEnvPath = ['~/.hermes/', 'env'].join('.')
+    const brandedEnvPath = ['~/.lemon-ai/', 'env'].join('.')
+    const command = 'hermes model'
+
+    const dispose = registerPluginLocales('branded-plugin', {
+      en: {
+        hint: (name: string) => `Run '${command}', then check ${sourceEnvPath} before reopening ${name} in Hermes Desktop.`
+      }
+    })
+
+    expect(translatePlugin('branded-plugin', 'en', 'hint', ['Hermes Agent.txt'])).toBe(
+      `Run '${command}', then check ${brandedEnvPath} before reopening Hermes Agent.txt in Lemon AI.`
+    )
+
+    dispose()
+  })
+
+  it('brands Bot Mode newer-desktop fallback through plugin i18n', () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+
+    const dispose = registerPluginLocales('hermes-bots-branding-test', BOTS_LOCALES)
+
+    expect(translatePlugin('hermes-bots-branding-test', 'en', 'bot.skillsNeedNewerDesktop', [])).toBe(
+      'Skills need a newer Lemon AI.'
+    )
+
+    dispose()
   })
 })
 

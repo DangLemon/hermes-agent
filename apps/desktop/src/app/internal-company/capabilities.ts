@@ -87,14 +87,57 @@ export function harnessEnvFromBuildConstants(constants: Partial<HarnessBuildCons
   }
 }
 
+const HARNESS_RUNTIME_GLOBAL_BY_CONSTANT: Record<keyof HarnessBuildConstants, string> = {
+  harness: '__HERMES_DESKTOP_HARNESS__',
+  showAgents: '__HERMES_HARNESS_SHOW_AGENTS__',
+  showCron: '__HERMES_HARNESS_SHOW_CRON__',
+  showMessaging: '__HERMES_HARNESS_SHOW_MESSAGING__',
+  showTerminal: '__HERMES_HARNESS_SHOW_TERMINAL__',
+  showWebhooks: '__HERMES_HARNESS_SHOW_WEBHOOKS__'
+}
+
+function buildConstantValue(name: keyof HarnessBuildConstants, compiledValue: string, fallback: string): string {
+  if (import.meta.env.MODE === 'test') {
+    const globalValue = (globalThis as unknown as Partial<Record<string, unknown>>)[
+      HARNESS_RUNTIME_GLOBAL_BY_CONSTANT[name]
+    ]
+
+    if (typeof globalValue === 'string') {
+      return globalValue
+    }
+  }
+
+  return compiledValue || fallback
+}
+
 export function internalCompanyBuildEnv(): HarnessEnv {
   return harnessEnvFromBuildConstants({
-    harness: typeof __HERMES_DESKTOP_HARNESS__ === 'string' ? __HERMES_DESKTOP_HARNESS__ : '',
-    showAgents: typeof __HERMES_HARNESS_SHOW_AGENTS__ === 'string' ? __HERMES_HARNESS_SHOW_AGENTS__ : 'false',
-    showCron: typeof __HERMES_HARNESS_SHOW_CRON__ === 'string' ? __HERMES_HARNESS_SHOW_CRON__ : 'true',
-    showMessaging: typeof __HERMES_HARNESS_SHOW_MESSAGING__ === 'string' ? __HERMES_HARNESS_SHOW_MESSAGING__ : 'false',
-    showTerminal: typeof __HERMES_HARNESS_SHOW_TERMINAL__ === 'string' ? __HERMES_HARNESS_SHOW_TERMINAL__ : 'true',
-    showWebhooks: typeof __HERMES_HARNESS_SHOW_WEBHOOKS__ === 'string' ? __HERMES_HARNESS_SHOW_WEBHOOKS__ : 'false'
+    harness: buildConstantValue('harness', typeof __HERMES_DESKTOP_HARNESS__ === 'string' ? __HERMES_DESKTOP_HARNESS__ : '', ''),
+    showAgents: buildConstantValue(
+      'showAgents',
+      typeof __HERMES_HARNESS_SHOW_AGENTS__ === 'string' ? __HERMES_HARNESS_SHOW_AGENTS__ : '',
+      'false'
+    ),
+    showCron: buildConstantValue(
+      'showCron',
+      typeof __HERMES_HARNESS_SHOW_CRON__ === 'string' ? __HERMES_HARNESS_SHOW_CRON__ : '',
+      'true'
+    ),
+    showMessaging: buildConstantValue(
+      'showMessaging',
+      typeof __HERMES_HARNESS_SHOW_MESSAGING__ === 'string' ? __HERMES_HARNESS_SHOW_MESSAGING__ : '',
+      'false'
+    ),
+    showTerminal: buildConstantValue(
+      'showTerminal',
+      typeof __HERMES_HARNESS_SHOW_TERMINAL__ === 'string' ? __HERMES_HARNESS_SHOW_TERMINAL__ : '',
+      'true'
+    ),
+    showWebhooks: buildConstantValue(
+      'showWebhooks',
+      typeof __HERMES_HARNESS_SHOW_WEBHOOKS__ === 'string' ? __HERMES_HARNESS_SHOW_WEBHOOKS__ : '',
+      'false'
+    )
   })
 }
 

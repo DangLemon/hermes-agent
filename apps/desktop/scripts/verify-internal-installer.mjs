@@ -28,7 +28,8 @@ const EXPECTED_WINDOWS_VERSION = {
 const EXPECTED_MAC_PLIST = {
   CFBundleDisplayName: 'Lemon AI',
   CFBundleName: 'Lemon AI',
-  CFBundleExecutable: 'Lemon AI'
+  CFBundleExecutable: 'Lemon AI',
+  NSHumanReadableCopyright: 'Copyright © 2026 Lemon Digital'
 }
 const MACHO_CPU_TYPES = {
   arm64: 0x0100000c,
@@ -203,6 +204,28 @@ export function validateGeneratedConfig(config) {
   assertEqual(config.executableName, 'Lemon AI', 'electron-builder executableName')
   assertEqual(config.extraMetadata?.name, 'lemon-ai', 'electron-builder extraMetadata.name')
   assertEqual(config.extraMetadata?.productName, 'Lemon AI', 'electron-builder extraMetadata.productName')
+  assertEqual(config.extraMetadata?.author?.name, 'Lemon Digital', 'electron-builder extraMetadata.author.name')
+  assertEqual(
+    config.extraMetadata?.description,
+    'Native desktop shell for Lemon AI.',
+    'electron-builder extraMetadata.description'
+  )
+  assertEqual(
+    config.extraMetadata?.homepage,
+    'https://github.com/DangLemon/hermes-agent',
+    'electron-builder extraMetadata.homepage'
+  )
+  assertEqual(
+    config.extraMetadata?.bugs?.url,
+    'https://github.com/DangLemon/hermes-agent/issues',
+    'electron-builder extraMetadata.bugs.url'
+  )
+  assertEqual(
+    config.extraMetadata?.repository?.url,
+    'git+https://github.com/DangLemon/hermes-agent.git',
+    'electron-builder extraMetadata.repository.url'
+  )
+  assertEqual(config.copyright, 'Copyright © 2026 Lemon Digital', 'electron-builder copyright')
   if (Object.hasOwn(config, 'publish')) fail('electron-builder config must not publish installers directly')
   assertEqual(config.mac?.executableName, 'Lemon AI', 'electron-builder mac.executableName')
   assertEqual(

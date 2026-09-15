@@ -14,6 +14,10 @@ function LanguageProbe({ target = 'zh' }: { target?: Locale }) {
       <p data-testid="locale">{locale}</p>
       <p data-testid="label">{t.language.label}</p>
       <p data-testid="save">{t.common.save}</p>
+      <p data-testid="install-title">{t.install.setupChoiceTitle}</p>
+      <p data-testid="install-one-time">{t.install.oneTimeTitle}</p>
+      <p data-testid="onboarding-title">{t.onboarding.headerTitle}</p>
+      <p data-testid="approval-desc">{t.assistant.approval.alwaysDescription('npm test')}</p>
       <p data-testid="loading">{String(isLoadingConfig)}</p>
       <p data-testid="saving">{String(isSavingLocale)}</p>
       <p data-testid="load-error">{configLoadError?.message ?? ''}</p>
@@ -42,6 +46,7 @@ describe('I18nProvider', () => {
 
     expect(screen.getByTestId('locale').textContent).toBe('en')
     expect(screen.getByTestId('label').textContent).toBe('Language')
+    expect(screen.getByTestId('install-title').textContent).toBe('Set up Hermes Desktop')
   })
 
   it('normalizes an initial locale alias and switches translations', async () => {
@@ -58,6 +63,7 @@ describe('I18nProvider', () => {
 
     await waitFor(() => expect(screen.getByTestId('locale').textContent).toBe('en'))
     expect(screen.getByTestId('label').textContent).toBe('Language')
+    expect(screen.getByTestId('install-title').textContent).toBe('Set up Hermes Desktop')
   })
 
   it('loads the initial locale from display.language config', async () => {
@@ -95,6 +101,7 @@ describe('I18nProvider', () => {
 
     expect(screen.getByTestId('locale').textContent).toBe('en')
     expect(screen.getByTestId('label').textContent).toBe('Language')
+    expect(screen.getByTestId('install-title').textContent).toBe('Set up Hermes Desktop')
     expect(configClient.saveConfig).not.toHaveBeenCalled()
   })
 
@@ -154,6 +161,11 @@ describe('I18nProvider', () => {
 
     expect(screen.getByTestId('locale').textContent).toBe('vi')
     expect(screen.getByTestId('save').textContent).toBe('Lưu')
+    expect(screen.getByTestId('install-title').textContent).toBe('Thiết lập Lemon AI')
+    expect(screen.getByTestId('install-one-time').textContent).toBe('Lemon AI cần cài đặt lần đầu')
+    expect(screen.getByTestId('onboarding-title').textContent).toBe('Thiết lập Lemon AI')
+    expect(screen.getByTestId('approval-desc').textContent).toContain('~/.lemon-ai/config.yaml')
+    expect(screen.getByTestId('approval-desc').textContent).not.toContain('Hermes')
     expect(configClient.saveConfig).not.toHaveBeenCalled()
   })
 
@@ -198,6 +210,8 @@ describe('I18nProvider', () => {
 
     expect(screen.getByTestId('locale').textContent).toBe('en')
     expect(screen.getByTestId('save').textContent).toBe('Save')
+    expect(screen.getByTestId('install-title').textContent).toBe('Set up Lemon AI')
+    expect(screen.getByTestId('approval-desc').textContent).toContain('~/.lemon-ai/config.yaml')
     expect(configClient.saveConfig).not.toHaveBeenCalled()
   })
 
@@ -304,6 +318,7 @@ describe('I18nProvider', () => {
 
     expect(screen.getByTestId('locale').textContent).toBe('en')
     expect(screen.getByTestId('label').textContent).toBe('Language')
+    expect(screen.getByTestId('install-title').textContent).toBe('Set up Hermes Desktop')
     expect(configClient.saveConfig).not.toHaveBeenCalled()
   })
 
@@ -401,5 +416,6 @@ describe('I18nProvider', () => {
 
     expect(screen.getByTestId('locale').textContent).toBe('en')
     expect(screen.getByTestId('label').textContent).toBe('Language')
+    expect(screen.getByTestId('install-title').textContent).toBe('Set up Hermes Desktop')
   })
 })

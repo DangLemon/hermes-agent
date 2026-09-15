@@ -12,6 +12,7 @@ import { $pluginRecords, type PluginRecord, setPluginEnabled } from '@/contrib/p
 import { discoverRuntimePlugins } from '@/contrib/runtime-loader'
 import { getProfiles } from '@/hermes'
 import { useI18n } from '@/i18n'
+import { appBrand } from '@/lib/app-brand'
 import { triggerHaptic } from '@/lib/haptics'
 import { FolderOpen, Monitor, Package, RefreshCw } from '@/lib/icons'
 import { normalize } from '@/lib/text'
@@ -171,6 +172,7 @@ function AgentPluginRowView({ row, profile }: { row: AgentPluginRow; profile: st
 }
 
 function AgentPluginsSection() {
+  const brand = appBrand()
   const { t } = useI18n()
   const p = t.settings.plugins
   const { requestGateway } = useGatewayRequest()
@@ -253,7 +255,7 @@ function AgentPluginsSection() {
             <SelectContent>
               {profiles.map(profile => (
                 <SelectItem key={profile.name} value={profile.name}>
-                  {profile.is_default ? 'Hermes (default)' : profile.name}
+                  {profile.is_default ? `${brand.appName} (default)` : profile.name}
                 </SelectItem>
               ))}
             </SelectContent>

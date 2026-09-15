@@ -32,9 +32,10 @@
 import { type PluginLocaleBundles, type PluginTranslate, usePluginI18n } from '@hermes/plugin-sdk'
 import { useMemo } from 'react'
 
+import { brandDisplayString, type BrandEnv } from './labels'
 import { getPluginCtx } from './shared'
 
-type BotsMessages = {
+export type BotsMessages = {
   /** Left rail: the bot + group-chat roster. */
   roster: {
     search: string
@@ -116,6 +117,7 @@ type BotsMessages = {
     advanced: string
     advancedHint: string
     advancedFailed: string
+    skillsNeedNewerDesktop: string
     openAnotherChatUnsupported: string
     remoteConnectionsUnsupported: string
     /** Stands under the bot's name in a chat it has not spoken in yet. */
@@ -345,6 +347,7 @@ const en: BotsMessages = {
     advanced: 'Advanced',
     advancedHint: 'Advanced — model, skills, toolsets, SOUL.md',
     advancedFailed: 'Advanced configuration failed',
+    skillsNeedNewerDesktop: 'Skills need a newer Hermes Desktop.',
     openAnotherChatUnsupported: 'Update Hermes Desktop to open another Bot chat.',
     remoteConnectionsUnsupported: 'Update Hermes Desktop to chat with bots on other connections.',
     chatEmpty: 'Say something to get started.',
@@ -562,6 +565,7 @@ const ja: BotsMessages = {
     advanced: '詳細設定',
     advancedHint: '詳細設定 — モデル、スキル、ツールセット、SOUL.md',
     advancedFailed: '詳細設定に失敗しました',
+    skillsNeedNewerDesktop: 'スキルを使うには Hermes Desktop の更新が必要です。',
     openAnotherChatUnsupported: '別のボットチャットを開くには Hermes Desktop を更新してください。',
     remoteConnectionsUnsupported: '他の接続上のボットとチャットするには Hermes Desktop を更新してください。',
     chatEmpty: '何か書いて始めましょう。',
@@ -775,6 +779,7 @@ const zh: BotsMessages = {
     advanced: '高级',
     advancedHint: '高级 — 模型、技能、工具集、SOUL.md',
     advancedFailed: '高级配置失败',
+    skillsNeedNewerDesktop: '技能需要更新版 Hermes Desktop。',
     openAnotherChatUnsupported: '请更新 Hermes Desktop 以打开另一个机器人聊天。',
     remoteConnectionsUnsupported: '请更新 Hermes Desktop 以与其他连接上的机器人聊天。',
     chatEmpty: '说点什么开始吧。',
@@ -988,6 +993,7 @@ const zhHant: BotsMessages = {
     advanced: '進階',
     advancedHint: '進階 — 模型、技能、工具集、SOUL.md',
     advancedFailed: '進階設定失敗',
+    skillsNeedNewerDesktop: '技能需要更新版 Hermes Desktop。',
     openAnotherChatUnsupported: '請更新 Hermes Desktop 以開啟另一個機器人聊天。',
     remoteConnectionsUnsupported: '請更新 Hermes Desktop 以與其他連線上的機器人聊天。',
     chatEmpty: '說點什麼開始吧。',
@@ -1127,8 +1133,34 @@ const zhHant: BotsMessages = {
   }
 }
 
+function brandMessages<T extends object>(messages: T, env: BrandEnv = import.meta.env): T {
+  const out = {} as Record<string, unknown>
+
+  for (const [key, value] of Object.entries(messages)) {
+    out[key] =
+      typeof value === 'function'
+        ? (...args: unknown[]) => brandDisplayString((value as (...a: unknown[]) => string)(...args), env, args)
+        : value && typeof value === 'object'
+          ? brandMessages(value as object, env)
+          : typeof value === 'string'
+            ? brandDisplayString(value, env)
+            : value
+  }
+
+  return out as T
+}
+
+export function brandBotsLocaleBundlesForEnv(env: BrandEnv = import.meta.env): PluginLocaleBundles {
+  return {
+    en: brandMessages(en, env),
+    ja: brandMessages(ja, env),
+    zh: brandMessages(zh, env),
+    'zh-hant': brandMessages(zhHant, env)
+  }
+}
+
 /** Registered via `ctx.i18n.register` at plugin load (disposer tracked). */
-export const BOTS_LOCALES: PluginLocaleBundles = { en, ja, zh, 'zh-hant': zhHant }
+export const BOTS_LOCALES: PluginLocaleBundles = brandBotsLocaleBundlesForEnv()
 
 // Bind the message SHAPE to a plugin translator: string leaves resolve now,
 // function leaves forward their args through t(path, …).
@@ -1169,7 +1201,7 @@ export function useBots(): BotsText {
  *  that beats `ctx.i18n` into existence, so an unresolved key never ships as
  *  the literal `cron.runsHourly`. */
 function english(key: string, ...args: unknown[]): string {
-  const leaf = key.split('.').reduce<unknown>((node, part) => (node as Record<string, unknown>)?.[part], en)
+  const leaf = key.split('.').reduce<unknown>((node, part) => (node as Record<string, unknown>)?.[part], BOTS_LOCALES.en)
 
   return typeof leaf === 'function' ? (leaf as (...a: unknown[]) => string)(...args) : String(leaf ?? key)
 }

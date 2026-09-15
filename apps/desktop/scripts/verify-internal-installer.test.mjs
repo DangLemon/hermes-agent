@@ -134,12 +134,26 @@ function validGeneratedConfig() {
     icon: 'assets/lemon-icon',
     extraMetadata: {
       name: 'lemon-ai',
-      productName: 'Lemon AI'
+      productName: 'Lemon AI',
+      author: {
+        name: 'Lemon Digital'
+      },
+      description: 'Native desktop shell for Lemon AI.',
+      homepage: 'https://github.com/DangLemon/hermes-agent',
+      bugs: {
+        url: 'https://github.com/DangLemon/hermes-agent/issues'
+      },
+      repository: {
+        type: 'git',
+        url: 'git+https://github.com/DangLemon/hermes-agent.git'
+      }
     },
+    copyright: 'Copyright © 2026 Lemon Digital',
     mac: {
       executableName: 'Lemon AI',
       extendInfo: {
-        CFBundleExecutable: 'Lemon AI'
+        CFBundleExecutable: 'Lemon AI',
+        NSHumanReadableCopyright: 'Copyright © 2026 Lemon Digital'
       }
     },
     dmg: {
@@ -201,6 +215,7 @@ function makePlist(filePath, values = {}) {
     CFBundleDisplayName: 'Lemon AI',
     CFBundleName: 'Lemon AI',
     CFBundleExecutable: 'Lemon AI',
+    NSHumanReadableCopyright: 'Copyright © 2026 Lemon Digital',
     ...values
   }
   const body = Object.entries(merged)

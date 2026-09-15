@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { formatErrorDiagnostics, parseErrorSurface } from './error-surface'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 describe('parseErrorSurface', () => {
   it('accepts a valid descriptor', () => {
@@ -46,6 +50,29 @@ describe('parseErrorSurface', () => {
     expect(surface?.model).toBe('test/m1')
     // Absent identity yields no keys, not empty strings.
     expect(parseErrorSurface({ layer: 'provider', code: 'x', retryable: true })?.provider).toBeUndefined()
+  })
+})
+
+describe('formatErrorDiagnostics', () => {
+  it('brands the copyable error details wrapper while preserving raw backend error text', () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+    const sourceEnvPath = ['~/.hermes/', 'env'].join('.')
+
+    const details = formatErrorDiagnostics({
+      appVersion: '1.2.3',
+      errorText: `Run 'hermes model', then check ${sourceEnvPath} because Hermes backend failed.`,
+      model: 'gpt-5',
+      provider: 'openai',
+      surface: { layer: 'gateway', code: 'boot_failed', retryable: false }
+    })
+
+    expect(details).toContain('Lemon AI error details')
+    expect(details).toContain(`error: Run 'hermes model', then check ${sourceEnvPath} because Hermes backend failed.`)
+    expect(details).toContain('layer: gateway')
+    expect(details).toContain('code: boot_failed')
+    expect(details).toContain('provider: openai')
+    expect(details).toContain('model: gpt-5')
+    expect(details).toContain('app: 1.2.3')
   })
 })
 

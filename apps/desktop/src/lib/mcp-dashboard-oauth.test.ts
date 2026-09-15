@@ -165,6 +165,31 @@ describe('completeMcpDesktopOAuth', () => {
     ).rejects.toThrow(/Hermes Desktop app/)
   })
 
+  it('brands custom desktop loopback missing-bridge errors for internal builds', async () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+    vi.stubGlobal('window', { setTimeout: (_callback: () => void) => 0 })
+
+    await expect(
+      completeMcpDesktopOAuth({
+        serverName: 'amazon-ads',
+        start: vi.fn().mockResolvedValue({
+          flow_id: 'flow-browser',
+          server_name: 'amazon-ads',
+          status: 'authorization_required',
+          authorization_url: 'https://idp.example/authorize?state=expected-state',
+          error: null,
+          callback_transport: 'desktop_loopback',
+          callback_redirect_uri: 'http://localhost:8000/auth/callback',
+          callback_expected_state: 'expected-state'
+        }),
+        status: vi.fn(),
+        relayCallback: vi.fn(),
+        openExternal: vi.fn(),
+        sleep: async () => {}
+      })
+    ).rejects.toThrow(/Lemon AI app/)
+  })
+
   it('cancels the backend flow when desktop listener setup fails', async () => {
     const cancel = vi.fn().mockResolvedValue({ ok: true })
     const listen = vi.fn().mockRejectedValue(new Error('port already in use'))

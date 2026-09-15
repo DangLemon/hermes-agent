@@ -12,7 +12,7 @@ import { EventEmitter } from 'node:events'
 
 import { test } from 'vitest'
 
-import { runNativeLogin } from './native-oauth-login'
+import { nativeLoginDoneHtml, runNativeLogin } from './native-oauth-login'
 
 // A fake http.Server: captures the request handler, lets the test drive a
 // synthetic browser callback, and records listen/close lifecycle.
@@ -47,6 +47,13 @@ function makeFakeServerFactory(port = 51234) {
 
   return { createServer, state }
 }
+
+test('native callback page uses the active desktop product name', () => {
+  const html = nativeLoginDoneHtml('Lemon AI')
+
+  assert.match(html, /Signed in to Lemon AI/)
+  assert.doesNotMatch(html, /Signed in to Hermes/)
+})
 
 test('runNativeLogin completes the loopback round trip and returns tokens', async () => {
   const { createServer, state } = makeFakeServerFactory()
