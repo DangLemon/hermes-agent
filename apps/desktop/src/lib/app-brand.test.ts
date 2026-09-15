@@ -178,6 +178,24 @@ describe('appBrandForEnv', () => {
     )
   })
 
+  it('preserves internal Hermes protocol, IPC channel, package, and module identifiers', () => {
+    const source =
+      'Open Hermes Desktop for hermes://open/settings/plugins, call hermes:api, import @hermes/plugin-sdk, and load hermes-agent from /opt/hermes-agent/bin.'
+
+    expect(replaceHermesBrandTerms(source, lemonAppBrand)).toBe(
+      'Open Lemon AI for hermes://open/settings/plugins, call hermes:api, import @hermes/plugin-sdk, and load hermes-agent from /opt/hermes-agent/bin.'
+    )
+  })
+
+  it('preserves lower-case technical identifiers while keeping legacy Hermes home display branding', () => {
+    const source =
+      'Store data-hermes-mode and hermes.desktop.routeTiles.v1 next to ~/.hermes/config.yaml for Hermes Desktop.'
+
+    expect(replaceHermesBrandTerms(source, lemonAppBrand)).toBe(
+      'Store data-hermes-mode and hermes.desktop.routeTiles.v1 next to ~/.lemon-ai/config.yaml for Lemon AI.'
+    )
+  })
+
   it('preserves explicit runtime values while branding static copy', () => {
     const source =
       'Hermes Desktop could not open Hermes Agent.txt from https://example.com/Hermes and reported: Hermes gateway unavailable.'

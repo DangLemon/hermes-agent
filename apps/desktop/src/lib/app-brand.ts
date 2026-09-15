@@ -86,6 +86,9 @@ const BRAND_VALUE_TOKEN_SUFFIX = '\uE001'
 const BRAND_SPAN_TOKEN_PREFIX = '\uE000lemon-span-'
 const HERMES_EXECUTABLE = /\bhermes\b/g
 
+const HERMES_TECHNICAL_CONTRACT =
+  /@hermes\/[A-Za-z0-9][A-Za-z0-9._/-]*|\bhermes:\/\/[^\s<>"'`,;)]*|\bhermes:(?!\/\/)[A-Za-z0-9][A-Za-z0-9._:-]*|\bhermes[._/-][A-Za-z0-9][A-Za-z0-9._/-]*/g
+
 const CLI_CONTEXT_WORDS = new Set([
   'command',
   'execute',
@@ -329,6 +332,18 @@ function protectHermesCliSpans(input: string, protect: (original: string) => str
   return output + input.slice(cursor)
 }
 
+function protectHermesTechnicalContracts(input: string, protect: (original: string) => string): string {
+  HERMES_TECHNICAL_CONTRACT.lastIndex = 0
+
+  return input.replace(HERMES_TECHNICAL_CONTRACT, (match, offset: number) => {
+    if (input[offset - 1] === '.') {
+      return match
+    }
+
+    return protect(match)
+  })
+}
+
 function protectInterpolationValues(input: string, values: readonly unknown[]): ProtectedBrandText {
   const replacements: Array<{ original: string; token: string }> = []
   let text = input
@@ -365,10 +380,11 @@ function protectDisplaySpans(input: string): ProtectedBrandText {
   }
 
   // Keep URLs and lower-case executable CLI command spans intact. Product
-  // names inside quotes/backticks remain brandable display copy unless the
-  // span is the lower-case `hermes` executable.
+  // names inside quotes/backticks remain brandable display copy unless the span
+  // is a lower-case executable or technical contract identifier.
   const textWithProtectedUrls = input.replace(/https?:\/\/[^\s<>"'`]+/gi, protect)
-  const text = protectHermesCliSpans(textWithProtectedUrls, protect)
+  const textWithProtectedContracts = protectHermesTechnicalContracts(textWithProtectedUrls, protect)
+  const text = protectHermesCliSpans(textWithProtectedContracts, protect)
 
   return {
     restore: value =>
