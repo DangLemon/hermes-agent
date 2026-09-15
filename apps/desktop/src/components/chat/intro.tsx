@@ -2,7 +2,7 @@ import { useState } from 'react'
 
 import { type ComposerTarget, requestComposerFocus, requestComposerInsert } from '@/app/chat/composer/focus'
 import { useI18n } from '@/i18n'
-import { appBrand } from '@/lib/app-brand'
+import { appBrand, replaceHermesBrandTerms } from '@/lib/app-brand'
 import { BarChart3, Clipboard, FileText, NotebookTabs } from '@/lib/icons'
 import { capitalize, normalize } from '@/lib/text'
 import { cn } from '@/lib/utils'
@@ -187,6 +187,12 @@ export function Intro({ composerDisabled = false, composerTarget = 'active', per
   const [mountSeed] = useState(() => Math.floor(Math.random() * 100000))
   const brand = appBrand()
   const copy = resolveCopy(personality, mountSeed + (seed ?? 0), brand.displayName)
+
+  const displayCopy = {
+    body: replaceHermesBrandTerms(copy.body, brand),
+    headline: replaceHermesBrandTerms(copy.headline, brand)
+  }
+
   const internalCopy = t.internalWorkspace
 
   return (
@@ -241,7 +247,7 @@ export function Intro({ composerDisabled = false, composerTarget = 'active', per
         ) : (
           <>
             <Wordmark className="mb-1" text={brand.wordmark} />
-            <p className="m-0 text-center leading-normal tracking-tight">{copy.body}</p>
+            <p className="m-0 text-center leading-normal tracking-tight">{displayCopy.body}</p>
           </>
         )}
       </div>

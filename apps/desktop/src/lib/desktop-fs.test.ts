@@ -97,6 +97,14 @@ describe('desktop filesystem facade', () => {
     expect(api).not.toHaveBeenCalled()
   })
 
+  it('brands missing bridge errors for internal builds', async () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+    vi.stubGlobal('window', {})
+    $connection.set({ mode: 'local' } as never)
+
+    await expect(readDesktopDir('/work')).rejects.toThrow('Lemon AI bridge is unavailable')
+  })
+
   it('routes filesystem reads through authenticated backend REST in remote mode', async () => {
     $connection.set({ mode: 'remote' } as never)
 

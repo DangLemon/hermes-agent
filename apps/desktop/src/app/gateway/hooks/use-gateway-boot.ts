@@ -5,6 +5,7 @@ import { shouldApplyPostBootProgressError } from '@/components/boot-failure-reau
 import type { HermesConnection } from '@/global'
 import { HermesGateway } from '@/hermes'
 import { translateNow } from '@/i18n'
+import { appBrand, replaceHermesBrandTerms } from '@/lib/app-brand'
 import { desktopDefaultCwd } from '@/lib/desktop-fs'
 import { decideLivenessForceClose, LIVENESS_REPROBE_DELAY_MS } from '@/lib/gateway-liveness-policy'
 import { reconnectBackoffDelayMs } from '@/lib/reconnect-backoff'
@@ -82,6 +83,8 @@ import { windowProfileOverride } from '@/store/windows'
 import type { RpcEvent } from '@/types/hermes'
 
 import { stashGatewaySurvivor, survivorIsStale, takeGatewaySurvivor } from './gateway-hmr-survivor'
+
+const brandCopy = (value: string) => replaceHermesBrandTerms(value, appBrand())
 
 // After the reconnect loop has been failing for this long, raise a NON-blocking
 // warning toast. Full-screen BootFailureOverlay used to lock the user out of
@@ -327,7 +330,7 @@ export function useGatewayBoot({
         const conn = await withTimeout(
           desktop.getConnection(),
           RECONNECT_ATTEMPT_TIMEOUT_MS,
-          'Timed out reconnecting to Hermes backend'
+          brandCopy('Timed out reconnecting to Hermes backend')
         )
 
         setPrimaryGatewayConnection(conn)
@@ -609,7 +612,7 @@ export function useGatewayBoot({
         const conn = await withTimeout(
           desktop.getConnection(windowProfileOverride() ?? undefined),
           BACKEND_BOOT_WAIT_TIMEOUT_MS,
-          'Timed out reconnecting to Hermes backend'
+          brandCopy('Timed out reconnecting to Hermes backend')
         )
 
         if (!ownsSwitch()) {
@@ -991,7 +994,7 @@ export function useGatewayBoot({
         const conn = await withTimeout(
           desktop.getConnection(windowProfileOverride() ?? undefined),
           BACKEND_BOOT_WAIT_TIMEOUT_MS,
-          'Timed out connecting to Hermes backend'
+          brandCopy('Timed out connecting to Hermes backend')
         )
 
         if (cancelled) {

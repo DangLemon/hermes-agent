@@ -1,3 +1,4 @@
+import { appBrand, replaceHermesBrandTerms } from '@/lib/app-brand'
 import type { NativeNotificationInput } from '@/store/native-notifications'
 import { dismissNotification, type NotificationInput, type NotificationKind, notify } from '@/store/notifications'
 
@@ -31,6 +32,10 @@ const LEVEL_TO_TOAST_KIND: Record<string, NotificationKind> = {
   info: 'info',
   success: 'success',
   warn: 'warning'
+}
+
+function brandStaticNoticeText(text: string): string {
+  return replaceHermesBrandTerms(text, appBrand())
 }
 
 // The severity glyphs the Python notice policy prefixes (`•` `⚠` `✕`/`✗` `✓`),
@@ -201,6 +206,6 @@ export function nativeNoticeInput(
     body: text,
     global: true,
     kind: 'credits',
-    title
+    title: brandStaticNoticeText(title)
   }
 }

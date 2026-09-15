@@ -18,6 +18,7 @@ import {
   resolveDesktopRuntimeIdentity,
   resolveDesktopRuntimeRoot,
   resolveInternalDesktopBuild,
+  runtimeDisplayCopy,
   shouldPreferWindowsDesktopRegistry,
   shouldReadWindowsHermesHomeRegistry
 } from './desktop-runtime-identity'
@@ -30,7 +31,8 @@ test('desktop runtime child env carries Lemon identity and compatibility variabl
       hermesHome: '/Users/test/.lemon-ai',
       identity: LEMON_AI_IDENTITY,
       internalBuild: true,
-      legacyHarnessConfigPath: '/tmp/legacy-harness.json'
+      legacyHarnessConfigPath: '/tmp/legacy-harness.json',
+      updateRepository: 'DangLemon/hermes-agent'
     }),
     {
       HERMES_BOOTSTRAP_MARKER_NAME: '.lemon-ai-bootstrap-complete',
@@ -40,6 +42,7 @@ test('desktop runtime child env carries Lemon identity and compatibility variabl
       HERMES_DESKTOP_RUNTIME_DIR_NAME: 'lemon-agent',
       HERMES_HOME: '/Users/test/.lemon-ai',
       HERMES_INSTALL_RUNTIME_DIR_NAME: 'lemon-agent',
+      HERMES_UPDATE_REPOSITORY: 'DangLemon/hermes-agent',
       LEMON_AI_DESKTOP_INTERNAL: '1',
       LEMON_AI_HOME: '/Users/test/.lemon-ai',
       LEMON_AI_INSTALL_RUNTIME_DIR_NAME: 'lemon-agent',
@@ -50,6 +53,23 @@ test('desktop runtime child env carries Lemon identity and compatibility variabl
       HERMES_UPDATE_RESULT_NAME: '.lemon-ai-update-result.json'
     }
   )
+})
+
+
+test('runtime display copy rewrites Lemon-visible Hermes terms without changing upstream copy', () => {
+  const upstream = runtimeDisplayCopy(HERMES_IDENTITY)
+  const lemon = runtimeDisplayCopy(LEMON_AI_IDENTITY)
+  const source = "Hermes backend failed. Re-run 'hermes model' or edit ~/.hermes/config.yaml for the Hermes Agent."
+
+  assert.equal(upstream.rewriteUserText(source), source)
+  assert.equal(
+    lemon.rewriteUserText(source),
+    "Lemon AI backend failed. Re-run 'hermes model' or edit ~/.lemon-ai/config.yaml for the Lemon AI."
+  )
+  assert.equal(lemon.backendName, 'Lemon AI backend')
+  assert.equal(lemon.gatewayName, 'Lemon AI gateway')
+  assert.equal(lemon.envPath, '~/.lemon-ai/.env')
+  assert.equal(lemon.rewriteUserText('Hermes is ready.'), 'Lemon AI is ready.')
 })
 
 test('ordinary desktop runtime identity keeps the Hermes filesystem contract', () => {

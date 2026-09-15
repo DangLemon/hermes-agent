@@ -22,6 +22,7 @@ import {
   updateMessagingPlatform
 } from '@/hermes'
 import { type Translations, useI18n } from '@/i18n'
+import { appBrand, replaceHermesBrandTerms } from '@/lib/app-brand'
 import { openExternalLink } from '@/lib/external-link'
 import { ExternalLink, Save, Trash2 } from '@/lib/icons'
 import { normalize } from '@/lib/text'
@@ -57,6 +58,8 @@ const PILL_TONE: Record<StatusTone, string> = {
 
 const stateLabel = (state: null | string | undefined, m: Translations['messaging']) =>
   state ? m.states[state] || state.replace(/_/g, ' ') : m.unknown
+
+const brandMessagingText = (value: string) => replaceHermesBrandTerms(value, appBrand())
 
 function stateTone({ enabled, state }: MessagingPlatformInfo): StatusTone {
   if (!enabled) {
@@ -601,13 +604,13 @@ function PlatformDetail({
             {!platform.gateway_running && <SetupPill active={false}>{m.gatewayStopped}</SetupPill>}
           </div>
           <p className="mt-1 text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)">
-            {platform.description}
+            {brandMessagingText(platform.description)}
           </p>
           <PlatformHint platform={platform} />
         </div>
       </header>
 
-      {platform.error_message && <ErrorBanner>{platform.error_message}</ErrorBanner>}
+      {platform.error_message && <ErrorBanner>{brandMessagingText(platform.error_message)}</ErrorBanner>}
 
       {/* Pending pairing requests. Rendered only when someone is actually
           waiting — an empty-state card here would be permanent chrome on a
@@ -847,7 +850,10 @@ const PLATFORM_INTRO: Record<string, string> = {
 }
 
 const introCopy = (platform: MessagingPlatformInfo, m: Translations['messaging']) =>
-  m.platformIntro[platform.id] || PLATFORM_INTRO[platform.id] || platform.description
+  m.platformIntro[platform.id] ||
+  (PLATFORM_INTRO[platform.id]
+    ? brandMessagingText(PLATFORM_INTRO[platform.id])
+    : brandMessagingText(platform.description))
 
 function MessagingField({
   edits,

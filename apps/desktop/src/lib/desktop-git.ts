@@ -8,6 +8,7 @@ import type {
   HermesReviewShipInfo
 } from '@/global'
 import { hermesApi } from '@/hermes'
+import { replaceHermesBrandTerms } from '@/lib/app-brand'
 
 import { desktopFsProfile, isDesktopFsRemoteMode } from './desktop-fs'
 
@@ -19,11 +20,11 @@ import { desktopFsProfile, isDesktopFsRemoteMode } from './desktop-fs'
 
 type GitBridge = NonNullable<NonNullable<Window['hermesDesktop']>['git']>
 
-function desktopApi<T>(path: string, body?: Record<string, unknown>): Promise<T> {
+async function desktopApi<T>(path: string, body?: Record<string, unknown>): Promise<T> {
   const desktop = window.hermesDesktop
 
   if (!desktop) {
-    throw new Error('Hermes Desktop bridge is unavailable')
+    throw new Error(replaceHermesBrandTerms('Hermes Desktop bridge is unavailable'))
   }
 
   return hermesApi<T>(

@@ -28,6 +28,7 @@
  * trust seam.
  */
 
+import { replaceHermesBrandTerms } from '@/lib/app-brand'
 import { installPluginSdk, sdkImportMap } from '@/sdk/runtime'
 import { notifyError } from '@/store/notifications'
 
@@ -318,7 +319,9 @@ async function readPluginSourceText(file: string): Promise<string> {
 
   if (result.truncated) {
     throw new PluginSourceOversizeError(
-      "plugin.js exceeds this shell's 512 KiB read limit — update Hermes Desktop to load larger plugins"
+      replaceHermesBrandTerms(
+        "plugin.js exceeds this shell's 512 KiB read limit — update Hermes Desktop to load larger plugins"
+      )
     )
   }
 

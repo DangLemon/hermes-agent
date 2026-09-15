@@ -149,3 +149,24 @@ def test_never_raises_on_io_error(tmp_path):
     home, root = _setup(tmp_path)
     with patch.object(cli_main, "get_hermes_home", side_effect=OSError("boom")):
         cli_main._refresh_bootstrap_cache_scripts()  # must not raise
+
+
+def test_repository_specific_mutable_branch_cache_entries_are_removed(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_UPDATE_REPOSITORY", "DangLemon/hermes-agent")
+    home, root = _setup(tmp_path)
+    cache = home / "bootstrap-cache"
+    ps1 = cache / "install-DangLemon__hermes-agent-main.ps1"
+    sh = cache / "install-DangLemon__hermes-agent-main.sh"
+    pinned = cache / ("install-DangLemon__hermes-agent-" + "a" * 40 + ".ps1")
+    unrelated = cache / "install-OtherOrg__runtime-agent-main.ps1"
+    ps1.write_bytes(b"stale repo ps1")
+    sh.write_bytes(b"stale repo sh")
+    pinned.write_bytes(b"pinned bytes")
+    unrelated.write_bytes(b"other repo cache")
+
+    _run(home, root, branch="main")
+
+    assert not ps1.exists()
+    assert not sh.exists()
+    assert pinned.read_bytes() == b"pinned bytes"
+    assert unrelated.read_bytes() == b"other repo cache"

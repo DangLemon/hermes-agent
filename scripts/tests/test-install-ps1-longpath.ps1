@@ -326,9 +326,9 @@ Assert-Equal -Expected 'lemon-runtime' -Actual $result.RuntimeDirName -Label "ch
 
 $invalidHarness = Join-Path ([System.IO.Path]::GetTempPath()) "missing-harness-selector-$PID.json"
 $result = Invoke-Normalization -Environment @{ LEMON_AI_DESKTOP_HARNESS_CONFIG = $invalidHarness }
-Assert-Equal -Expected "NousResearch/hermes-agent" -Actual $result.Repository -Label "invalid explicit selector keeps the Hermes repository"
-Assert-Equal -Expected "hermes-agent" -Actual $result.RuntimeDirName -Label "invalid explicit selector keeps the Hermes runtime directory"
-Assert-Equal -Expected ".hermes-bootstrap-complete" -Actual $result.BootstrapMarker -Label "invalid explicit selector keeps the Hermes bootstrap marker"
+Assert-Equal -Expected "DangLemon/hermes-agent" -Actual $result.Repository -Label "invalid explicit selector keeps the Lemon repository"
+Assert-Equal -Expected "lemon-agent" -Actual $result.RuntimeDirName -Label "invalid explicit selector keeps the Lemon runtime directory"
+Assert-Equal -Expected ".lemon-ai-bootstrap-complete" -Actual $result.BootstrapMarker -Label "invalid explicit selector keeps the Lemon bootstrap marker"
 
 $result = Invoke-Normalization -Environment @{ HERMES_INSTALLER_BRAND = 'hermes' }
 Assert-Equal -Expected "NousResearch/hermes-agent" -Actual $result.Repository -Label "brand=hermes overrides checkout manifest"
@@ -336,14 +336,26 @@ Assert-Equal -Expected "hermes-agent" -Actual $result.RuntimeDirName -Label "bra
 Assert-Equal -Expected ".hermes-bootstrap-complete" -Actual $result.BootstrapMarker -Label "brand=hermes keeps the Hermes bootstrap marker"
 Assert-Equal -Expected "https://hermes-agent.nousresearch.com/install.ps1" -Actual $result.RecoveryUrl -Label "brand=hermes keeps the Hermes recovery URL"
 
+$result = Invoke-Normalization -Environment @{ HERMES_INSTALLER_BRAND = 'hermes' } `
+    -ExtraArgs @('-Repository', 'ExampleOrg/runtime-agent')
+Assert-Equal -Expected "ExampleOrg/runtime-agent" -Actual $result.Repository -Label "explicit custom repository selects the requested repository"
+Assert-Equal -Expected "https://raw.githubusercontent.com/ExampleOrg/runtime-agent/main/scripts/install.ps1" -Actual $result.RecoveryUrl -Label "explicit custom repository selects a repository-aware recovery URL"
+
+$result = Invoke-Normalization -Environment @{
+    HERMES_INSTALLER_BRAND = 'hermes'
+    HERMES_INSTALL_REPOSITORY = 'ExampleOrg/env-agent'
+}
+Assert-Equal -Expected "ExampleOrg/env-agent" -Actual $result.Repository -Label "environment custom repository selects the requested repository"
+Assert-Equal -Expected "https://raw.githubusercontent.com/ExampleOrg/env-agent/main/scripts/install.ps1" -Actual $result.RecoveryUrl -Label "environment custom repository selects a repository-aware recovery URL"
+
 $rawScript = Join-Path ([System.IO.Path]::GetTempPath()) "raw-install-$PID.ps1"
 Copy-Item -LiteralPath $installScript -Destination $rawScript -Force
 $result = Invoke-Normalization -ScriptPath $rawScript
 Assert-Equal -Expected 0 -Actual $result.ExitCode -Label "raw script: install.ps1 still reaches its early exit"
-Assert-Equal -Expected "NousResearch/hermes-agent" -Actual $result.Repository -Label "raw script keeps the Hermes repository"
-Assert-Equal -Expected "hermes-agent" -Actual $result.RuntimeDirName -Label "raw script keeps the Hermes runtime directory"
-Assert-Equal -Expected ".hermes-bootstrap-complete" -Actual $result.BootstrapMarker -Label "raw script keeps the Hermes bootstrap marker"
-Assert-Equal -Expected "$($longRoot)${sep}AppData${sep}Local\hermes" -Actual $result.HermesHome -Label "raw script keeps the Hermes home"
+Assert-Equal -Expected "DangLemon/hermes-agent" -Actual $result.Repository -Label "raw script chooses the Lemon repository"
+Assert-Equal -Expected "lemon-agent" -Actual $result.RuntimeDirName -Label "raw script chooses the Lemon runtime directory"
+Assert-Equal -Expected ".lemon-ai-bootstrap-complete" -Actual $result.BootstrapMarker -Label "raw script chooses the Lemon bootstrap marker"
+Assert-Equal -Expected $expectedLemonHome -Actual $result.HermesHome -Label "raw script chooses the Lemon home"
 
 $result = Invoke-Normalization -ScriptPath $rawScript -Environment @{ HERMES_INSTALLER_BRAND = 'lemon' }
 Assert-Equal -Expected "DangLemon/hermes-agent" -Actual $result.Repository -Label "brand=lemon overrides raw script default"

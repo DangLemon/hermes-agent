@@ -73,6 +73,22 @@ export interface RegistryConnection {
   remoteProfile?: string
 }
 
+interface ConnectionRegistryDisplayOptions {
+  appName?: string
+}
+
+function appNameFromOptions(options: ConnectionRegistryDisplayOptions = {}): string {
+  return String(options.appName || 'Hermes').trim() || 'Hermes'
+}
+
+function defaultLabelForRemoteKind(
+  kind: 'cloud' | 'remote',
+  url: string,
+  options: ConnectionRegistryDisplayOptions
+): string {
+  return hostLabelFromBaseUrl(url) || (kind === 'cloud' ? `${appNameFromOptions(options)} Cloud` : 'Remote gateway')
+}
+
 /**
  * A registry entry that failed normalization (#94246). The raw entry is USER
  * DATA — it is preserved verbatim here (and re-persisted on every write)
@@ -1233,7 +1249,7 @@ export function normalizeRegistry(raw: unknown): ConnectionRegistry {
  * URL/host against the global block), so a user who had `research` pinned to
  * a second gateway sees both sources registered on first launch.
  */
-export function migrateV1ToRegistry(v1: unknown): ConnectionRegistry {
+export function migrateV1ToRegistry(v1: unknown, options: ConnectionRegistryDisplayOptions = {}): ConnectionRegistry {
   const config = v1 && typeof v1 === 'object' ? (v1 as Record<string, any>) : {}
   const connections: RegistryConnection[] = [localEntry()]
   const byFingerprint = new Map<string, RegistryConnection>()
@@ -1253,7 +1269,7 @@ export function migrateV1ToRegistry(v1: unknown): ConnectionRegistry {
     }
 
     const label = uniqueLabel(
-      hostLabelFromBaseUrl(url) || (kind === 'cloud' ? 'Hermes Cloud' : 'Remote gateway'),
+      defaultLabelForRemoteKind(kind, url, options),
       connections.map(c => c.label)
     )
 
@@ -1431,7 +1447,8 @@ export function setLastUsedConnection(registry: ConnectionRegistry, id: string):
  */
 export function reconcileAppliedGlobalConnection(
   registry: ConnectionRegistry,
-  config: Record<string, any>
+  config: Record<string, any>,
+  options: ConnectionRegistryDisplayOptions = {}
 ): ConnectionRegistry {
   const mode = config?.mode
 
@@ -1465,7 +1482,7 @@ export function reconcileAppliedGlobalConnection(
   const label =
     existing?.label ||
     uniqueLabel(
-      hostLabelFromBaseUrl(url) || (kind === 'cloud' ? 'Hermes Cloud' : 'Remote gateway'),
+      defaultLabelForRemoteKind(kind, url, options),
       registry.connections.map(connection => connection.label)
     )
 
@@ -1516,7 +1533,8 @@ export function reconcileAppliedGlobalConnection(
  */
 export function reconcileRegistryDrift(
   registry: ConnectionRegistry,
-  v1: unknown
+  v1: unknown,
+  options: ConnectionRegistryDisplayOptions = {}
 ): { changed: boolean; registry: ConnectionRegistry } {
   const config = v1 && typeof v1 === 'object' ? (v1 as Record<string, any>) : {}
   const unchanged = { changed: false, registry }
@@ -1611,7 +1629,7 @@ export function reconcileRegistryDrift(
     return unchanged
   }
 
-  return { changed: true, registry: reconcileAppliedGlobalConnection(registry, config) }
+  return { changed: true, registry: reconcileAppliedGlobalConnection(registry, config, options) }
 }
 
 /** Choose whether launch restores the explicit primary or the last-used source. */

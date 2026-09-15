@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef } from 'react'
 
+import { appBrand, replaceHermesBrandTerms } from '@/lib/app-brand'
 import {
   initialQuickComposerState,
   QUICK_TARGET_CURRENT,
@@ -8,6 +9,9 @@ import {
   quickComposerReducer,
   type QuickComposerState
 } from '@/store/quick-entry'
+
+const quickEntryCopy = (connected: boolean) =>
+  replaceHermesBrandTerms(connected ? 'Ask Hermes…' : 'Not connected — open Hermes to reconnect', appBrand())
 
 /**
  * The Quick Entry composer — the whole renderer surface of the global-hotkey
@@ -131,7 +135,7 @@ export function QuickEntryApp() {
                 dispatch({ type: 'dismiss' })
               }
             }}
-            placeholder={state.connected ? 'Ask Hermes…' : 'Not connected — open Hermes to reconnect'}
+            placeholder={quickEntryCopy(state.connected)}
             ref={inputRef}
             spellCheck={false}
             style={{

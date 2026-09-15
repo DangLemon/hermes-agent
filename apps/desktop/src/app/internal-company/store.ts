@@ -1,6 +1,6 @@
 import { atom } from 'nanostores'
 
-import type { RuntimeReadinessResult } from '@/lib/runtime-readiness'
+import { runtimeReadinessForBrand, type RuntimeReadinessResult } from '@/lib/runtime-readiness'
 
 import {
   harnessProvisioningFromRuntimeReadiness,
@@ -37,6 +37,6 @@ export function updateInternalCompanyRuntimeReadiness(status: RuntimeReadinessRe
   const current = $internalCompanyCapabilities.get()
 
   $internalCompanyCapabilities.set(
-    updateInternalCompanyProvisioning(current, harnessProvisioningFromRuntimeReadiness(status))
+    updateInternalCompanyProvisioning(current, harnessProvisioningFromRuntimeReadiness(runtimeReadinessForBrand(status)))
   )
 }

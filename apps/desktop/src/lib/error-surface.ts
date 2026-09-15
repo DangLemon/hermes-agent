@@ -1,3 +1,5 @@
+import { appBrand, replaceHermesBrandTerms } from '@/lib/app-brand'
+
 // Structured turn-error descriptor forwarded by the gateway (see
 // agent/error_surface.py). Names WHICH layer of the stack failed so the error
 // card can say "Provider error" / "Gateway error" and offer layer-appropriate
@@ -62,13 +64,14 @@ export function formatErrorDiagnostics(input: {
   provider?: string
   surface?: ErrorSurface | null
 }): string {
+  const brand = appBrand()
   // The descriptor's identity (captured when the turn failed) beats the
   // caller-supplied fallback (typically the foreground composer's atoms).
   const provider = input.surface?.provider || input.provider
   const model = input.surface?.model || input.model
 
   const lines = [
-    '── Hermes error details ──',
+    replaceHermesBrandTerms('── Hermes error details ──', brand),
     `time: ${new Date().toISOString()}`,
     input.surface ? `layer: ${input.surface.layer}` : null,
     input.surface ? `code: ${input.surface.code}` : null,

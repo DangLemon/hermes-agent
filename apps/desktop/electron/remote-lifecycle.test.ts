@@ -30,6 +30,7 @@ import {
   PROTOCOL_VERSION,
   readLockfile,
   READY_RE,
+  remoteInstallCommand,
   remotePidAlive,
   remoteSupportsSshOwnership,
   scrapeReadyPort,
@@ -44,6 +45,23 @@ import {
 const OWNERSHIP_ID = '0123456789abcdef0123456789abcdef'
 const SPAWN_NONCE = '0123456789abcdef'
 const exec = promisify(execCallback)
+
+test('remoteInstallCommand carries configured source repository for Lemon remote hints', () => {
+  assert.equal(remoteInstallCommand(), 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | sh')
+  assert.equal(
+    remoteInstallCommand('DangLemon/hermes-agent'),
+    'curl -fsSL https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.sh | sh -s -- --repo DangLemon/hermes-agent'
+  )
+})
+
+test('main SSH lifecycle wiring passes the configured source repository into remote hints', async () => {
+  const source = await readFile(path.join(import.meta.dirname, 'main.ts'), 'utf8')
+  const callStart = source.indexOf('result = await lifecycle({')
+  const callEnd = source.indexOf('})', callStart)
+  const body = source.slice(callStart, callEnd)
+
+  assert.match(body, /sourceRepository: resolveDesktopUpdateRepository\(\)/)
+})
 
 test('SSH reuse proof rejects a backend whose runtime was replaced', () => {
   assert.equal(
@@ -253,9 +271,10 @@ test('listRemoteHermesProfiles rejects a hostile HERMES_HOME', async () => {
   const ssh = fakeSsh([[/HERMES_HOME/, '/tmp/x; echo pwned\n']])
 
   await assert.rejects(
-    () => listRemoteHermesProfiles(ssh),
+    () => listRemoteHermesProfiles(ssh, 'Lemon AI'),
     (err: any) => {
       assert.equal(err.kind, 'unsafe-path')
+      assert.match(err.message, /Unsafe remote Lemon AI home/)
 
       return true
     }
@@ -361,6 +380,23 @@ test('locateHermes throws a hermes-not-found error with an install hint', async 
   )
 })
 
+test('locateHermes uses the Lemon host label without changing executable hints', async () => {
+  const ssh = fakeSsh([]) // nothing is executable
+
+  await assert.rejects(
+    () => locateHermes(ssh, '', 'DangLemon/hermes-agent', 'Lemon AI'),
+    (err: any) => {
+      assert.equal(err.kind, 'hermes-not-found')
+      assert.match(err.message, /Lemon AI is not installed/)
+      assert.match(err.message, /`hermes` executable/)
+      assert.match(err.message, /--repo DangLemon\/hermes-agent/)
+      assert.doesNotMatch(err.message, /Hermes is not installed/)
+
+      return true
+    }
+  )
+})
+
 test('locateHermes uses a login shell for the command -v probe', async () => {
   const ssh = fakeSsh([
     [/command -v hermes/, '/x/hermes'],
@@ -402,6 +438,23 @@ test('probeRemotePlatform uses the Lemon host label without changing remote Herm
     /Lemon AI Desktop SSH mode/
   )
   assert.equal(ownershipDirectory(OWNERSHIP_ID), `~/.hermes/desktop-ssh/${OWNERSHIP_ID}`)
+})
+
+test('POSIX update marker errors use the Lemon host label', async () => {
+  const ssh = {
+    async exec(command: string) {
+      if (command.includes('.hermes-update-in-progress')) {
+        return 'LIVE:4242'
+      }
+
+      return ''
+    }
+  }
+
+  await assert.rejects(
+    () => assertRemoteInstallUpdateClear(ssh, '~/.hermes', 'Lemon AI'),
+    /Remote Lemon AI update process 4242 is still running/
+  )
 })
 
 test('ownership paths are isolated by ownership ID and spawn nonce', () => {

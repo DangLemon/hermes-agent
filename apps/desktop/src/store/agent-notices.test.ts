@@ -1,4 +1,4 @@
-import { beforeEach, expect, test } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import {
   type AgentNoticePayload,
@@ -25,6 +25,10 @@ function usage(overrides: Partial<AgentNoticePayload> = {}): AgentNoticePayload 
 
 beforeEach(() => {
   clearNotifications()
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
 })
 
 // ── noticeToToast: the whole mapping contract ────────────────────────────────
@@ -102,6 +106,20 @@ test('the trailing "· detail" is split off as a secondary meta line, not inline
   const plain = noticeToToast(usage())
   expect(plain?.message).toBe("You've used $110.00 of your $220.00 cap")
   expect(plain?.meta).toBeUndefined()
+})
+
+test('noticeToToast preserves backend notice text for the internal desktop app', () => {
+  vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+
+  const toast = noticeToToast({
+    key: 'credits.depleted',
+    kind: 'sticky',
+    level: 'error',
+    text: "✕ Hermes credit access paused · Run 'hermes model' against Hermes-4.5 with ~/.hermes/.env."
+  })
+
+  expect(toast?.message).toBe('Hermes credit access paused')
+  expect(toast?.meta).toBe("Run 'hermes model' against Hermes-4.5 with ~/.hermes/.env.")
 })
 
 test('splitMeta splits on the first space-middot-space only', () => {
@@ -228,4 +246,23 @@ test('the urgent pair maps to a global native input carrying the text as its bod
 
   expect(restored?.kind).toBe('credits')
   expect(restored?.body).toBe('✓ Credit access restored')
+})
+
+test('native credit notices preserve backend notice body and brand only the static title', () => {
+  vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+
+  const notice = nativeNoticeInput(
+    {
+      key: 'credits.depleted',
+      kind: 'sticky',
+      level: 'error',
+      text: "✕ Hermes credit access paused · run 'hermes model' with Hermes-4.5 and ~/.hermes/.env"
+    },
+    'Hermes credits'
+  )
+
+  expect(notice).toMatchObject({
+    body: "✕ Hermes credit access paused · run 'hermes model' with Hermes-4.5 and ~/.hermes/.env",
+    title: 'Lemon AI credits'
+  })
 })

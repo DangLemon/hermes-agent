@@ -45,12 +45,31 @@ const DEFAULT_LOGIN_TIMEOUT_MS = 5 * 60 * 1000
 // The minimal page the browser lands on after the gateway redirect. No tokens,
 // no secrets — just a close affordance. Served for any loopback request so a
 // favicon probe doesn't look like a failure.
-const DONE_HTML =
-  '<!doctype html><meta charset="utf-8"><title>Signed in</title>' +
-  '<body style="font:15px system-ui;margin:3rem;text-align:center">' +
-  '<h2>&#10003; Signed in to Hermes</h2>' +
-  '<p>You can close this window and return to the app.</p>' +
-  '<script>setTimeout(()=>window.close(),800)</script>'
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, character => {
+    const entities: Record<string, string> = {
+      '&': '&amp;',
+      "'": '&#39;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;'
+    }
+
+    return entities[character] || character
+  })
+}
+
+export function nativeLoginDoneHtml(appName = 'Hermes'): string {
+  const safeAppName = escapeHtml(appName.trim() || 'Hermes')
+
+  return (
+    '<!doctype html><meta charset="utf-8"><title>Signed in</title>' +
+    '<body style="font:15px system-ui;margin:3rem;text-align:center">' +
+    `<h2>&#10003; Signed in to ${safeAppName}</h2>` +
+    '<p>You can close this window and return to the app.</p>' +
+    '<script>setTimeout(()=>window.close(),800)</script>'
+  )
+}
 
 export interface NativeLoginDeps {
   /** Open a URL in the user's system browser (shell.openExternal). */
@@ -78,11 +97,12 @@ export interface NativeLoginDeps {
 export async function runNativeLogin(
   baseUrl: string,
   deps: NativeLoginDeps,
-  opts: { provider?: string } = {}
+  opts: { appName?: string; provider?: string } = {}
 ): Promise<NativeTokenSet> {
   const createServer = deps.createServer || http.createServer
   const timeoutMs = deps.timeoutMs ?? DEFAULT_LOGIN_TIMEOUT_MS
   const log = deps.rememberLog || (() => undefined)
+  const doneHtml = nativeLoginDoneHtml(opts.appName)
 
   const { verifier, challenge } = generatePkcePair()
   const state = generateState()
@@ -99,7 +119,7 @@ export async function runNativeLogin(
       // Always answer the browser with the close page — we never surface the
       // outcome to the browser, only to the app.
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-      res.end(DONE_HTML)
+      res.end(doneHtml)
 
       if (settled) {
         return

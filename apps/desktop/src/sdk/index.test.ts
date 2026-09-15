@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createClientSessionState } from '@/lib/chat-runtime'
 import { host } from '@/sdk'
+import { $notifications } from '@/store/notifications'
 import { setActiveSessionId, setAwaitingResponse, setBusy } from '@/store/session'
 import { clearAllSessionStates, publishSessionState } from '@/store/session-states'
 
@@ -129,6 +130,7 @@ describe('host.connections', () => {
   }
 
   afterEach(() => {
+    vi.unstubAllGlobals()
     desktopWindow.hermesDesktop = originalDesktop
   })
 
@@ -172,10 +174,19 @@ describe('host.connections', () => {
 
     await expect(host.connections()).rejects.toThrow('This Desktop build has no connection registry')
   })
+
+  it('brands missing registry errors for internal builds', async () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+    desktopWindow.hermesDesktop = undefined
+
+    await expect(host.connections()).rejects.toThrow('This Desktop build has no connection registry. Update Lemon AI.')
+  })
 })
 
 describe('host workspace scope', () => {
   afterEach(async () => {
+    vi.unstubAllGlobals()
+    $notifications.set([])
     host.setWorkspaceScope('sessions')
     const tree = await import('@/components/pane-shell/tree/store')
     tree.$newSessionTabAction.set(null)
@@ -229,5 +240,20 @@ describe('host workspace scope', () => {
 
     expect(opened).toEqual(['tab'])
     expect($workspaceNewSessionTarget.get()).toEqual({ kind: 'route', route })
+  })
+
+  it('brands the Bot workspace unsupported notification for internal builds', () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+
+    const route = {
+      connectionId: 'connection-b',
+      mode: 'remote' as const,
+      profile: 'writer',
+      targetProfile: 'writer'
+    }
+
+    host.newChat(route, { workspaceMode: 'bots', workspaceOwnerKey: 'bot:connection-b::writer' })
+
+    expect($notifications.get()[0]?.message).toBe('Update Lemon AI to open another Bot chat.')
   })
 })

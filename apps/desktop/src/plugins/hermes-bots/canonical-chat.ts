@@ -12,6 +12,7 @@ import * as sdk from '@hermes/plugin-sdk'
 import { host } from '@hermes/plugin-sdk'
 
 import { $botMeta, botMetaKey, botOwner, persistBotMetaSnapshot } from './data'
+import { brandDisplayString } from './labels'
 import { backendTargetProfile, botConnectionRoute, botRosterMeta, botWorkspaceOwnerKey, requestForBot } from './routing'
 import type { RpcErrorLike } from './routing'
 import { getPluginCtx } from './shared'
@@ -84,7 +85,7 @@ async function openStoredBotChat(
   summary: CanonicalChatRow
 ): Promise<string> {
   if (!storedId || typeof host.openSession !== 'function') {
-    throw new Error('This Hermes Desktop version cannot open stored sessions')
+    throw new Error(brandDisplayString('This Hermes Desktop version cannot open stored sessions'))
   }
 
   const { bot, name, route } = botOwner(owner)
@@ -532,7 +533,7 @@ export async function prepareBotSource(bot: RosterRow) {
   if (route && typeof host.requestProfile !== 'function') {
     throw new Error(
       getPluginCtx()?.i18n?.t('bot.remoteConnectionsUnsupported') ??
-        'Update Hermes Desktop to chat with bots on other connections.'
+        brandDisplayString('Update Hermes Desktop to chat with bots on other connections.')
     )
   }
 

@@ -21,10 +21,17 @@ import { test } from 'vitest'
 
 import {
   canonicalGitHubRemote,
+  githubRepositoryCanonical,
+  githubRepositoryHttpsUrl,
+  isNonDefaultRepository,
   isOfficialSshRemote,
   isSshRemote,
+  isSshRemoteForRepository,
   OFFICIAL_REPO_CANONICAL,
-  OFFICIAL_REPO_HTTPS_URL
+  OFFICIAL_REPO_HTTPS_URL,
+  planUpdateOriginRepository,
+  remoteMatchesRepository,
+  validateGitHubRepositoryIdentity
 } from './update-remote'
 
 test('canonicalGitHubRemote normalizes SSH and HTTPS forms to the same value', () => {
@@ -76,4 +83,87 @@ test('isOfficialSshRemote does NOT match forks, other hosts, or HTTPS', () => {
 test('OFFICIAL_REPO_HTTPS_URL canonicalizes to OFFICIAL_REPO_CANONICAL', () => {
   // Invariant: the URL we substitute in must be the same repo we detect.
   assert.equal(canonicalGitHubRemote(OFFICIAL_REPO_HTTPS_URL), OFFICIAL_REPO_CANONICAL)
+})
+
+test('GitHub repository helpers validate and build Lemon source URLs', () => {
+  assert.equal(validateGitHubRepositoryIdentity('DangLemon/hermes-agent'), 'DangLemon/hermes-agent')
+  assert.equal(githubRepositoryCanonical('DangLemon/hermes-agent'), 'github.com/danglemon/hermes-agent')
+  assert.equal(githubRepositoryHttpsUrl('DangLemon/hermes-agent'), 'https://github.com/DangLemon/hermes-agent.git')
+  assert.equal(isNonDefaultRepository('DangLemon/hermes-agent'), true)
+  assert.equal(isNonDefaultRepository('NousResearch/hermes-agent'), false)
+})
+
+test('repository remote matching is driven by the configured owner/repo', () => {
+  assert.equal(remoteMatchesRepository('https://github.com/DangLemon/hermes-agent.git', 'DangLemon/hermes-agent'), true)
+  assert.equal(remoteMatchesRepository('git@github.com:DangLemon/hermes-agent.git', 'DangLemon/hermes-agent'), true)
+  assert.equal(
+    remoteMatchesRepository('https://github.com/NousResearch/hermes-agent.git', 'DangLemon/hermes-agent'),
+    false
+  )
+  assert.equal(isSshRemoteForRepository('git@github.com:DangLemon/hermes-agent.git', 'DangLemon/hermes-agent'), true)
+  assert.equal(
+    isSshRemoteForRepository('https://github.com/DangLemon/hermes-agent.git', 'DangLemon/hermes-agent'),
+    false
+  )
+})
+
+test('repository identity rejects URLs and path traversal', () => {
+  assert.throws(() => validateGitHubRepositoryIdentity('https://github.com/DangLemon/hermes-agent'), /sourceRepository/)
+  assert.throws(() => validateGitHubRepositoryIdentity('../hermes-agent'), /sourceRepository/)
+  assert.throws(() => validateGitHubRepositoryIdentity('DangLemon/hermes-agent.git'), /sourceRepository/)
+})
+
+
+test('update origin plan preserves matching SSH origins', () => {
+  assert.deepEqual(
+    planUpdateOriginRepository({
+      originUrl: 'git@github.com:DangLemon/hermes-agent.git',
+      sourceRepository: 'DangLemon/hermes-agent',
+      updateRootHasGit: true
+    }),
+    {
+      action: 'none',
+      originUrl: 'git@github.com:DangLemon/hermes-agent.git',
+      repository: 'DangLemon/hermes-agent'
+    }
+  )
+})
+
+test('update origin plan remaps mismatched origins to the configured repository', () => {
+  assert.deepEqual(
+    planUpdateOriginRepository({
+      originUrl: 'https://github.com/NousResearch/hermes-agent.git',
+      sourceRepository: 'DangLemon/hermes-agent',
+      updateRootHasGit: true
+    }),
+    {
+      action: 'set-url',
+      args: [
+        'remote',
+        'set-url',
+        'origin',
+        'https://github.com/DangLemon/hermes-agent.git'
+      ],
+      expectedUrl: 'https://github.com/DangLemon/hermes-agent.git',
+      originUrl: 'https://github.com/NousResearch/hermes-agent.git',
+      repository: 'DangLemon/hermes-agent'
+    }
+  )
+})
+
+test('update origin plan adds a missing origin for a configured repository checkout', () => {
+  assert.deepEqual(
+    planUpdateOriginRepository({
+      originUrl: '',
+      sourceRepository: 'DangLemon/hermes-agent',
+      updateRootHasGit: true
+    }),
+    {
+      action: 'add',
+      args: ['remote', 'add', 'origin', 'https://github.com/DangLemon/hermes-agent.git'],
+      expectedUrl: 'https://github.com/DangLemon/hermes-agent.git',
+      originUrl: '',
+      repository: 'DangLemon/hermes-agent'
+    }
+  )
 })

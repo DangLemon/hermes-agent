@@ -77,6 +77,32 @@ export function resolveDesktopRuntimeIdentity({
   return internalHarnessRequested ? LEMON_AI_IDENTITY : HERMES_IDENTITY
 }
 
+export function runtimeDisplayCopy(identity: DesktopRuntimeIdentity) {
+  const backendName = `${identity.appName} backend`
+  const envPath = `~/${identity.posixHomeDirName}/.env`
+  const homePath = `~/${identity.posixHomeDirName}/`
+  const gatewayName = `${identity.appName} gateway`
+  const isHermes = identity.appName === 'Hermes' && identity.posixHomeDirName === '.hermes'
+
+  function rewriteUserText(value: string): string {
+    if (isHermes) {
+      return value
+    }
+
+    return value
+      .replaceAll('~/.hermes/', homePath)
+      .replaceAll('hermes backend', backendName)
+      .replaceAll('hermes gateway', gatewayName)
+      .replaceAll('Hermes backend', backendName)
+      .replaceAll('Hermes gateway', gatewayName)
+      .replaceAll('Hermes Desktop', identity.appName)
+      .replaceAll('Hermes Agent', identity.appName)
+      .replace(/\bHermes\b/g, identity.appName)
+  }
+
+  return { backendName, envPath, gatewayName, rewriteUserText }
+}
+
 export function resolveInternalDesktopBuild({
   internalPackage = false,
   internalHarnessRequested = false
@@ -300,7 +326,8 @@ export function buildDesktopRuntimeEnv({
   hermesHome,
   identity,
   internalBuild = false,
-  legacyHarnessConfigPath
+  legacyHarnessConfigPath,
+  updateRepository
 }: {
   activeRuntimeRoot: string
   harnessResourcePath?: string | null
@@ -308,6 +335,7 @@ export function buildDesktopRuntimeEnv({
   identity: DesktopRuntimeIdentity
   internalBuild?: boolean
   legacyHarnessConfigPath?: string
+  updateRepository?: string | null
 }): Record<string, string | undefined> {
   const runtimeDirName = path.basename(activeRuntimeRoot)
 
@@ -322,6 +350,7 @@ export function buildDesktopRuntimeEnv({
     HERMES_UPDATE_HANDOFF_LOG_NAME: identity.updateHandoffLogName,
     HERMES_UPDATE_MARKER_NAME: identity.updateMarkerName,
     HERMES_UPDATE_PRODUCT_NAME: identity.appName,
+    HERMES_UPDATE_REPOSITORY: updateRepository || undefined,
     HERMES_UPDATE_TEMP_PREFIX: identity.updateTempPrefix,
     HERMES_UPDATE_RESULT_NAME: identity.handoffResultName
   }

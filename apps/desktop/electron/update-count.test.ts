@@ -268,6 +268,18 @@ test('compareApiUrl builds the GitHub compare URL for HTTPS origins', () => {
   )
 })
 
+test('compareApiUrl can use the configured Lemon source repository independent of origin', () => {
+  assert.equal(
+    compareApiUrl({
+      currentSha: SHA_A,
+      originUrl: 'https://github.com/NousResearch/hermes-agent.git',
+      sourceRepository: 'DangLemon/hermes-agent',
+      targetSha: SHA_B
+    }),
+    `https://api.github.com/repos/DangLemon/hermes-agent/compare/${SHA_A}...${SHA_B}`
+  )
+})
+
 test('compareApiUrl handles SSH origin forms', () => {
   for (const originUrl of [
     'git@github.com:NousResearch/hermes-agent.git',

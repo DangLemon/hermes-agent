@@ -46,8 +46,10 @@ const HARNESS_RESOURCE_FILENAME = 'lemon-ai-harness.json'
 const LEGACY_HARNESS_RESOURCE_FILENAME = 'internal-desktop-harness.json'
 const DEFAULT_SOURCE_REPOSITORY = 'NousResearch/hermes-agent'
 const INTERNAL_SOURCE_REPOSITORY = 'DangLemon/hermes-agent'
+
 const SOURCE_REPOSITORY_RE =
   /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/
+
 const STAMP_COMMIT_RE = /^[0-9a-f]{7,40}$/i
 const FALLBACK_COMMIT_RE = /^0{7,40}$/
 const FALLBACK_BRANCH = 'main'
@@ -137,6 +139,12 @@ function resolveBootstrapSourceRepository({
     return packaged
   }
 
+  const explicitRepository = environ.HERMES_UPDATE_REPOSITORY || environ.HERMES_INSTALL_REPOSITORY
+
+  if (explicitRepository) {
+    return validateSourceRepository(explicitRepository)
+  }
+
   const lemonSelected =
     typeof environ.LEMON_AI_DESKTOP_HARNESS_CONFIG === 'string'
       ? environ.LEMON_AI_DESKTOP_HARNESS_CONFIG.trim()
@@ -148,7 +156,14 @@ function resolveBootstrapSourceRepository({
       ? environ.HERMES_DESKTOP_HARNESS_CONFIG.trim()
       : '')
 
-  return (selected ? readHarnessSourceRepository(path.resolve(selected)) : null) || DEFAULT_SOURCE_REPOSITORY
+  const internalBuild = ['LEMON_AI_DESKTOP_INTERNAL', 'HERMES_DESKTOP_INTERNAL', 'HERMES_DESKTOP_INTERNAL_PACKAGE'].some(
+    name => environ[name] === '1'
+  )
+
+  return (
+    (selected ? readHarnessSourceRepository(path.resolve(selected)) : null) ||
+    (internalBuild ? INTERNAL_SOURCE_REPOSITORY : DEFAULT_SOURCE_REPOSITORY)
+  )
 }
 
 type ExecGitFn = (args: string[], cwd: string) => string

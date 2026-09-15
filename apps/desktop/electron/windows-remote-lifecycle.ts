@@ -19,8 +19,13 @@ function powerShellCommand(script) {
   return `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encodedPowerShell(script)}`
 }
 
-async function probeWindowsRemote(ssh, explicitHermesPath = '') {
+function displayAppName(hostAppName = 'Hermes'): string {
+  return String(hostAppName || 'Hermes').trim() || 'Hermes'
+}
+
+async function probeWindowsRemote(ssh, explicitHermesPath = '', hostAppName = 'Hermes') {
   const explicit = psLiteral(explicitHermesPath)
+  const appName = displayAppName(hostAppName)
 
   const script = [
     '$ErrorActionPreference="Stop"',
@@ -57,7 +62,7 @@ async function probeWindowsRemote(ssh, explicitHermesPath = '') {
     '$candidates+=$fallbackProfileCandidate',
     '$hermes=$null',
     'foreach($candidate in $candidates){Assert-NoReparse $candidate $true;$candidatePython=[IO.Path]::Combine([IO.Path]::GetDirectoryName($candidate), "python.exe");Assert-NoReparse $candidatePython $true;try{$item=Get-Item -LiteralPath $candidate -Force -ErrorAction Stop;if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 -and -not $item.PSIsContainer){$hermes=$item.FullName;break}}catch [Management.Automation.ItemNotFoundException]{continue}}',
-    'if(-not $hermes){throw "Hermes is not installed on the remote Windows host."}',
+    `if(-not $hermes){throw ${psLiteral(`${appName} is not installed on the remote Windows host.`)}}`,
     'Assert-NoReparse $hermes $false',
     'if($explicit -and $hermes -ne $explicit){throw "The configured Hermes path is not an executable file."}',
     '$python=[IO.Path]::Combine([IO.Path]::GetDirectoryName($hermes), "python.exe")',
@@ -137,7 +142,8 @@ public static class HermesMarkerNoFollow {
  * This uses only PowerShell/.NET and therefore never imports the remote
  * checkout while an updater may be replacing it.
  */
-async function assertWindowsRemoteInstallUpdateClear(ssh, hermesHome) {
+async function assertWindowsRemoteInstallUpdateClear(ssh, hermesHome, hostAppName = 'Hermes') {
+  const appName = displayAppName(hostAppName)
   let observation = ''
 
   try {
@@ -148,7 +154,7 @@ async function assertWindowsRemoteInstallUpdateClear(ssh, hermesHome) {
         .split(/\r?\n/)
         .pop() || ''
   } catch (cause) {
-    const error: any = new Error('Could not prove that the remote Hermes install is clear for SSH startup.')
+    const error: any = new Error(`Could not prove that the remote ${appName} install is clear for SSH startup.`)
     error.kind = 'update-in-progress'
     error.cause = cause
     throw error
@@ -162,8 +168,8 @@ async function assertWindowsRemoteInstallUpdateClear(ssh, hermesHome) {
 
   const error: any = new Error(
     live
-      ? `Remote Hermes update process ${live[1]} is still running; SSH startup is paused.`
-      : 'The remote Hermes update marker is unreadable or malformed; refusing SSH startup.'
+      ? `Remote ${appName} update process ${live[1]} is still running; SSH startup is paused.`
+      : `The remote ${appName} update marker is unreadable or malformed; refusing SSH startup.`
   )
 
   error.kind = 'update-in-progress'
@@ -177,7 +183,9 @@ const TRANSPORT_KINDS = new Set([
   SSH_ERROR.UNREACHABLE
 ])
 
-async function detectRemotePlatform(ssh, explicitHermesPath = '') {
+async function detectRemotePlatform(ssh, explicitHermesPath = '', hostAppName = 'Hermes') {
+  const appName = displayAppName(hostAppName)
+
   try {
     const output = (await ssh.exec('uname -s; uname -m')).trim().split('\n')
 
@@ -194,7 +202,7 @@ async function detectRemotePlatform(ssh, explicitHermesPath = '') {
   }
 
   try {
-    return await probeWindowsRemote(ssh, explicitHermesPath)
+    return await probeWindowsRemote(ssh, explicitHermesPath, appName)
   } catch (cause: any) {
     if (TRANSPORT_KINDS.has(cause?.kind)) {
       throw cause
@@ -207,7 +215,7 @@ async function detectRemotePlatform(ssh, explicitHermesPath = '') {
       .trim()
 
     const error: any = new Error(
-      `The remote operating system is not supported by Desktop SSH.${detail ? ` (probe: ${detail.slice(0, 300)})` : ''}`
+      `The remote operating system is not supported by ${appName} Desktop SSH.${detail ? ` (probe: ${detail.slice(0, 300)})` : ''}`
     )
 
     error.kind = 'unsupported-platform'
@@ -559,16 +567,19 @@ async function connectWindowsRemote(deps) {
     waitForHermes,
     probeReuseProof,
     rememberLog = () => {},
+    hostAppName = 'Hermes',
     readyTimeoutMs = 45_000
   } = deps
 
   assertBootstrapNotSuperseded(signal)
-  const runtime = await probeWindowsRemote(ssh, remoteHermesPath)
-  await assertWindowsRemoteInstallUpdateClear(ssh, runtime.hermesHome)
+  const runtime = await probeWindowsRemote(ssh, remoteHermesPath, hostAppName)
+  await assertWindowsRemoteInstallUpdateClear(ssh, runtime.hermesHome, hostAppName)
   const inspection = await helper(ssh, runtime, 'inspect', [runtime.hermesPath])
 
   if (!inspection.supported) {
-    const error: any = new Error('Update Hermes on the remote Windows host before connecting with Desktop SSH.')
+    const error: any = new Error(
+      `Update ${displayAppName(hostAppName)} on the remote Windows host before connecting with Desktop SSH.`
+    )
     error.kind = 'update-required'
     throw error
   }
@@ -578,7 +589,7 @@ async function connectWindowsRemote(deps) {
   rememberLog(`[ssh-lifecycle] remote platform Windows/${runtime.arch}`)
   rememberLog(`[ssh-lifecycle] located hermes at ${runtime.hermesPath}`)
 
-  await assertWindowsRemoteInstallUpdateClear(ssh, runtime.hermesHome)
+  await assertWindowsRemoteInstallUpdateClear(ssh, runtime.hermesHome, hostAppName)
   const lock = await helper(ssh, runtime, 'read-lock', [ownershipId])
 
   if (validLock(lock, ownershipId)) {
@@ -593,7 +604,7 @@ async function connectWindowsRemote(deps) {
     const reusable = reusableWindowsLock(lock, state, profile, reuseToken, runtime)
 
     if (reusable) {
-      await assertWindowsRemoteInstallUpdateClear(ssh, runtime.hermesHome)
+      await assertWindowsRemoteInstallUpdateClear(ssh, runtime.hermesHome, hostAppName)
       const localPort = await pickLocalPort()
       await forward(localPort, lock.port)
 
@@ -625,23 +636,23 @@ async function connectWindowsRemote(deps) {
         }
 
         await cancelForward(localPort, lock.port)
-        await assertWindowsRemoteInstallUpdateClear(ssh, runtime.hermesHome)
+        await assertWindowsRemoteInstallUpdateClear(ssh, runtime.hermesHome, hostAppName)
         await cleanupOwned(ssh, runtime, ownershipId, lock)
       } catch (error) {
         await cancelForward(localPort, lock.port)
         throw error
       }
     } else {
-      await assertWindowsRemoteInstallUpdateClear(ssh, runtime.hermesHome)
+      await assertWindowsRemoteInstallUpdateClear(ssh, runtime.hermesHome, hostAppName)
       await cleanupOwned(ssh, runtime, ownershipId, lock)
     }
   } else if (lock) {
-    await assertWindowsRemoteInstallUpdateClear(ssh, runtime.hermesHome)
+    await assertWindowsRemoteInstallUpdateClear(ssh, runtime.hermesHome, hostAppName)
     await helper(ssh, runtime, 'remove-lock', [ownershipId])
   }
 
   assertBootstrapNotSuperseded(signal)
-  await assertWindowsRemoteInstallUpdateClear(ssh, runtime.hermesHome)
+  await assertWindowsRemoteInstallUpdateClear(ssh, runtime.hermesHome, hostAppName)
   const token = crypto.randomBytes(32).toString('hex')
   const spawnNonce = crypto.randomBytes(8).toString('hex')
   await helper(ssh, runtime, 'upload-token', [ownershipId, spawnNonce], token)
@@ -650,7 +661,7 @@ async function connectWindowsRemote(deps) {
   let spawned
 
   try {
-    await assertWindowsRemoteInstallUpdateClear(ssh, runtime.hermesHome)
+    await assertWindowsRemoteInstallUpdateClear(ssh, runtime.hermesHome, hostAppName)
     spawned = await atomicWindowsSpawn(
       ssh,
       runtime,

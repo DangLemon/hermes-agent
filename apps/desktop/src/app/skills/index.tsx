@@ -31,6 +31,7 @@ import {
   setToolsetEnabled
 } from '@/hermes'
 import { useI18n } from '@/i18n'
+import { appBrand } from '@/lib/app-brand'
 import { isDesktopToolsetVisible } from '@/lib/desktop-toolsets'
 import { compactNumber } from '@/lib/format'
 import { Loader2 } from '@/lib/icons'
@@ -251,6 +252,7 @@ export function SkillsView({
   setStatusbarItemGroup: _setStatusbarItemGroup,
   ...props
 }: SkillsViewProps) {
+  const brand = appBrand()
   const { t } = useI18n()
   const internalCompany = useStore($internalCompanyCapabilities)
   const harnessMode = internalCompany.mode === 'harness'
@@ -969,9 +971,7 @@ export function SkillsView({
       id="skill-create-editor"
       onClose={() => closeCreateEditor({ restoreFocus: true })}
       title={
-        <span className="text-[0.68rem] font-normal text-muted-foreground/60">
-          {createSkillTriggerLabel}/SKILL.md
-        </span>
+        <span className="text-[0.68rem] font-normal text-muted-foreground/60">{createSkillTriggerLabel}/SKILL.md</span>
       }
     >
       <form
@@ -1089,10 +1089,10 @@ export function SkillsView({
 
     return (profilesData?.profiles ?? []).map(p => ({
       key: p.name,
-      label: p.is_default ? 'Hermes (default)' : p.name,
+      label: p.is_default ? `${brand.appName} (default)` : p.name,
       value: p.name
     }))
-  }, [multiConnection, profilesData, rosterData])
+  }, [brand.appName, multiConnection, profilesData, rosterData])
 
   // The selector's current value must match one option's value exactly. On the
   // roster path an ambient (non-override) scope is the active gateway's
@@ -1148,7 +1148,13 @@ export function SkillsView({
       // searching it is noise.
       searchHidden={effectiveMode === 'mcp'}
       searchHints={harnessMode ? [] : searchHints}
-      searchPlaceholder={effectiveMode === 'skills' ? (harnessMode ? t.internalWorkspace.skills.searchPlaceholder : t.skills.searchSkills) : t.skills.searchToolsets}
+      searchPlaceholder={
+        effectiveMode === 'skills'
+          ? harnessMode
+            ? t.internalWorkspace.skills.searchPlaceholder
+            : t.skills.searchSkills
+          : t.skills.searchToolsets
+      }
       searchTrailingAction={
         effectiveMode === 'skills' && !createEditorOpen ? (
           <Button onClick={openCreateEditor} ref={newSkillButtonRef} size="xs" variant="text">
@@ -1158,7 +1164,11 @@ export function SkillsView({
       }
       searchValue={query}
       tabs={[
-        { id: 'skills', label: harnessMode ? t.internalWorkspace.skills.skillsTab : t.skills.tabSkills, meta: skills?.length ?? null },
+        {
+          id: 'skills',
+          label: harnessMode ? t.internalWorkspace.skills.skillsTab : t.skills.tabSkills,
+          meta: skills?.length ?? null
+        },
         ...(harnessMode
           ? []
           : [

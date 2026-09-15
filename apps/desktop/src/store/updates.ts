@@ -16,12 +16,29 @@ import type {
 } from '@/global'
 import { checkHermesUpdate, getActionStatus, updateHermes } from '@/hermes'
 import { translateNow } from '@/i18n'
+import { appBrandForEnv, replaceHermesBrandTerms } from '@/lib/app-brand'
 import { persistString, storedString } from '@/lib/storage'
 import { $connectionsRegistry, refreshConnectionsRegistry } from '@/store/connections'
 import { reconnectGateway } from '@/store/gateway-reconnect'
 import { dismissNotification, notify } from '@/store/notifications'
 import { $connection } from '@/store/session'
 import type { BackendUpdateCheckResponse } from '@/types/hermes'
+
+/**
+ * Backend and updater messages are user-facing data, so they must pass through
+ * the same display-brand boundary as static translations. Keep executable
+ * Hermes CLI commands and compatibility identifiers intact; the branding helper
+ * already protects those spans for internal builds.
+ */
+function brandUpdateText(value: unknown, preserveValues: readonly unknown[] = []): string {
+  const text = typeof value === 'string' ? value : String(value ?? '')
+
+  return replaceHermesBrandTerms(text, appBrandForEnv(), preserveValues)
+}
+
+function brandUpdateStatus(status: DesktopUpdateStatus): DesktopUpdateStatus {
+  return status.message ? { ...status, message: brandUpdateText(status.message) } : status
+}
 
 export interface UpdateApplyState {
   applying: boolean
@@ -194,7 +211,7 @@ export function reportInstallMethodWarning(message: string | undefined): void {
     durationMs: 0,
     id: INSTALL_METHOD_TOAST_ID,
     kind: 'warning',
-    message,
+    message: brandUpdateText(message),
     onDismiss: () => snoozeInstallMethodToast(),
     title: translateNow('notifications.installMethodUnsupportedTitle')
   })
@@ -376,7 +393,7 @@ function mapBackendCheck(res: BackendUpdateCheckResponse): DesktopUpdateStatus {
 
   return {
     supported: res.can_apply,
-    message: res.message ?? undefined,
+    message: res.message ? brandUpdateText(res.message) : undefined,
     updateAvailable: res.update_available,
     behind: behind > 0 ? behind : 0,
     currentVersion: res.current_version,
@@ -403,7 +420,7 @@ export async function checkBackendUpdates(): Promise<DesktopUpdateStatus | null>
     const fallback: DesktopUpdateStatus = {
       supported: $backendUpdateStatus.get()?.supported ?? true,
       error: 'check-failed',
-      message: error instanceof Error ? error.message : String(error),
+      message: brandUpdateText(error instanceof Error ? error.message : String(error)),
       fetchedAt: Date.now()
     }
 
@@ -425,7 +442,7 @@ export async function checkUpdates(): Promise<DesktopUpdateStatus | null> {
   $updateChecking.set(true)
 
   try {
-    const status = await bridge.check()
+    const status = brandUpdateStatus(await bridge.check())
     $updateStatus.set(status)
     maybeNotifyUpdateAvailable(status, 'client')
     void refreshDesktopVersion()
@@ -438,7 +455,7 @@ export async function checkUpdates(): Promise<DesktopUpdateStatus | null> {
       supported: previous?.supported ?? true,
       branch: previous?.branch,
       error: 'check-failed',
-      message: error instanceof Error ? error.message : String(error),
+      message: brandUpdateText(error instanceof Error ? error.message : String(error)),
       fetchedAt: Date.now()
     }
 
@@ -495,7 +512,7 @@ export async function applyUpdates(opts: DesktopUpdateApplyOptions = {}): Promis
         ...IDLE,
         applying: false,
         stage: 'guiSkew',
-        message: result.message ?? translateNow('updates.guiSkewBody')
+        message: brandUpdateText(result.message ?? translateNow('updates.guiSkewBody'))
       })
 
       return result
@@ -509,7 +526,7 @@ export async function applyUpdates(opts: DesktopUpdateApplyOptions = {}): Promis
         ...IDLE,
         applying: false,
         stage: 'manual',
-        message: result.message ?? translateNow('updates.manualPickedUp')
+        message: brandUpdateText(result.message ?? translateNow('updates.manualPickedUp'))
       })
 
       return result
@@ -539,7 +556,7 @@ export async function applyUpdates(opts: DesktopUpdateApplyOptions = {}): Promis
           applying: false,
           stage: 'error',
           error: result?.error ?? 'apply-failed',
-          message: result?.message ?? translateNow('updates.errorBody'),
+          message: brandUpdateText(result?.message ?? translateNow('updates.errorBody')),
           blockers: result?.blockers ?? null
         })
       }
@@ -547,7 +564,7 @@ export async function applyUpdates(opts: DesktopUpdateApplyOptions = {}): Promis
 
     return result
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+    const message = brandUpdateText(error instanceof Error ? error.message : String(error))
     $updateApply.set({ ...$updateApply.get(), applying: false, stage: 'error', error: 'apply-failed', message })
 
     return { ok: false, error: 'apply-failed', message }
@@ -596,7 +613,7 @@ function ingestBackendActionStatus(status: Awaited<ReturnType<typeof getActionSt
 
   const log = status.lines
     .filter(line => line.trim().length > 0)
-    .map(line => ({ at: Date.now(), message: line, stage: current.stage }))
+    .map(line => ({ at: Date.now(), message: brandUpdateText(line), stage: current.stage }))
     .slice(-50)
 
   const latest = log.at(-1)?.message
@@ -679,7 +696,10 @@ async function runBackendUpdate(): Promise<DesktopUpdateApplyResult> {
     const applyStartedAtMs = Date.now()
 
     if (!started.ok) {
-      const message = (started as { message?: string }).message || translateNow('updates.applyStatus.notAvailable')
+      const message = brandUpdateText(
+        (started as { message?: string }).message || translateNow('updates.applyStatus.notAvailable')
+      )
+
       const command = (started as { update_command?: string }).update_command || 'hermes update'
       $backendUpdateApply.set({ ...IDLE, applying: false, stage: 'manual', message, command })
 
@@ -775,7 +795,7 @@ async function runBackendUpdate(): Promise<DesktopUpdateApplyResult> {
 
     return { ok: false, error: 'apply-failed', message: 'Backend update failed.' }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+    const message = brandUpdateText(error instanceof Error ? error.message : String(error))
     $backendUpdateApply.set({
       ...$backendUpdateApply.get(),
       applying: false,
@@ -915,17 +935,24 @@ async function runEverythingUpdate(): Promise<void> {
 
         for (const row of results) {
           if (row.ok) {
-            notify({ title: row.label, message: row.detail || translateNow('updates.everythingDispatched') })
+            notify({
+              title: row.label,
+              message: brandUpdateText(row.detail || translateNow('updates.everythingDispatched'), [row.label])
+            })
           } else if (row.skipped) {
             notify({
               title: row.label,
-              message: row.detail || row.reason || translateNow('updates.everythingSkipped')
+              message: brandUpdateText(row.detail || row.reason || translateNow('updates.everythingSkipped'), [
+                row.label
+              ])
             })
           } else {
             notify({
               kind: 'warning',
               title: row.label,
-              message: row.error || row.detail || translateNow('updates.everythingRowFailed')
+              message: brandUpdateText(row.error || row.detail || translateNow('updates.everythingRowFailed'), [
+                row.label
+              ])
             })
           }
         }
@@ -933,7 +960,7 @@ async function runEverythingUpdate(): Promise<void> {
         notify({
           kind: 'warning',
           title: translateNow('updates.everythingFanoutFailedTitle'),
-          message: error instanceof Error ? error.message : String(error)
+          message: brandUpdateText(error instanceof Error ? error.message : String(error))
         })
       }
     }
@@ -961,7 +988,8 @@ async function runEverythingUpdate(): Promise<void> {
 
 function ingestProgress(payload: DesktopUpdateProgress): void {
   const current = $updateApply.get()
-  const log = [...current.log, { stage: payload.stage, message: payload.message, at: payload.at }].slice(-50)
+  const message = brandUpdateText(payload.message)
+  const log = [...current.log, { stage: payload.stage, message, at: payload.at }].slice(-50)
 
   const terminal =
     payload.stage === 'error' ||
@@ -972,11 +1000,11 @@ function ingestProgress(payload: DesktopUpdateProgress): void {
   $updateApply.set({
     applying: !terminal,
     stage: payload.stage,
-    message: payload.message,
+    message,
     // Streamed log lines carry percent: null; keep the last milestone percent
     // (10/60/…) instead of resetting the bar to indeterminate on every line.
     percent: payload.percent ?? current.percent,
-    error: payload.error,
+    error: payload.error ? brandUpdateText(payload.error) : payload.error,
     // 'manual' carries the command to run in its message field.
     command: payload.stage === 'manual' ? payload.message : current.command,
     log

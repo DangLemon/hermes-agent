@@ -12,8 +12,42 @@
  * testable without booting Electron (main.ts requires('electron') at load).
  */
 
-const OFFICIAL_REPO_HTTPS_URL = 'https://github.com/NousResearch/hermes-agent.git'
-const OFFICIAL_REPO_CANONICAL = 'github.com/nousresearch/hermes-agent'
+const OFFICIAL_REPO_IDENTITY = 'NousResearch/hermes-agent'
+
+const GITHUB_REPOSITORY_RE =
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/
+
+function validateGitHubRepositoryIdentity(sourceRepository) {
+  if (sourceRepository === undefined || sourceRepository === null || sourceRepository === '') {
+    return OFFICIAL_REPO_IDENTITY
+  }
+
+  if (typeof sourceRepository !== 'string' || !GITHUB_REPOSITORY_RE.test(sourceRepository)) {
+    throw new Error('sourceRepository must be a GitHub owner/repo identity')
+  }
+
+  if (
+    sourceRepository.includes('..') ||
+    sourceRepository.endsWith('.git') ||
+    sourceRepository.startsWith('-') ||
+    /^(https?:|git@)/i.test(sourceRepository)
+  ) {
+    throw new Error('sourceRepository must be a safe GitHub owner/repo identity')
+  }
+
+  return sourceRepository
+}
+
+function githubRepositoryCanonical(sourceRepository) {
+  return `github.com/${validateGitHubRepositoryIdentity(sourceRepository)}`.toLowerCase()
+}
+
+function githubRepositoryHttpsUrl(sourceRepository) {
+  return `https://github.com/${validateGitHubRepositoryIdentity(sourceRepository)}.git`
+}
+
+const OFFICIAL_REPO_CANONICAL = githubRepositoryCanonical(OFFICIAL_REPO_IDENTITY)
+const OFFICIAL_REPO_HTTPS_URL = githubRepositoryHttpsUrl(OFFICIAL_REPO_IDENTITY)
 
 // Normalize common GitHub remote URL forms to `host/owner/repo` (lowercased,
 // no trailing slash, no .git suffix) so SSH and HTTPS forms of the same repo
@@ -62,4 +96,51 @@ function isOfficialSshRemote(url) {
   return isSshRemote(url) && canonicalGitHubRemote(url) === OFFICIAL_REPO_CANONICAL
 }
 
-export { canonicalGitHubRemote, isOfficialSshRemote, isSshRemote, OFFICIAL_REPO_CANONICAL, OFFICIAL_REPO_HTTPS_URL }
+function remoteMatchesRepository(url, sourceRepository) {
+  return canonicalGitHubRemote(url) === githubRepositoryCanonical(sourceRepository)
+}
+
+function isSshRemoteForRepository(url, sourceRepository) {
+  return isSshRemote(url) && remoteMatchesRepository(url, sourceRepository)
+}
+
+function isNonDefaultRepository(sourceRepository) {
+  return githubRepositoryCanonical(sourceRepository) !== OFFICIAL_REPO_CANONICAL
+}
+
+function planUpdateOriginRepository({ originUrl = '', sourceRepository, updateRootHasGit = true }) {
+  const repository = validateGitHubRepositoryIdentity(sourceRepository)
+
+  if (!isNonDefaultRepository(repository) || !updateRootHasGit) {
+    return { action: 'none', originUrl, repository }
+  }
+
+  if (remoteMatchesRepository(originUrl, repository)) {
+    return { action: 'none', originUrl, repository }
+  }
+
+  const expectedUrl = githubRepositoryHttpsUrl(repository)
+
+  return {
+    action: originUrl ? 'set-url' : 'add',
+    args: originUrl ? ['remote', 'set-url', 'origin', expectedUrl] : ['remote', 'add', 'origin', expectedUrl],
+    expectedUrl,
+    originUrl,
+    repository
+  }
+}
+
+export {
+  canonicalGitHubRemote,
+  githubRepositoryCanonical,
+  githubRepositoryHttpsUrl,
+  isNonDefaultRepository,
+  isOfficialSshRemote,
+  isSshRemote,
+  isSshRemoteForRepository,
+  OFFICIAL_REPO_CANONICAL,
+  OFFICIAL_REPO_HTTPS_URL,
+  planUpdateOriginRepository,
+  remoteMatchesRepository,
+  validateGitHubRepositoryIdentity
+}

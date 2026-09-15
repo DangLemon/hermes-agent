@@ -12,11 +12,15 @@ def test_windows_native_install_path_docs_match_installer() -> None:
     assert "%LOCALAPPDATA%\\hermes\\bin" in doc
     assert (
         "Get-Command hermes        # should print "
-        "C:\\Users\\<you>\\AppData\\Local\\hermes\\bin\\hermes.exe"
+        "C:\\Users\\<you>\\AppData\\Local\\hermes\\bin\\hermes.cmd"
     ) in doc
-    # Installer exposes $HermesHome\bin, and must copy the launchers into it.
+    # Installer exposes $HermesHome\bin through repository-aware .cmd wrappers.
+    # The executable launchers stay inside venv\Scripts so PATH never exposes
+    # that whole directory (and therefore never shadows the user's Python).
     assert '$hermesBin = "$HermesHome\\bin"' in install
-    assert "hermes.exe" in install and "hermes-acp.exe" in install
+    assert 'foreach ($launcher in @("hermes", "hermes-acp"))' in install
+    assert '$cmd = Join-Path $Destination "$launcher.cmd"' in install
+    assert '$shadowingExe = Join-Path $Destination "$launcher.exe"' in install
     # Guard against regressions to either legacy layout.
     assert '$hermesBin = "$InstallDir\\venv\\Scripts"' not in install
     assert '$hermesBin = "$InstallDir\\bin"' not in install

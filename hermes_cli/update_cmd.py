@@ -87,12 +87,14 @@ from hermes_cli.update_cmd_deps import (  # noqa: F401
     _venv_core_imports_healthy, _venv_foreign_owned_paths, _web_build_toolchain_ready,
     _web_toolchain_roots)
 from hermes_cli.update_cmd_git import (  # noqa: F401
-    OFFICIAL_REPO_URL, OFFICIAL_REPO_URLS, SKIP_UPSTREAM_PROMPT_FILE, _ORPHAN_RESCUE_REFS_TO_KEEP,
-    _ORPHAN_RESCUE_REF_MAX_AGE_DAYS, _add_upstream_remote, _assess_parked_branch_switch,
-    _branch_head_label, _branch_head_suffix, _classify_fetch_failure, _count_commits_between,
-    _discard_lockfile_churn, _ensure_non_trampoline_git, _get_origin_url, _git_is_trampoline,
-    _has_upstream_remote, _is_fork, _locate_real_git, _mark_skip_upstream_prompt,
-    _normalize_managed_eol, _portable_git_candidates, _print_fetch_failure,
+    DEFAULT_UPDATE_REPOSITORY, OFFICIAL_REPO_URL, OFFICIAL_REPO_URLS, SKIP_UPSTREAM_PROMPT_FILE,
+    UPDATE_REPOSITORY_ENV, _ORPHAN_RESCUE_REFS_TO_KEEP, _ORPHAN_RESCUE_REF_MAX_AGE_DAYS,
+    _add_upstream_remote, _assess_parked_branch_switch, _branch_head_label, _branch_head_suffix,
+    _classify_fetch_failure, _configured_update_repository, _configured_update_repository_url,
+    _count_commits_between, _discard_lockfile_churn, _ensure_non_trampoline_git,
+    _ensure_origin_matches_configured_repository, _get_origin_url, _git_is_trampoline,
+    _has_upstream_remote, _is_default_update_repository, _is_fork, _locate_real_git,
+    _mark_skip_upstream_prompt, _normalize_managed_eol, _portable_git_candidates, _print_fetch_failure,
     _print_parked_branch_kept_notice, _print_parked_branch_skip_warning,
     _prune_orphan_rescue_refs, _should_skip_upstream_prompt, _sync_fork_with_upstream,
     _sync_with_upstream_if_needed)
@@ -163,6 +165,15 @@ def _capture_head_sha(git_cmd, cwd) -> str | None:
         return result.stdout.strip() or None
     except (subprocess.CalledProcessError, OSError):
         return None
+
+
+def _reinstall_command_for_configured_repository() -> str:
+    """Shell command for non-git reinstall guidance."""
+    if _is_default_update_repository():
+        return "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
+    repository = _configured_update_repository()
+    installer_url = f"https://raw.githubusercontent.com/{repository}/main/scripts/install.sh"
+    return f"curl -fsSL {installer_url} | bash -s -- --repo {repository}"
 
 
 def _validate_python_files_syntax(root, relpaths) -> tuple[bool, str | None, str | None]:
@@ -456,6 +467,12 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
 
     git_cmd = _base_git_cmd()
 
+    if not _ensure_origin_matches_configured_repository(git_cmd, _m().PROJECT_ROOT):
+        print(
+            f"✗ Could not configure origin for {UPDATE_REPOSITORY_ENV}="
+            f"{_configured_update_repository()!r}.")
+        sys.exit(1)
+
     # Interrupted fetches leave .git/*.lock behind ("File exists" forever); self-heal first.
     from hermes_cli.gitlock import clear_stale_git_locks, clear_stale_tmp_packs
     for lock_path in clear_stale_git_locks(_m().PROJECT_ROOT):
@@ -475,7 +492,11 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
 
     # Probe locally for an 'upstream' remote before a network fetch non-forks always fail.
     fetch_result = None
-    if branch == "main" and _git_run(git_cmd, ["remote", "get-url", "upstream"]).returncode == 0:
+    if (
+        branch == "main"
+        and _is_default_update_repository()
+        and _git_run(git_cmd, ["remote", "get-url", "upstream"]).returncode == 0
+    ):
         print("→ Fetching from upstream...")
         fetch_result = _git_run(git_cmd, ["fetch"] + depth_args + ["upstream", branch], network=True)
     if fetch_result is not None and fetch_result.returncode == 0:
@@ -504,7 +525,9 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
             return
         from hermes_cli.banner import _github_compare_behind
         # counted == 0 means local-ahead, not behind; None means the API could not count.
-        _print_update_check_result(_github_compare_behind(head_sha, target_sha), compare_branch)
+        _print_update_check_result(
+            _github_compare_behind(head_sha, target_sha, repository=_configured_update_repository()),
+            compare_branch)
         return
 
     rev_result = _git_run(git_cmd, ["rev-list", f"HEAD..{compare_branch}", "--count"], check=True)
@@ -871,7 +894,9 @@ def _prepare_checkout_for_update(
     apply_is_shallow = _is_shallow_checkout(git_cmd)
     if commit_count > 0 and apply_is_shallow:
         from hermes_cli.banner import _github_compare_behind
-        counted = _github_compare_behind(*_tip_shas(git_cmd, f"origin/{branch}"))
+        counted = _github_compare_behind(
+            *_tip_shas(git_cmd, f"origin/{branch}"),
+            repository=_configured_update_repository())
         # counted == 0 means local-ahead: falls through to the up-to-date path.
         commit_count = counted if counted is not None else -1
 
@@ -1009,7 +1034,7 @@ def _prepare_git_command() -> tuple[bool, list, bool]:
     use_zip_update = not git_dir.exists()
     if use_zip_update and sys.platform != "win32":
         print("✗ Not a git repository. Please reinstall:")
-        print("  curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash")
+        print(f"  {_reinstall_command_for_configured_repository()}")
         sys.exit(1)
 
     git_cmd = _base_git_cmd()
@@ -1019,6 +1044,12 @@ def _prepare_git_command() -> tuple[bool, list, bool]:
     # swap in a real binary up front so git survives instead of degrading to ZIP.
     # See #87876.
     git_cmd = _ensure_non_trampoline_git(git_cmd)
+
+    if git_dir.exists() and not _ensure_origin_matches_configured_repository(git_cmd, _m().PROJECT_ROOT):
+        print(
+            f"✗ Could not configure origin for {UPDATE_REPOSITORY_ENV}="
+            f"{_configured_update_repository()!r}.")
+        sys.exit(1)
 
     # Before stash/branch logic: npm rewrites package-lock.json non-deterministically and
     # line-ending churn is machine-made dirt; both would otherwise force an autostash every update.

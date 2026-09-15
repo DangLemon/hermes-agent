@@ -5,6 +5,7 @@ import type {
   HermesReadFileTextResult,
   HermesSelectPathsOptions
 } from '@/global'
+import { replaceHermesBrandTerms } from '@/lib/app-brand'
 import { $connection } from '@/store/session'
 
 export interface DesktopFsRemotePicker {
@@ -88,7 +89,7 @@ function bridge() {
   const desktop = window.hermesDesktop
 
   if (!desktop) {
-    throw new Error('Hermes Desktop bridge is unavailable')
+    throw new Error(replaceHermesBrandTerms('Hermes Desktop bridge is unavailable'))
   }
 
   return desktop

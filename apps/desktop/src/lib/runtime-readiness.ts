@@ -1,3 +1,5 @@
+import type { AppBrand } from '@/lib/app-brand'
+
 export interface SetupStatusSnapshot {
   provider_configured?: boolean
 }
@@ -15,6 +17,7 @@ export interface RuntimeReadinessSignals {
 }
 
 export interface RuntimeReadinessOptions {
+  brand?: AppBrand
   defaultReason?: string
   requestedProvider?: string
   unknownReady?: boolean
@@ -53,6 +56,13 @@ function normalizeMessage(value: null | string | undefined): null | string {
   const next = value?.trim()
 
   return next ? next : null
+}
+
+export function runtimeReadinessForBrand(
+  status: RuntimeReadinessResult | null,
+  _brand?: AppBrand
+): RuntimeReadinessResult | null {
+  return status
 }
 
 async function requestWithFallback<T>(
@@ -97,6 +107,7 @@ export function interpretRuntimeReadiness(
     typeof signals.setup?.provider_configured === 'boolean' ? Boolean(signals.setup.provider_configured) : undefined
 
   const runtimeOk = typeof signals.runtime?.ok === 'boolean' ? Boolean(signals.runtime.ok) : undefined
+
   const runtimeFailure = normalizeMessage(signals.runtime?.error) ?? normalizeMessage(signals.runtimeError)
   const setupFailure = normalizeMessage(signals.setupError)
 

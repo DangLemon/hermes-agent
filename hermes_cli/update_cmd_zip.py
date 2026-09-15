@@ -26,6 +26,15 @@ _ZIP_PRESERVED_TOP_LEVEL = {"venv", "node_modules", ".git", ".env"}
 _STASH_HINT = "  Stash or commit your changes, then rerun `hermes update`."
 
 
+def _zip_reinstall_url_for_configured_repository() -> str:
+    from hermes_cli.update_cmd import _configured_update_repository, _is_default_update_repository
+    if _is_default_update_repository():
+        return "https://hermes-agent.nousresearch.com"
+    repository = _configured_update_repository()
+    installer_url = f"https://raw.githubusercontent.com/{repository}/main/scripts/install.ps1"
+    return f"& ([scriptblock]::Create((irm {installer_url}))) -Repository '{repository}'"
+
+
 def _remove_path(path: str, *, ignore_errors: bool = False) -> None:
     """Remove a dir or file; missing paths are a no-op."""
     if os.path.isdir(path):
@@ -310,10 +319,18 @@ def _download_and_swap_zip(branch: str, zip_url: str) -> None:
         print(f"✗ ZIP update failed: {e}")
         # Two-phase replace commits all or rolls all back, so no mixed tree here — don't push a needless reinstall.
         print("  Your existing install was left in place.")
-        print("  Re-run `hermes update` to retry; if the agent won't start, reinstall from https://hermes-agent.nousresearch.com")
+        print(
+            "  Re-run `hermes update` to retry; if the agent won't start, "
+            f"reinstall from {_zip_reinstall_url_for_configured_repository()}"
+        )
         _m().sys.exit(1)
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _zip_source_archive_url(branch: str) -> str:
+    from hermes_cli.update_cmd import _configured_update_repository
+    return f"https://github.com/{_configured_update_repository()}/archive/refs/heads/{branch}.zip"
 
 
 def _reinstall_python_deps_after_zip(active_tool_dependencies) -> None:
@@ -379,7 +396,7 @@ def _update_via_zip(args, *, had_desktop_app_before_update: bool = False) -> boo
         )
         _m().sys.exit(1)
     _abort_zip_update_if_dirty_tree()
-    _download_and_swap_zip(branch, f"https://github.com/NousResearch/hermes-agent/archive/refs/heads/{branch}.zip")
+    _download_and_swap_zip(branch, _zip_source_archive_url(branch))
     _sweep_bytecode_after_update(branch)
     # Self-lock deferral: the code swap is committed; defer only the dependency sync when this process
     # holds a native extension the sync must rewrite.

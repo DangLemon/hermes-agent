@@ -3,10 +3,13 @@ import { useStore } from '@nanostores/react'
 import { useCallback, useEffect, useRef } from 'react'
 
 import type { HermesGateway } from '@/hermes'
+import { appBrand, replaceHermesBrandTerms } from '@/lib/app-brand'
 import { RECONNECT_ATTEMPT_TIMEOUT_MS, withTimeout } from '@/lib/with-timeout'
 import { $gateway, ensureActiveGatewayOpen, isActivePrimary } from '@/store/gateway'
 import { $activeGatewayProfile } from '@/store/profile'
 import { $gatewayState, setConnection } from '@/store/session'
+
+const brandCopy = (value: string) => replaceHermesBrandTerms(value, appBrand())
 
 export function useGatewayRequest() {
   const gatewayState = useStore($gatewayState)
@@ -82,7 +85,7 @@ export function useGatewayRequest() {
         const conn = await withTimeout(
           desktop.getConnection($activeGatewayProfile.get()),
           RECONNECT_ATTEMPT_TIMEOUT_MS,
-          'Timed out reconnecting to Hermes backend'
+          brandCopy('Timed out reconnecting to Hermes backend')
         )
 
         connectionRef.current = conn
@@ -125,7 +128,7 @@ export function useGatewayRequest() {
       const gateway = gatewayRef.current
 
       if (!gateway) {
-        throw new Error('Hermes gateway unavailable')
+        throw new Error(brandCopy('Hermes gateway unavailable'))
       }
 
       try {

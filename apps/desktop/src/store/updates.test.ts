@@ -81,6 +81,7 @@ vi.mock('@/store/gateway-reconnect', () => ({
 
 const {
   maybeNotifyUpdateAvailable,
+  checkUpdates,
   checkBackendUpdates,
   $backendUpdateStatus,
   applyBackendUpdate,
@@ -704,6 +705,43 @@ describe('applyEverythingUpdate', () => {
     // The everything-flow runs the backend leg first (a 1.5s status poll on
     // real timers) before reaching the client apply — give it room.
     await vi.waitFor(() => expect(applyClientMock).toHaveBeenCalled(), { timeout: 5000 })
+  })
+})
+
+describe('checkUpdates branding', () => {
+  const checkClientMock = vi.fn()
+
+  beforeEach(() => {
+    checkClientMock.mockReset()
+    $updateStatus.set(null)
+    ;(globalThis as unknown as { window: unknown }).window = {
+      hermesDesktop: { updates: { check: checkClientMock } }
+    }
+  })
+
+  afterEach(() => {
+    $updateStatus.set(null)
+    delete (globalThis as unknown as { window?: unknown }).window
+    vi.unstubAllGlobals()
+  })
+
+  it('brands bridge check messages before storing them for About settings', async () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+    const sourceEnvPath = ['~/.hermes/', 'env'].join('.')
+    const brandedEnvPath = ['~/.lemon-ai/', 'env'].join('.')
+    checkClientMock.mockResolvedValue(
+      status({
+        supported: false,
+        message: `Run 'hermes model', then check ${sourceEnvPath} because Hermes Desktop update is unsupported.`
+      })
+    )
+
+    const result = await checkUpdates()
+
+    expect(result?.message).toBe(
+      `Run 'hermes model', then check ${brandedEnvPath} because Lemon AI update is unsupported.`
+    )
+    expect($updateStatus.get()?.message).toBe(result?.message)
   })
 })
 

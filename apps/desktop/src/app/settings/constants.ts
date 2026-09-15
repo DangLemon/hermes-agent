@@ -1,3 +1,4 @@
+import { appBrand, replaceHermesBrandTerms } from '@/lib/app-brand'
 import {
   Box,
   Brain,
@@ -21,6 +22,8 @@ export { BUILTIN_PERSONALITIES } from '@/lib/personalities'
 
 import { defineFieldCopy } from './field-copy'
 import type { DesktopConfigSection } from './types'
+
+const brandCopy = (value: string) => replaceHermesBrandTerms(value, appBrand())
 
 // Provider group definitions used to fold raw env-var names like
 // ``XAI_API_KEY`` into a single "xAI" card with a friendly label, short
@@ -47,7 +50,7 @@ export const PROVIDER_GROUPS: ProviderPrefix[] = [
   {
     prefix: 'NOUS_',
     name: 'Nous Portal',
-    description: 'Hosted Hermes & Nous-trained models',
+    description: brandCopy('Hosted Hermes & Nous-trained models'),
     docsUrl: 'https://portal.nousresearch.com',
     priority: 0
   },
@@ -557,12 +560,13 @@ export const FIELD_DESCRIPTIONS: Record<string, string> = defineFieldCopy({
   },
   timezone: 'IANA timezone identifier. Blank uses the system timezone.',
   browser: {
-    useRealProfile:
+    useRealProfile: brandCopy(
       "Local browsing uses your real logins. Hermes copies your default browser's profile (cookies, logins, preferences) into a managed snapshot and drives it with its packaged Chromium — your live profile is never opened directly, and the copy is refreshed from it on each run. Also lets the agent open a local real-profile session on request even when a cloud browser backend is configured. Only Chromium browsers (Chrome, Edge, Brave, Brave Origin, Chromium) are supported; a non-Chromium default fails with a clear message. Off by default."
+    )
   },
   agent: {
     imageInputMode: 'Controls how image attachments are sent to the model.',
-    maxTurns: 'Upper bound for tool-calling turns before Hermes stops a run.'
+    maxTurns: brandCopy('Upper bound for tool-calling turns before Hermes stops a run.')
   },
   terminal: {
     cwd: 'Default project folder for tool and terminal work.',
@@ -576,9 +580,9 @@ export const FIELD_DESCRIPTIONS: Record<string, string> = defineFieldCopy({
   codeExecution: {
     mode: 'How strictly code execution is scoped to the current project.'
   },
-  fileReadMaxChars: 'Maximum characters Hermes can read from one file request.',
+  fileReadMaxChars: brandCopy('Maximum characters Hermes can read from one file request.'),
   approvals: {
-    mode: 'How Hermes handles commands that need explicit approval.',
+    mode: brandCopy('How Hermes handles commands that need explicit approval.'),
     timeout: 'How long approval prompts wait before timing out.'
   },
   security: {
@@ -622,8 +626,9 @@ export const FIELD_DESCRIPTIONS: Record<string, string> = defineFieldCopy({
     }
   },
   updates: {
-    nonInteractiveLocalChanges:
+    nonInteractiveLocalChanges: brandCopy(
       'When Hermes updates itself from the app (no terminal prompt), keep local source edits (stash) or throw them away (discard). Terminal updates always ask.'
+    )
   }
 })
 

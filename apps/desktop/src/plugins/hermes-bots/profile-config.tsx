@@ -23,6 +23,7 @@ import { useState } from 'react'
 import { $lastRoster, ROSTER_KEY } from './data'
 import { labeled, ResizableFrame } from './dialog-parts'
 import { useBots } from './i18n'
+import { brandDisplayString } from './labels'
 import { McpSetupButton } from './mcp-setup'
 import { ModelPicker } from './model-picker'
 import { botBackendProfileScope, requestForBot, resolveBotConnectionRoute } from './routing'
@@ -185,7 +186,7 @@ export function AdvancedProfileConfig({ bot, state, setState }: AdvancedProfileC
   if (unsupported) {
     return (
       <div className="px-2 py-3 text-center text-xs text-(--ui-text-tertiary)">
-        Full configuration needs a newer gateway (restart it after updating Hermes).
+        {brandDisplayString('Full configuration needs a newer gateway (restart it after updating Hermes).')}
       </div>
     )
   }

@@ -22,9 +22,16 @@ vi.mock('electron', () => ({
   }
 }))
 
-const { registerMcpOauthCallbackIpc } = await import('./mcp-oauth-callback-ipc')
+const { mcpOauthDoneHtml, registerMcpOauthCallbackIpc } = await import('./mcp-oauth-callback-ipc')
 
 registerMcpOauthCallbackIpc()
+
+test('callback page can use the internal desktop product name', () => {
+  const html = mcpOauthDoneHtml('Lemon AI')
+
+  assert.match(html, /return to Lemon AI/)
+  assert.doesNotMatch(html, /return to Hermes/)
+})
 
 async function freePort(host = '127.0.0.1'): Promise<number> {
   return await new Promise((resolve, reject) => {
@@ -160,15 +167,16 @@ test('listen can bind an exact loopback redirect URI and ignores wrong path/stat
   await assert.rejects(fetch(`${redirectUri}?code=again&state=expected-state`))
 })
 
-
 test('concurrent listener starts cannot exceed the pending listener cap', async () => {
   const listeners = await Promise.allSettled(
     Array.from({ length: 9 }, () => invoke('hermes:mcp-oauth:listen') as Promise<{ id: string; redirectUri: string }>)
   )
 
-  const fulfilled = listeners.filter((result): result is PromiseFulfilledResult<{ id: string; redirectUri: string }> => {
-    return result.status === 'fulfilled'
-  })
+  const fulfilled = listeners.filter(
+    (result): result is PromiseFulfilledResult<{ id: string; redirectUri: string }> => {
+      return result.status === 'fulfilled'
+    }
+  )
 
   const rejected = listeners.filter(result => result.status === 'rejected')
 
@@ -210,7 +218,6 @@ test('listen can bind an exact IPv6 loopback redirect URI when the host supports
   assert.equal(result.code, 'ipv6-code')
   assert.equal(result.state, 'ipv6-state')
 })
-
 
 test('listener lifetime timeout frees the port and pending slot when wait is never called', async () => {
   const port = await freePort()

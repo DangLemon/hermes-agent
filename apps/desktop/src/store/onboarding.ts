@@ -12,6 +12,7 @@ import {
   validateProviderCredential
 } from '@/hermes'
 import { translateNow } from '@/i18n'
+import { appBrand, replaceHermesBrandTerms } from '@/lib/app-brand'
 import { isProviderSetupErrorMessage } from '@/lib/provider-setup-errors'
 import { evaluateRuntimeReadiness, type RuntimeReadinessResult } from '@/lib/runtime-readiness'
 import { setMainModelAssignment } from '@/store/cron-model-impact'
@@ -162,7 +163,8 @@ export const $desktopOnboarding = atom<DesktopOnboardingState>(INITIAL)
 let pollTimer: number | null = null
 let providersRefreshPromise: null | Promise<void> = null
 
-const errMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
+const brandCopy = (value: string) => replaceHermesBrandTerms(value, appBrand())
+const errMessage = (e: unknown) => brandCopy(e instanceof Error ? e.message : String(e))
 
 const patch = (update: Partial<DesktopOnboardingState>) =>
   $desktopOnboarding.set({ ...$desktopOnboarding.get(), ...update })
@@ -217,7 +219,7 @@ function shouldPreserveConfiguredOnFallback(runtime: RuntimeReadinessResult, sta
 }
 
 function notifyReady(provider: string) {
-  notify({ kind: 'success', title: 'Hermes is ready', message: `${provider} connected.` })
+  notify({ kind: 'success', title: brandCopy('Hermes is ready'), message: `${provider} connected.` })
 }
 
 // Human-friendly labels for tools auto-routed through the Nous Tool Gateway,
@@ -356,7 +358,7 @@ async function completeWithModelConfirm(
 
       notifyGatewayTools(res.gateway_tools)
     } catch (error) {
-      onFail(error instanceof Error ? error.message : 'Hermes could not save the selected model.')
+      onFail(error instanceof Error ? errMessage(error) : brandCopy('Hermes could not save the selected model.'))
 
       return
     }
@@ -389,11 +391,11 @@ async function completeWithModelConfirm(
 }
 
 function providerResolutionFailure(reason: null | string) {
-  const detail = reason?.trim()
+  const detail = reason?.trim() ? brandCopy(reason.trim()) : ''
 
   return detail
-    ? `Connected, but Hermes still cannot resolve a usable provider. ${detail}`
-    : 'Connected, but Hermes still cannot resolve a usable provider.'
+    ? brandCopy(`Connected, but Hermes still cannot resolve a usable provider. ${detail}`)
+    : brandCopy('Connected, but Hermes still cannot resolve a usable provider.')
 }
 
 async function refreshProviders() {
@@ -418,7 +420,7 @@ async function refreshProviders() {
 }
 
 export function requestDesktopOnboarding(reason = DEFAULT_ONBOARDING_REASON) {
-  patch({ reason: reason.trim() || DEFAULT_ONBOARDING_REASON, requested: true })
+  patch({ reason: brandCopy(reason.trim() || DEFAULT_ONBOARDING_REASON), requested: true })
 }
 
 /** Credential warning delivered passively (session create/activate/resume
@@ -441,7 +443,7 @@ export function requestDesktopOnboardingForCredentialWarning(reason: null | stri
     return
   }
 
-  pendingCredentialWarning = warning
+  pendingCredentialWarning = brandCopy(warning)
 }
 
 /** Submit-time gate: returns the deferred credential warning (and clears it)
@@ -591,14 +593,15 @@ export async function refreshOnboarding(ctx: OnboardingContext) {
       id: 'runtime-not-ready',
       kind: 'error',
       title: 'Runtime not ready',
-      message:
+      message: brandCopy(
         'Hermes Desktop could not verify the running backend on startup. Some features may be unavailable until the gateway is reachable.'
+      )
     })
 
     return false
   }
 
-  const reason = runtime.reason || state.reason || DEFAULT_ONBOARDING_REASON
+  const reason = brandCopy(runtime.reason || state.reason || DEFAULT_ONBOARDING_REASON)
 
   writeCachedConfigured(false)
   patch({ configured: false, reason })
@@ -665,7 +668,7 @@ export async function startProviderOAuth(provider: OAuthProvider, ctx: Onboardin
     )
     pollTimer = window.setInterval(() => void pollSession(provider, start, ctx), POLL_MS)
   } catch (error) {
-    setFlow({ status: 'error', provider, message: `Could not start sign-in: ${errMessage(error)}` })
+    setFlow({ status: 'error', provider, message: brandCopy(`Could not start sign-in: ${errMessage(error)}`) })
   }
 }
 
@@ -686,11 +689,11 @@ async function pollSession(provider: OAuthProvider, start: DeviceStart, ctx: Onb
       )
     } else if (status !== 'pending') {
       clearPoll()
-      setFlow({ status: 'error', provider, start, message: error_message || `Sign-in ${status}.` })
+      setFlow({ status: 'error', provider, start, message: brandCopy(error_message || `Sign-in ${status}.`) })
     }
   } catch (error) {
     clearPoll()
-    setFlow({ status: 'error', provider, start, message: `Polling failed: ${errMessage(error)}` })
+    setFlow({ status: 'error', provider, start, message: brandCopy(`Polling failed: ${errMessage(error)}`) })
   }
 }
 
@@ -725,7 +728,7 @@ export async function submitOnboardingCode(ctx: OnboardingContext) {
         })
       )
     } else {
-      setFlow({ status: 'error', provider, start, message: resp.message || 'Token exchange failed.' })
+      setFlow({ status: 'error', provider, start, message: brandCopy(resp.message || 'Token exchange failed.') })
     }
   } catch (error) {
     setFlow({ status: 'error', provider, start, message: errMessage(error) })
@@ -800,9 +803,10 @@ export async function recheckExternalSignin(ctx: OnboardingContext) {
     setFlow({
       status: 'error',
       provider,
-      message:
+      message: brandCopy(
         reason?.trim() ||
-        `Hermes still cannot reach ${provider.name}. Run \`${provider.cli_command}\` in a terminal first.`
+          `Hermes still cannot reach ${provider.name}. Run \`${provider.cli_command}\` in a terminal first.`
+      )
     })
   )
 }
@@ -820,7 +824,7 @@ export async function saveOnboardingApiKey(
   const trimmed = value.trim()
 
   if (!trimmed) {
-    return { ok: false, message: 'Enter a value first.' }
+    return { ok: false, message: brandCopy('Enter a value first.') }
   }
 
   // The "Local / custom endpoint" option carries a base URL (in `value`) plus
@@ -877,7 +881,7 @@ export async function saveOnboardingLocalEndpoint(baseUrl: string, apiKey: strin
   const key = apiKey.trim()
 
   if (!url) {
-    return { ok: false, message: 'Enter the endpoint URL first.' }
+    return { ok: false, message: brandCopy('Enter the endpoint URL first.') }
   }
 
   // Probe connectivity + discover the served models. Any HTTP response proves
@@ -889,16 +893,16 @@ export async function saveOnboardingLocalEndpoint(baseUrl: string, apiKey: strin
     const probe = await validateProviderCredential('OPENAI_BASE_URL', url, key)
 
     if (!probe.ok && probe.reachable) {
-      return { ok: false, message: probe.message || 'Could not reach that endpoint.' }
+      return { ok: false, message: brandCopy(probe.message || 'Could not reach that endpoint.') }
     }
 
     if (!probe.reachable) {
-      return { ok: false, message: probe.message || `Could not reach ${url}.` }
+      return { ok: false, message: brandCopy(probe.message || `Could not reach ${url}.`) }
     }
 
     model = (probe.models?.[0] ?? '').trim()
   } catch {
-    return { ok: false, message: `Could not reach ${url}.` }
+    return { ok: false, message: brandCopy(`Could not reach ${url}.`) }
   }
 
   if (!model) {
@@ -917,7 +921,7 @@ export async function saveOnboardingLocalEndpoint(baseUrl: string, apiKey: strin
     if (!runtime.ready) {
       const detail = (runtime.reason ?? '').trim()
 
-      return { ok: false, message: detail || `Saved, but Hermes still cannot reach ${url}.` }
+      return { ok: false, message: brandCopy(detail || `Saved, but Hermes still cannot reach ${url}.`) }
     }
 
     notifyReady('Local / custom endpoint')

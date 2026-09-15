@@ -1,3 +1,5 @@
+import { replaceHermesBrandTerms } from '@/lib/app-brand'
+
 export interface McpOAuthFlow {
   flow_id: string
   server_name: string
@@ -55,7 +57,11 @@ async function waitForDesktopCallback(
   const bridge = window.hermesDesktop?.mcpOauth
 
   if (!bridge) {
-    throw new Error('Desktop loopback OAuth requires the Hermes Desktop app. Open this flow in Desktop and retry.')
+    throw new Error(
+      replaceHermesBrandTerms(
+        'Desktop loopback OAuth requires the Hermes Desktop app. Open this flow in Desktop and retry.'
+      )
+    )
   }
 
   const waitPromise = bridge.wait(listenerId)
@@ -116,7 +122,11 @@ export async function completeMcpDesktopOAuth({
       const bridge = window.hermesDesktop?.mcpOauth
 
       if (!bridge) {
-        throw new Error('Desktop loopback OAuth requires the Hermes Desktop app. Open this flow in Desktop and retry.')
+        throw new Error(
+          replaceHermesBrandTerms(
+            'Desktop loopback OAuth requires the Hermes Desktop app. Open this flow in Desktop and retry.'
+          )
+        )
       }
 
       const listener = await bridge.listen({

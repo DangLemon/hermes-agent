@@ -62,7 +62,7 @@ import { groupChatMemberBots, groupChatNames, groupLastActivity } from './group-
 import { $groupMainTabsRev, shouldRenderGroupChatInPane } from './group-panes'
 import { $showHiddenBots, isBotHidden, isBotPinned } from './hidden-bots'
 import { useBots } from './i18n'
-import { displayName } from './labels'
+import { botModeProductName, displayName } from './labels'
 import { deleteBot, mergeServerMeta, pullServerAvatars } from './profile-ops'
 import { $activityToasts, setActivityToasts, trackInboundActivity } from './roster-actions'
 import {
@@ -1032,7 +1032,7 @@ export function BotsPane() {
             <span>
               {'This will permanently delete the bot '}
               <span className="font-medium text-foreground">{deleting.name}</span>
-              {' and its associated Hermes profile at '}
+              {` and its associated ${botModeProductName()} profile at `}
               <span className="font-mono text-xs">{deleting.path}</span>. This cannot be undone.
             </span>
           ) : null

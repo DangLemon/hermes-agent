@@ -138,6 +138,25 @@ test('encryptDesktopSecret requires available secure storage', () => {
   )
 })
 
+test('encryptDesktopSecret uses the active app name in secure-storage guidance', () => {
+  assert.throws(
+    () =>
+      encryptDesktopSecret(
+        'token',
+        { isEncryptionAvailable: () => false, encryptString: () => Buffer.alloc(0) },
+        { appName: 'Lemon AI' }
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.match(error.message, /Lemon AI cannot save remote gateway tokens/)
+      assert.doesNotMatch(error.message, /Hermes Desktop cannot save/)
+      assert.match(error.message, /HERMES_DESKTOP_REMOTE_URL/)
+
+      return true
+    }
+  )
+})
+
 test('encryptDesktopSecret stores safeStorage base64 payload', () => {
   const secret = encryptDesktopSecret('token-123', {
     isEncryptionAvailable: () => true,

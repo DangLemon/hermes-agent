@@ -1,4 +1,5 @@
 import { translateNow } from '@/i18n'
+import { appBrand, replaceHermesBrandTerms } from '@/lib/app-brand'
 import { textPart } from '@/lib/chat-messages'
 import { coerceGatewayText } from '@/lib/chat-runtime'
 import { isProviderSetupErrorMessage } from '@/lib/provider-setup-errors'
@@ -16,6 +17,10 @@ import { setTurnStartedAt } from '@/store/session'
 import { clearActiveSessionTodos } from '@/store/todos'
 
 import type { GatewayEventContext } from './types'
+
+function brandCopy(value: string): string {
+  return replaceHermesBrandTerms(value, appBrand())
+}
 
 /** status.update / review.summary / notification.show / notification.clear /
  *  error — the status-and-notice tail of the dispatcher. */
@@ -104,7 +109,7 @@ export function handleStatusEvent(ctx: GatewayEventContext): boolean {
     // `slash:`) so SystemMessage can paint it as the memory-write row it
     // is instead of sniffing the backend's prose. The leading 💾 goes with
     // it — the row draws its own glyph.
-    const text = coerceGatewayText(payload?.text)
+    const text = brandCopy(coerceGatewayText(payload?.text))
       .trim()
       .replace(/^[^\p{L}\p{N}]+/u, '')
 
@@ -167,7 +172,8 @@ export function handleStatusEvent(ctx: GatewayEventContext): boolean {
   }
 
   if (event.type === 'error') {
-    const errorMessage = payload?.message || 'Hermes reported an error'
+    const rawErrorMessage = coerceGatewayText(payload?.message).trim()
+    const errorMessage = rawErrorMessage || brandCopy('Hermes reported an error')
     const looksLikeProviderSetup = isProviderSetupErrorMessage(errorMessage)
 
     // A turn that errors out has also ended — drop any open blocking prompt

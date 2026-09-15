@@ -23,17 +23,80 @@ def test_check_for_updates_uses_cache(tmp_path, monkeypatch):
     (repo_dir / ".git").mkdir()
 
     cache_file = tmp_path / ".update_check"
+    repository = "NousResearch/hermes-agent"
     cache_file.write_text(
-        json.dumps({"ts": time.time(), "behind": 3, "ver": __version__}),
+        json.dumps(
+            {
+                "ts": time.time(),
+                "behind": 3,
+                "ver": __version__,
+                "repo": repository,
+            }
+        ),
         encoding="utf-8",
     )
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_UPDATE_REPOSITORY", repository)
     with patch("hermes_cli.banner.subprocess.run") as mock_run:
         result = check_for_updates()
 
     assert result == 3
     mock_run.assert_not_called()
+
+
+def test_check_for_updates_rejects_cache_from_other_repository(tmp_path, monkeypatch):
+    """A fresh result from another configured source must not cross repository boundaries."""
+    from hermes_cli import __version__, banner
+
+    cache_file = tmp_path / ".update_check"
+    cache_file.write_text(
+        json.dumps(
+            {
+                "ts": time.time(),
+                "behind": 123,
+                "rev": None,
+                "ver": __version__,
+                "repo": "NousResearch/hermes-agent",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_UPDATE_REPOSITORY", "DangLemon/hermes-agent")
+    monkeypatch.setattr(banner, "_resolve_repo_dir", lambda: tmp_path / "repo")
+    check = MagicMock(return_value=7)
+    monkeypatch.setattr(banner, "_check_via_local_git", check)
+
+    assert banner.check_for_updates() == 7
+    check.assert_called_once_with(tmp_path / "repo")
+    assert json.loads(cache_file.read_text(encoding="utf-8"))["repo"] == "DangLemon/hermes-agent"
+
+
+def test_check_for_updates_rejects_legacy_cache_without_repository(tmp_path, monkeypatch):
+    """Pre-repository cache entries miss rather than crossing source identities."""
+    from hermes_cli import __version__, banner
+
+    cache_file = tmp_path / ".update_check"
+    cache_file.write_text(
+        json.dumps(
+            {
+                "ts": time.time(),
+                "behind": 123,
+                "rev": None,
+                "ver": __version__,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_UPDATE_REPOSITORY", "DangLemon/hermes-agent")
+    monkeypatch.setattr(banner, "_resolve_repo_dir", lambda: tmp_path / "repo")
+    check = MagicMock(return_value=7)
+    monkeypatch.setattr(banner, "_check_via_local_git", check)
+
+    assert banner.check_for_updates() == 7
+    check.assert_called_once_with(tmp_path / "repo")
 
 
 
@@ -269,7 +332,5 @@ def test_check_for_updates_does_not_cache_none(tmp_path, monkeypatch):
 
     # The cache file must NOT have been written with a None result
     assert not cache_file.exists(), "None result must not be cached"
-
-
 
 

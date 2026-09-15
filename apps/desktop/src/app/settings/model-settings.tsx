@@ -24,6 +24,7 @@ import type {
   StaleAuxAssignment
 } from '@/hermes'
 import { useI18n } from '@/i18n'
+import { appBrand, replaceHermesBrandTerms } from '@/lib/app-brand'
 import { isCodeSkewRestartRequired } from '@/lib/code-skew-error'
 import { AlertTriangle, Cpu, Loader2 } from '@/lib/icons'
 import { DEFAULT_REASONING_EFFORT, REASONING_EFFORT_VALUES } from '@/lib/reasoning-effort'
@@ -190,6 +191,7 @@ interface ModelSettingsProps {
 }
 
 export function ModelSettings({ onMainModelChanged, scopeProfile }: ModelSettingsProps) {
+  const brand = appBrand()
   const { t } = useI18n()
   const m = t.settings.model
   const [loading, setLoading] = useState(true)
@@ -899,7 +901,10 @@ export function ModelSettings({ onMainModelChanged, scopeProfile }: ModelSetting
           <p className="mt-2 text-xs text-muted-foreground">
             {selectedProviderRow?.auth_type === 'api_key'
               ? `${selectedProviderRow?.name} needs an API key — set it up to choose a model.`
-              : `${selectedProviderRow?.name} signs in through your browser — Hermes runs the flow for you.`}
+              : replaceHermesBrandTerms(
+                  `${selectedProviderRow?.name} signs in through your browser — Hermes runs the flow for you.`,
+                  brand
+                )}
           </p>
         )}
         {config && mainModel && (reasoningSupported || fastSupported) && (

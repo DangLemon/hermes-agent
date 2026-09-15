@@ -19,6 +19,7 @@ import pytest
 from hermes_cli import main as hermes_main
 import hermes_cli.main_install_repair as main_install_repair
 from hermes_cli import update_cmd
+from hermes_cli import update_cmd_zip
 
 
 def _cpe(cmd, returncode=2, stderr="", stdout="") -> subprocess.CalledProcessError:
@@ -26,6 +27,37 @@ def _cpe(cmd, returncode=2, stderr="", stdout="") -> subprocess.CalledProcessErr
     exc.stderr = stderr
     exc.stdout = stdout
     return exc
+
+
+@pytest.mark.parametrize(
+    ("repository", "expected_url"),
+    [
+        (
+            "DangLemon/hermes-agent",
+            "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.ps1))) -Repository 'DangLemon/hermes-agent'",
+        ),
+        (None, "https://hermes-agent.nousresearch.com"),
+    ],
+)
+def test_zip_failure_reinstall_guidance_uses_configured_repository(
+    repository, expected_url, monkeypatch, capsys
+):
+    if repository is None:
+        monkeypatch.delenv("HERMES_UPDATE_REPOSITORY", raising=False)
+        monkeypatch.delenv("HERMES_INSTALL_REPOSITORY", raising=False)
+        monkeypatch.delenv("LEMON_AI_DESKTOP_INTERNAL", raising=False)
+        monkeypatch.delenv("HERMES_DESKTOP_INTERNAL", raising=False)
+        monkeypatch.delenv("HERMES_DESKTOP_INTERNAL_PACKAGE", raising=False)
+    else:
+        monkeypatch.setenv("HERMES_UPDATE_REPOSITORY", repository)
+
+    with patch("urllib.request.urlretrieve", side_effect=OSError("download failed")):
+        with pytest.raises(SystemExit) as exc_info:
+            update_cmd_zip._download_and_swap_zip("main", "https://example.invalid/main.zip")
+
+    assert exc_info.value.code == 1
+    out = capsys.readouterr().out
+    assert expected_url in out
 
 
 # ---------------------------------------------------------------------------

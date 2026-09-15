@@ -132,9 +132,66 @@ def copy_raw_install_sh(tmp_path: Path) -> Path:
     return raw_script
 
 
-def test_install_sh_raw_script_defaults_to_upstream_without_network(tmp_path: Path) -> None:
-    upstream, _ = create_remote(tmp_path, "NousResearch/hermes-agent", marker="upstream")
-    gitconfig = write_gitconfig(tmp_path, {"NousResearch/hermes-agent": upstream})
+def write_fake_windows_uname(tmp_path: Path) -> Path:
+    bin_dir = tmp_path / "fake-windows-bin"
+    bin_dir.mkdir()
+    uname = bin_dir / "uname"
+    uname.write_text("#!/bin/sh\nprintf 'MINGW64_NT-10.0\\n'\n", encoding="utf-8")
+    uname.chmod(uname.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return bin_dir
+
+
+def run_raw_install_sh_on_fake_windows(
+    tmp_path: Path, *, repository: str | None = None
+) -> subprocess.CompletedProcess[str]:
+    raw_script = copy_raw_install_sh(tmp_path)
+    env = os.environ.copy()
+    env.update({"HOME": str(tmp_path / "home")})
+    env["PATH"] = f"{write_fake_windows_uname(tmp_path)}{os.pathsep}{env['PATH']}"
+    if repository is not None:
+        env["HERMES_INSTALL_REPOSITORY"] = repository
+    return subprocess.run(
+        ["bash", str(raw_script), "--non-interactive"],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+
+
+def test_install_sh_windows_handoff_uses_lemon_powershell_installer_by_default(
+    tmp_path: Path,
+) -> None:
+    result = run_raw_install_sh_on_fake_windows(tmp_path)
+
+    assert result.returncode == 1
+    assert (
+        "& ([scriptblock]::Create((irm "
+        "https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.ps1))) "
+        "-Repository 'DangLemon/hermes-agent'"
+    ) in result.stdout
+    assert "https://hermes-agent.nousresearch.com/install.ps1" not in result.stdout
+
+
+def test_install_sh_windows_handoff_uses_configured_powershell_installer(
+    tmp_path: Path,
+) -> None:
+    result = run_raw_install_sh_on_fake_windows(
+        tmp_path, repository="DangLemon/hermes-agent"
+    )
+
+    assert result.returncode == 1
+    assert (
+        "& ([scriptblock]::Create((irm "
+        "https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.ps1))) "
+        "-Repository 'DangLemon/hermes-agent'"
+    ) in result.stdout
+    assert "https://hermes-agent.nousresearch.com/install.ps1" not in result.stdout
+
+
+def test_install_sh_raw_script_defaults_to_lemon_without_network(tmp_path: Path) -> None:
+    internal, _ = create_remote(tmp_path, "DangLemon/hermes-agent", marker="internal")
+    gitconfig = write_gitconfig(tmp_path, {"DangLemon/hermes-agent": internal})
     install_dir = tmp_path / "install"
     raw_script = copy_raw_install_sh(tmp_path)
 
@@ -147,8 +204,8 @@ def test_install_sh_raw_script_defaults_to_upstream_without_network(tmp_path: Pa
     )
 
     assert '"ok":true' in result.stdout.replace(" ", "")
-    assert (install_dir / "README.md").read_text(encoding="utf-8") == "upstream\n"
-    assert origin_url(install_dir) == "https://github.com/NousResearch/hermes-agent.git"
+    assert (install_dir / "README.md").read_text(encoding="utf-8") == "internal\n"
+    assert origin_url(install_dir) == "git@github.com:DangLemon/hermes-agent.git"
 
 
 def test_install_sh_internal_fresh_clone_defaults_to_lemon_repository(tmp_path: Path) -> None:
@@ -166,7 +223,7 @@ def test_install_sh_internal_fresh_clone_defaults_to_lemon_repository(tmp_path: 
 
     assert '"ok":true' in result.stdout.replace(" ", "")
     assert (install_dir / "README.md").read_text(encoding="utf-8") == "internal\n"
-    assert origin_url(install_dir) == "https://github.com/DangLemon/hermes-agent.git"
+    assert origin_url(install_dir) == "git@github.com:DangLemon/hermes-agent.git"
 
 
 def test_install_sh_checkout_manifest_defaults_to_lemon_repository(tmp_path: Path) -> None:
@@ -178,7 +235,7 @@ def test_install_sh_checkout_manifest_defaults_to_lemon_repository(tmp_path: Pat
 
     assert '"ok":true' in result.stdout.replace(" ", "")
     assert (install_dir / "README.md").read_text(encoding="utf-8") == "internal\n"
-    assert origin_url(install_dir) == "https://github.com/DangLemon/hermes-agent.git"
+    assert origin_url(install_dir) == "git@github.com:DangLemon/hermes-agent.git"
 
 
 def test_install_sh_checkout_manifest_reports_lemon_stage_titles(tmp_path: Path) -> None:
@@ -196,13 +253,13 @@ def test_install_sh_checkout_manifest_reports_lemon_stage_titles(tmp_path: Path)
 
     manifest = json.loads(result.stdout)
     titles = {stage["name"]: stage["title"] for stage in manifest["stages"]}
-    assert titles["repository"] == "Download Lemon AI"
-    assert titles["path"] == "Install command line launcher"
-    assert titles["config"] == "Prepare Lemon AI config and skills"
-    assert titles["setup"] == "Configure Lemon AI API keys and settings"
-    assert titles["gateway"] == "Configure Lemon AI gateway service"
-    assert titles["desktop"] == "Build Lemon AI desktop app"
-    assert titles["complete"] == "Finish Lemon AI install"
+    assert titles["repository"] == "Tải Lemon AI"
+    assert titles["path"] == "Cài lệnh terminal"
+    assert titles["config"] == "Chuẩn bị cấu hình Lemon AI và skills"
+    assert titles["setup"] == "Cấu hình API key và cài đặt Lemon AI"
+    assert titles["gateway"] == "Cấu hình gateway Lemon AI"
+    assert titles["desktop"] == "Build app Lemon AI"
+    assert titles["complete"] == "Hoàn tất cài Lemon AI"
     assert [stage["name"] for stage in manifest["stages"]] == [
         "prerequisites",
         "repository",
@@ -218,7 +275,7 @@ def test_install_sh_checkout_manifest_reports_lemon_stage_titles(tmp_path: Path)
     ]
 
 
-def test_install_sh_raw_manifest_reports_hermes_stage_titles(tmp_path: Path) -> None:
+def test_install_sh_raw_manifest_reports_lemon_stage_titles(tmp_path: Path) -> None:
     env = os.environ.copy()
     env.update({"HOME": str(tmp_path / "home")})
     raw_script = copy_raw_install_sh(tmp_path)
@@ -234,13 +291,13 @@ def test_install_sh_raw_manifest_reports_hermes_stage_titles(tmp_path: Path) -> 
 
     manifest = json.loads(result.stdout)
     titles = {stage["name"]: stage["title"] for stage in manifest["stages"]}
-    assert titles["repository"] == "Download Hermes Agent"
-    assert titles["path"] == "Install hermes command"
-    assert titles["config"] == "Prepare config and skills"
-    assert titles["setup"] == "Configure API keys and settings"
-    assert titles["gateway"] == "Configure gateway service"
-    assert titles["desktop"] == "Build desktop app"
-    assert titles["complete"] == "Finish install"
+    assert titles["repository"] == "Tải Lemon AI"
+    assert titles["path"] == "Cài lệnh terminal"
+    assert titles["config"] == "Chuẩn bị cấu hình Lemon AI và skills"
+    assert titles["setup"] == "Cấu hình API key và cài đặt Lemon AI"
+    assert titles["gateway"] == "Cấu hình gateway Lemon AI"
+    assert titles["desktop"] == "Build app Lemon AI"
+    assert titles["complete"] == "Hoàn tất cài Lemon AI"
 
 
 def test_install_sh_checkout_manifest_reports_lemon_help_text(tmp_path: Path) -> None:
@@ -262,7 +319,7 @@ def test_install_sh_checkout_manifest_reports_lemon_help_text(tmp_path: Path) ->
     assert "Hermes Agent Installer" not in result.stdout
 
 
-def test_install_sh_raw_script_reports_hermes_help_text(tmp_path: Path) -> None:
+def test_install_sh_raw_script_reports_lemon_help_text(tmp_path: Path) -> None:
     env = os.environ.copy()
     env.update({"HOME": str(tmp_path / "home")})
     raw_script = copy_raw_install_sh(tmp_path)
@@ -276,8 +333,8 @@ def test_install_sh_raw_script_reports_hermes_help_text(tmp_path: Path) -> None:
         check=True,
     )
 
-    assert result.stdout.startswith("Hermes Agent Installer\n")
-    assert "When running as root on Linux, Hermes installs the code under" in result.stdout
+    assert result.stdout.startswith("Lemon AI Installer\n")
+    assert "When running as root on Linux, Lemon AI installs the code under" in result.stdout
     assert "/usr/local/bin/hermes" in result.stdout
 
 
@@ -336,7 +393,7 @@ def test_install_sh_brand_hermes_overrides_checkout_manifest(tmp_path: Path) -> 
 
     assert '"ok":true' in result.stdout.replace(" ", "")
     assert (install_dir / "README.md").read_text(encoding="utf-8") == "upstream\n"
-    assert origin_url(install_dir) == "https://github.com/NousResearch/hermes-agent.git"
+    assert origin_url(install_dir) == "git@github.com:NousResearch/hermes-agent.git"
 
 
 def test_install_sh_brand_lemon_overrides_raw_script_default(tmp_path: Path) -> None:
@@ -356,7 +413,59 @@ def test_install_sh_brand_lemon_overrides_raw_script_default(tmp_path: Path) -> 
 
     assert '"ok":true' in result.stdout.replace(" ", "")
     assert (install_dir / "README.md").read_text(encoding="utf-8") == "internal\n"
-    assert origin_url(install_dir) == "https://github.com/DangLemon/hermes-agent.git"
+    assert origin_url(install_dir) == "git@github.com:DangLemon/hermes-agent.git"
+
+
+def test_install_cmd_selects_configured_repository_for_powershell_handoff() -> None:
+    source = (REPO_ROOT / "scripts" / "install.cmd").read_text(encoding="utf-8")
+
+    assert "$env:HERMES_INSTALL_REPOSITORY" in source
+    assert "raw.githubusercontent.com/' + $repo + '/main/scripts/install.ps1" in source
+    assert "$installerArgs = @('-Repository', $repo)" in source
+    assert "[scriptblock]::Create" in source
+
+
+def test_install_cmd_validates_repository_before_powershell_handoff() -> None:
+    source = (REPO_ROOT / "scripts" / "install.cmd").read_text(encoding="utf-8")
+
+    assert "%HERMES_INSTALL_REPOSITORY%" not in source
+    assert "-notmatch '^[A-Za-z0-9]" in source
+    assert "$repo.Contains('..')" in source
+    assert "$repo.EndsWith('.git')" in source
+    assert "$repo.StartsWith('-')" in source
+    assert "$repo -match '^(https?:|git@)'" in source
+
+
+def test_install_ps1_windows_launcher_contracts_are_fail_closed() -> None:
+    """Source-level guard for Windows-only launcher behavior.
+
+    The focused PowerShell test runs on Windows CI. This keeps the contract
+    visible on non-Windows hosts too, where pwsh is not guaranteed to exist.
+    """
+    text = INSTALL_PS1.read_text(encoding="utf-8")
+
+    assert "Get-HermesLauncherRelativeSource" in text
+    assert "[System.IO.Path]::GetPathRoot($base)" in text
+    assert "[System.IO.Path]::GetPathRoot($target)" in text
+    assert "stale launcher blocks PATH resolution" in text
+    assert "Remove-Item -LiteralPath $shadowingExe -Force -ErrorAction Stop" in text
+    assert "$resolvedPython = Resolve-AvailablePythonVersion" in text
+    assert "& $UvCmd python find $PythonVersion" not in (
+        text[
+            text.index("function Set-PathVariable"):
+            text.index("function Write-BootstrapMarker")
+        ]
+    )
+
+
+def test_install_ps1_launcher_ci_loads_helper_dependencies() -> None:
+    test_text = (REPO_ROOT / "scripts" / "ci" / "test_install_ps1_cli_launchers.ps1").read_text(encoding="utf-8")
+
+    assert "$n.Name -eq 'Get-HermesLauncherRelativeSource'" in test_text
+    assert "Invoke-Expression $relativeSourceFn.Extent.Text" in test_text
+    assert "different drive roots are rejected" in test_text
+    assert "different UNC hosts are rejected" in test_text
+    assert "stale hermes.exe removal failure fails closed" in test_text
 
 
 def test_install_sh_checkout_manifest_ignores_inherited_hermes_home(tmp_path: Path) -> None:
@@ -392,9 +501,9 @@ def test_install_sh_checkout_manifest_preserves_runtime_override(tmp_path: Path)
     assert f"default (non-root):  {tmp_path / 'home' / '.lemon-ai' / 'custom-runtime'}" in result.stdout
 
 
-def test_install_sh_invalid_explicit_selector_does_not_auto_detect_checkout_manifest(tmp_path: Path) -> None:
-    upstream, _ = create_remote(tmp_path, "NousResearch/hermes-agent", marker="upstream")
-    gitconfig = write_gitconfig(tmp_path, {"NousResearch/hermes-agent": upstream})
+def test_install_sh_invalid_explicit_selector_keeps_lemon_fork_defaults(tmp_path: Path) -> None:
+    internal, _ = create_remote(tmp_path, "DangLemon/hermes-agent", marker="internal")
+    gitconfig = write_gitconfig(tmp_path, {"DangLemon/hermes-agent": internal})
     install_dir = tmp_path / "install"
 
     result = run_repository_stage(
@@ -406,8 +515,8 @@ def test_install_sh_invalid_explicit_selector_does_not_auto_detect_checkout_mani
     )
 
     assert '"ok":true' in result.stdout.replace(" ", "")
-    assert (install_dir / "README.md").read_text(encoding="utf-8") == "upstream\n"
-    assert origin_url(install_dir) == "https://github.com/NousResearch/hermes-agent.git"
+    assert (install_dir / "README.md").read_text(encoding="utf-8") == "internal\n"
+    assert origin_url(install_dir) == "git@github.com:DangLemon/hermes-agent.git"
 
 
 def test_install_sh_internal_help_reports_only_lemon_default_paths(tmp_path: Path) -> None:
@@ -423,6 +532,25 @@ def test_install_sh_internal_help_reports_only_lemon_default_paths(tmp_path: Pat
         check=True,
     )
 
+    assert f"default (non-root):  {tmp_path / 'home' / '.lemon-ai' / 'lemon-agent'}" in result.stdout
+    assert "default: DangLemon/hermes-agent" in result.stdout
+    assert ".hermes/hermes-agent" not in result.stdout
+
+
+def test_install_sh_lemon_repo_argument_selects_internal_help_before_parse(tmp_path: Path) -> None:
+    env = os.environ.copy()
+    env.update({"HOME": str(tmp_path / "home")})
+
+    result = subprocess.run(
+        ["bash", str(INSTALL_SH), "--repo", "DangLemon/hermes-agent", "--help"],
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=True,
+    )
+
+    assert result.stdout.startswith("Lemon AI Installer\n")
     assert f"default (non-root):  {tmp_path / 'home' / '.lemon-ai' / 'lemon-agent'}" in result.stdout
     assert "default: DangLemon/hermes-agent" in result.stdout
     assert ".hermes/hermes-agent" not in result.stdout
@@ -467,7 +595,77 @@ def test_install_sh_custom_repo_clone_and_existing_update_use_selected_repo(tmp_
     assert '"ok":true' in first.stdout.replace(" ", "")
     assert '"ok":true' in second.stdout.replace(" ", "")
     assert (install_dir / "README.md").read_text(encoding="utf-8") == "internal\n"
+    assert origin_url(install_dir) == "git@github.com:DangLemon/hermes-agent.git"
+
+
+def write_fake_ssh_fail_tools(tmp_path: Path) -> Path:
+    bin_dir = tmp_path / "fake-ssh-fail-bin"
+    bin_dir.mkdir()
+    git_wrapper = bin_dir / "git"
+    git_wrapper.write_text(
+        textwrap.dedent(
+            f"""
+            #!/bin/sh
+            if [ "$1" = "clone" ]; then
+                for arg in "$@"; do
+                    case "$arg" in
+                        git@github.com:*) exit 42 ;;
+                    esac
+                done
+            fi
+            exec "{REAL_GIT}" "$@"
+            """
+        ).lstrip(),
+        encoding="utf-8",
+    )
+    sleep_wrapper = bin_dir / "sleep"
+    sleep_wrapper.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    for executable in (git_wrapper, sleep_wrapper):
+        executable.chmod(executable.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return bin_dir
+
+
+def test_install_sh_https_fallback_keeps_https_origin(tmp_path: Path) -> None:
+    internal, _ = create_remote(tmp_path, "DangLemon/hermes-agent", marker="internal")
+    gitconfig = write_gitconfig(tmp_path, {"DangLemon/hermes-agent": internal})
+    install_dir = tmp_path / "install"
+    fake_bin = write_fake_ssh_fail_tools(tmp_path)
+
+    result = run_repository_stage(
+        tmp_path,
+        gitconfig=gitconfig,
+        install_dir=install_dir,
+        repository="DangLemon/hermes-agent",
+        extra_path=fake_bin,
+        check=True,
+    )
+
+    assert '"ok":true' in result.stdout.replace(" ", "")
+    assert (install_dir / "README.md").read_text(encoding="utf-8") == "internal\n"
     assert origin_url(install_dir) == "https://github.com/DangLemon/hermes-agent.git"
+
+
+def test_install_sh_existing_checkout_preserves_matching_ssh_origin(tmp_path: Path) -> None:
+    internal, _ = create_remote(tmp_path, "DangLemon/hermes-agent", marker="internal")
+    gitconfig = write_gitconfig(tmp_path, {"DangLemon/hermes-agent": internal})
+    install_dir = tmp_path / "install"
+    env = installer_env(tmp_path, gitconfig)
+    run(
+        [REAL_GIT or "git", "clone", "git@github.com:DangLemon/hermes-agent.git", str(install_dir)],
+        cwd=tmp_path,
+        env=env,
+    )
+
+    result = run_repository_stage(
+        tmp_path,
+        gitconfig=gitconfig,
+        install_dir=install_dir,
+        repository="DangLemon/hermes-agent",
+        check=True,
+    )
+
+    assert '"ok":true' in result.stdout.replace(" ", "")
+    assert origin_url(install_dir) == "git@github.com:DangLemon/hermes-agent.git"
 
 
 def test_install_sh_existing_checkout_mismatched_origin_fails_before_update_and_keeps_dirty_edits(tmp_path: Path) -> None:
@@ -601,7 +799,7 @@ def test_install_ps1_source_repository_contracts_are_bounded_and_repo_aware() ->
     assert 'return $true' in source
     assert '$PSScriptRoot' in source
     assert 'lemon-ai-desktop.config.json' in source
-    assert 'return (Test-InternalHarnessResource $selected)' in source
+    assert 'if (Test-InternalHarnessResource $selected) { return $true }' in source
     assert 'elseif ($InternalDesktopBuild -and $env:LEMON_AI_INSTALL_RUNTIME_DIR_NAME)' in source
     assert 'elseif (-not $InternalDesktopBuild -and $env:HERMES_INSTALL_RUNTIME_DIR_NAME)' in source
     assert 'elseif ($InternalDesktopBuild -and $env:LEMON_AI_HOME)' in source
@@ -623,12 +821,19 @@ def test_install_ps1_source_repository_contracts_are_bounded_and_repo_aware() ->
     assert 'function Get-GitHubRepositoryIdentity' in source
     assert 'function Ensure-ManagedOrigin' in source
     assert 'function Get-InstallerRecoveryUrl' in source
-    assert 'raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.ps1' in source
+    assert 'https://raw.githubusercontent.com/$Repository/main/scripts/install.ps1' in source
+    assert ".\\install.ps1 -Repository '$Repository'" in source
     assert 'does not match selected -Repository' in source
     assert 'git@github.com:$Repository.git' in source
+    assert 'ssh://git@github\\.com/' in source
     assert 'https://github.com/$Repository.git' in source
     assert 'https://github.com/$Repository/archive/$Commit.zip' in source
     assert 'https://github.com/$Repository/archive/refs/tags/$Tag.zip' in source
     assert 'https://github.com/$Repository/archive/refs/heads/$Branch.zip' in source
     assert '$Value -match "^(https?:|git@)"' in source
     assert '$Value -like "*.git"' in source
+    assert '[Parameter(Mandatory=$true)] [string]$Repository' in source
+    assert 'set `"HERMES_UPDATE_REPOSITORY=$Repository`"' in source
+    assert 'Set-UserEnvironmentVariableIfChanged -Name "HERMES_UPDATE_REPOSITORY"' not in source
+    assert 'function Install-HermesNoVenvCommandLauncher' in source
+    assert 'Install-HermesNoVenvCommandLauncher -Root $InstallDir' in source

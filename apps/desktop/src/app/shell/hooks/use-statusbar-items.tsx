@@ -29,7 +29,11 @@ import {
   Terminal,
   Zap
 } from '@/lib/icons'
-import { runtimeReadinessDisplay, type RuntimeReadinessResult } from '@/lib/runtime-readiness'
+import {
+  runtimeReadinessDisplay,
+  runtimeReadinessForBrand,
+  type RuntimeReadinessResult
+} from '@/lib/runtime-readiness'
 import { cacheHitLabel, contextBarLabel, LiveDuration, tokensPerSecondLabel, usageContextLabel } from '@/lib/statusbar'
 import { useStoreSelector } from '@/lib/use-session-slice'
 import { cn } from '@/lib/utils'
@@ -291,6 +295,7 @@ export function useStatusbarItems({
 
   const approvalModeItem = useApprovalModeStatusbarItem(activeGatewayProfile, requestGateway)
   const systemResourcesItem = useSystemResourcesStatusbarItem()
+  const displayInferenceStatus = useMemo(() => runtimeReadinessForBrand(inferenceStatus), [inferenceStatus])
 
   const gatewayMenuContent = useMemo(
     () => (close: () => void) => (
@@ -298,7 +303,7 @@ export function useStatusbarItems({
         gatewayState={gatewayState}
         harnessMode={internalCompany.mode === 'harness'}
         harnessProvisioning={internalCompany.provisioning}
-        inferenceStatus={inferenceStatus}
+        inferenceStatus={displayInferenceStatus}
         onClose={close}
         onOpenAiConnection={() => navigate(`${SETTINGS_ROUTE}?tab=providers`)}
         onOpenSystem={() => openCommandCenterSection('system')}
@@ -307,7 +312,7 @@ export function useStatusbarItems({
     ),
     [
       gatewayState,
-      inferenceStatus,
+      displayInferenceStatus,
       internalCompany.mode,
       internalCompany.provisioning,
       navigate,
@@ -318,9 +323,9 @@ export function useStatusbarItems({
 
   const gatewayOpen = gatewayState === 'open'
   const gatewayConnecting = gatewayState === 'connecting'
-  const inferenceReady = gatewayOpen && inferenceStatus?.ready === true
+  const inferenceReady = gatewayOpen && displayInferenceStatus?.ready === true
   const gatewayDegraded = gatewayOpen || gatewayConnecting
-  const readinessDisplay = runtimeReadinessDisplay(inferenceStatus)
+  const readinessDisplay = runtimeReadinessDisplay(displayInferenceStatus)
 
   const harnessProvisioning = internalCompany.mode === 'harness' ? internalCompany.provisioning : null
 
@@ -473,7 +478,7 @@ export function useStatusbarItems({
         menuClassName: 'w-72',
         menuContent: gatewayMenuContent,
         // Tip only when there's a real status reason — not "gateway status" restating the label.
-        title: harnessProvisioning?.detail || inferenceStatus?.reason || undefined,
+        title: harnessProvisioning?.detail || displayInferenceStatus?.reason || undefined,
         toggleLabel: copy.gateway,
         variant: 'menu'
       },
@@ -569,7 +574,7 @@ export function useStatusbarItems({
       gatewayRestarting,
       harnessProvisioning?.detail,
       inferenceReady,
-      inferenceStatus?.reason,
+      displayInferenceStatus?.reason,
       openAgents,
       projectName,
       sessionsShowing,

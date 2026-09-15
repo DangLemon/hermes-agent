@@ -11,6 +11,80 @@
 import { aliasIdentityFor } from './routing'
 import type { BotMeta, RosterRow } from './types'
 
+export type BrandEnv = {
+  readonly [key: string]: unknown
+}
+
+function envString(env: BrandEnv, key: string): string {
+  const value = env[key]
+
+  // Callers may pass an explicit environment snapshot in tests or when
+  // rendering a locale bundle. It must win over the process-wide compiled
+  // global; otherwise a stale global from another test/build masks the
+  // requested profile.
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim()
+  }
+
+  const globalKey = key.replace(/^VITE_/, '__') + '__'
+  const globalValue = (globalThis as unknown as Partial<Record<string, unknown>>)[globalKey]
+
+  if (typeof globalValue === 'string' && globalValue.trim()) {
+    return globalValue.trim()
+  }
+
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+export function botModeUsesLemonAiBrand(env: BrandEnv = import.meta.env): boolean {
+  return envString(env, 'VITE_HERMES_DESKTOP_HARNESS').toLowerCase() === 'internal'
+}
+
+export function botModeProductName(env: BrandEnv = import.meta.env): string {
+  return botModeUsesLemonAiBrand(env) ? 'Lemon AI' : 'Hermes'
+}
+
+export function botModeDesktopProductName(env: BrandEnv = import.meta.env): string {
+  return `${botModeProductName(env)} Desktop`
+}
+
+function protectValues(value: string, preserveValues: readonly unknown[]): { restore: (text: string) => string; text: string } {
+  const values = preserveValues.filter((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0)
+  const tokens = values.map((_, index) => `lemon-bot-value-${index}`)
+  const text = values.reduce((next, original, index) => next.split(original).join(tokens[index]), value)
+
+  return {
+    restore: textWithTokens => tokens.reduce((next, token, index) => next.split(token).join(values[index]), textWithTokens),
+    text
+  }
+}
+
+export function brandDisplayString(
+  value: string,
+  env: BrandEnv = import.meta.env,
+  preserveValues: readonly unknown[] = []
+): string {
+  if (!botModeUsesLemonAiBrand(env)) {
+    return value
+  }
+
+  const protectedValue = protectValues(value, preserveValues)
+  const desktopToken = '\uE000lemon-bot-desktop\uE001'
+
+  const branded = protectedValue.text
+    .replace(/\bHermes Desktop\b/g, desktopToken)
+    .replace(/\bHermes Agent\b/g, botModeProductName(env))
+    .replace(/\bHermes\b/g, botModeProductName(env))
+    .split(desktopToken)
+    .join(botModeDesktopProductName(env))
+
+  return protectedValue.restore(branded)
+}
+
+export function defaultAgentName(): string {
+  return botModeProductName()
+}
+
 export function displayName(bot: Partial<RosterRow>, meta?: BotMeta | null): string {
   // A configured alias route claiming this row overrides source-derived
   // identity: the friendly alias name must survive hosted-session
@@ -52,10 +126,10 @@ export function displayName(bot: Partial<RosterRow>, meta?: BotMeta | null): str
   }
 
   // The primary profile is literally named "default" — as a bot identity
-  // that reads like nobody bothered. Present it as Hermes (the agent it is)
+  // that reads like nobody bothered. Present it as the active app name
   // unless the user gives it a real title.
   if ((bot.name || '').trim().toLowerCase() === 'default' && !bot.title) {
-    return 'Hermes'
+    return defaultAgentName()
   }
 
   const raw = (bot.title || bot.name || '').replace(/[-_]+/g, ' ').trim()

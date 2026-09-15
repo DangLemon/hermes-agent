@@ -25,6 +25,26 @@ const watchPreviewFile = vi.fn<(path: string) => Promise<{ id: string }>>()
 const stopPreviewFileWatch = vi.fn<(id: string) => Promise<boolean>>()
 const onPreviewFileChanged = vi.fn()
 
+function forceInternalHarnessForTest(): () => void {
+  const key = '__HERMES_DESKTOP_HARNESS__'
+  const previous = Object.getOwnPropertyDescriptor(globalThis, key)
+
+  Object.defineProperty(globalThis, key, {
+    configurable: true,
+    enumerable: previous?.enumerable ?? false,
+    value: 'internal',
+    writable: true
+  })
+
+  return () => {
+    if (previous) {
+      Object.defineProperty(globalThis, key, previous)
+    } else {
+      Reflect.deleteProperty(globalThis, key)
+    }
+  }
+}
+
 beforeEach(() => {
   desktopPluginsRoot.mockReset()
   agentPluginsRoot.mockReset()
@@ -349,6 +369,29 @@ describe('plugin source reads (512 KiB preview-cap bug)', () => {
       expect($pluginRecords.get().huge.error).toMatch(/512 KiB/)
     } finally {
       restore()
+    }
+  })
+
+  it('brands the truncated-source recovery hint for internal builds', async () => {
+    const restoreHarness = forceInternalHarnessForTest()
+    desktopPluginsRoot.mockResolvedValue('/local/.hermes/desktop-plugins')
+    agentPluginsRoot.mockResolvedValue('')
+    standaloneRootWith('huge-internal')
+    readFileText.mockResolvedValue({
+      text: 'export default { id: "huge-internal", register: () => { throw new Error("must never evaluate") } }',
+      truncated: true
+    })
+    watchPreviewFile.mockResolvedValue({ id: 'w-huge-internal' })
+
+    const restore = blobToDataUrl()
+
+    try {
+      await discoverRuntimePlugins()
+
+      expect($pluginRecords.get()['huge-internal'].error).toContain('update Lemon AI to load larger plugins')
+    } finally {
+      restore()
+      restoreHarness()
     }
   })
 

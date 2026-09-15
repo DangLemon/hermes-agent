@@ -8,6 +8,7 @@ const DISABLED_AUTO_DISCOVERY_VALUES = new Set(['false', '0', 'no'])
 
 const HERMES_MAC_COPY = {
   CFBundleDisplayName: 'Hermes',
+  CFBundleExecutable: 'Hermes',
   CFBundleName: 'Hermes',
   NSAudioCaptureUsageDescription: 'Hermes uses audio capture for voice conversations.',
   NSCameraUsageDescription: 'Hermes uses the camera when a plugin or feature you enable requests it.',
@@ -29,6 +30,7 @@ const LEMON_MAC_COPY = {
   CFBundleDisplayName: 'Lemon AI',
   CFBundleExecutable: 'Lemon AI',
   CFBundleName: 'Lemon AI',
+  NSHumanReadableCopyright: 'Copyright © 2026 Lemon Digital',
   NSAudioCaptureUsageDescription: 'Lemon AI uses audio capture for voice conversations.',
   NSCameraUsageDescription: 'Lemon AI uses the camera when a plugin or feature you enable requests it.',
   NSMicrophoneUsageDescription: 'Lemon AI uses the microphone for voice input and voice conversations.',
@@ -53,6 +55,68 @@ export function resolveDesktopBuildMode({ env = process.env, harnessResource } =
 export function createDesktopPackageConfig(baseBuild, { env = process.env, harnessResource } = {}) {
   const config = structuredClone(baseBuild)
 
+  if (String(env.HERMES_INSTALLER_BRAND ?? '').trim().toLowerCase() === 'hermes') {
+    config.productName = 'Hermes'
+    config.appId = 'com.nousresearch.hermes'
+    config.executableName = 'Hermes'
+    config.extraMetadata = {
+      ...(config.extraMetadata || {}),
+      name: 'hermes',
+      productName: 'Hermes',
+      author: {
+        name: 'Nous Research'
+      },
+      description: 'Native desktop shell for Hermes Agent.',
+      homepage: 'https://github.com/NousResearch/hermes-agent',
+      bugs: {
+        url: 'https://github.com/NousResearch/hermes-agent/issues'
+      },
+      repository: {
+        type: 'git',
+        url: 'git+https://github.com/NousResearch/hermes-agent.git'
+      }
+    }
+    config.copyright = 'Copyright © 2026 Nous Research'
+    config.artifactName = 'Hermes-${version}-${os}-${arch}.${ext}'
+    config.icon = 'assets/icon'
+    config.extraResources = config.extraResources.map(entry =>
+      entry?.from === 'assets/lemon-icon.ico' && entry?.to === 'icon.ico' ? { ...entry, from: 'assets/icon.ico' } : entry
+    )
+    config.mac = {
+      ...config.mac,
+      executableName: 'Hermes',
+      extendInfo: {
+        ...config.mac.extendInfo,
+        ...HERMES_MAC_COPY
+      }
+    }
+    config.dmg = {
+      ...config.dmg,
+      title: 'Install Hermes'
+    }
+    config.win = {
+      ...config.win,
+      legalTrademarks: 'Hermes'
+    }
+    config.linux = {
+      ...config.linux,
+      maintainer: 'Nous Research <support@nousresearch.com>',
+      synopsis: 'Native desktop shell for Hermes Agent.'
+    }
+    config.nsis = {
+      ...config.nsis,
+      shortcutName: 'Hermes',
+      uninstallDisplayName: 'Hermes'
+    }
+    config.protocols = config.protocols.map(protocol =>
+      Array.isArray(protocol?.schemes) && protocol.schemes.includes('hermes')
+        ? { ...protocol, name: 'Hermes Protocol' }
+        : protocol
+    )
+
+    return config
+  }
+
   if (resolveDesktopBuildMode({ env, harnessResource }) !== INTERNAL_MODE) {
     return config
   }
@@ -63,8 +127,21 @@ export function createDesktopPackageConfig(baseBuild, { env = process.env, harne
   config.extraMetadata = {
     ...(config.extraMetadata || {}),
     name: 'lemon-ai',
-    productName: 'Lemon AI'
+    productName: 'Lemon AI',
+    author: {
+      name: 'Lemon Digital'
+    },
+    description: 'Native desktop shell for Lemon AI.',
+    homepage: 'https://github.com/DangLemon/hermes-agent',
+    bugs: {
+      url: 'https://github.com/DangLemon/hermes-agent/issues'
+    },
+    repository: {
+      type: 'git',
+      url: 'git+https://github.com/DangLemon/hermes-agent.git'
+    }
   }
+  config.copyright = 'Copyright © 2026 Lemon Digital'
   config.artifactName = 'Lemon-AI-${version}-${os}-${arch}.${ext}'
   config.icon = 'assets/lemon-icon'
   config.extraResources = config.extraResources.map(entry =>

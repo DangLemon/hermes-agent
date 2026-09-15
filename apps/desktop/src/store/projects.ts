@@ -9,6 +9,7 @@ import {
 import type { HermesGitBaseBranch, HermesGitBranch } from '@/global'
 import { getHermesConfig, hermesApi, type HermesGateway } from '@/hermes'
 import { translateNow } from '@/i18n'
+import { replaceHermesBrandTerms } from '@/lib/app-brand'
 import { desktopDefaultCwd, isDesktopFsRemoteMode, selectDesktopPaths, writeDesktopFileText } from '@/lib/desktop-fs'
 import { desktopGit } from '@/lib/desktop-git'
 import { isMissingRestEndpoint, isMissingRpcMethod } from '@/lib/gateway-rpc'
@@ -38,6 +39,10 @@ import type { ProjectInfo, ProjectsPayload } from '@/types/hermes'
 // served by the live gateway's `projects.*` JSON-RPC methods, which wrap the
 // per-profile projects.db store. The sidebar groups sessions by project folder
 // membership; these atoms are the renderer's cached view.
+
+function projectDisplayError(message: string): string {
+  return replaceHermesBrandTerms(message)
+}
 
 export const $projects = atom<ProjectInfo[]>([])
 export const $activeProjectId = atom<null | string>(null)
@@ -273,7 +278,7 @@ async function gatewayRequest<T>(method: string, params: Record<string, unknown>
   }
 
   if (!gateway) {
-    throw new Error('Hermes gateway is not connected')
+    throw new Error(projectDisplayError('Hermes gateway is not connected'))
   }
 
   return gateway.request<T>(method, params)
@@ -333,7 +338,7 @@ async function activeProjectsContext(): Promise<ActiveProjectsContext> {
   }
 
   if (!gateway || gateway !== activeGateway() || profile !== projectProfile()) {
-    throw new Error('Active Hermes profile changed while connecting')
+    throw new Error(projectDisplayError('Active Hermes profile changed while connecting'))
   }
 
   return { gateway, profile }

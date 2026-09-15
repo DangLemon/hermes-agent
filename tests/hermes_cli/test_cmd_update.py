@@ -8,6 +8,7 @@ from unittest.mock import ANY, patch
 import pytest
 
 from hermes_cli.main import cmd_update, PROJECT_ROOT
+from hermes_cli import main as hermes_main
 from hermes_cli import main_web_build
 from hermes_cli import main_install_repair
 from hermes_cli import update_cmd
@@ -89,11 +90,65 @@ def _patch_gateway_discovery():
     conftest live-system guard and turns into a spurious ``sys.exit(1)``.
     Discovery returning nothing makes the phase a clean no-op for every test
     in this module (none of them assert on gateway restarts).
+
+    ``_purge_stale_hermes_modules`` must also be stubbed because the real
+    updater evicts ``hermes_cli.gateway`` after replacing the checkout. A
+    later function-local import would otherwise load a fresh, unpatched
+    module and let this test process inspect or signal unrelated gateways.
     """
     with patch("hermes_cli.gateway.find_gateway_pids", return_value=[]), \
          patch("hermes_cli.gateway.supports_systemd_services", return_value=False), \
-         patch("hermes_cli.gateway.find_profile_gateway_processes", return_value=[]):
+         patch("hermes_cli.gateway.find_profile_gateway_processes", return_value=[]), \
+         patch.object(hermes_main, "_purge_stale_hermes_modules", lambda *a, **kw: None):
         yield
+
+
+@pytest.mark.parametrize(
+    "repository",
+    ["DangLemon/hermes-agent", "ExampleOrg/runtime-agent"],
+)
+def test_prepare_git_command_reinstall_uses_configured_repository(
+    repository, tmp_path, monkeypatch, capsys
+):
+    from hermes_cli import main as hm
+
+    monkeypatch.setattr(hm, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(update_cmd.sys, "platform", "linux")
+    monkeypatch.setenv("HERMES_UPDATE_REPOSITORY", repository)
+
+    with pytest.raises(SystemExit) as exc_info:
+        update_cmd._prepare_git_command()
+
+    assert exc_info.value.code == 1
+    out = capsys.readouterr().out
+    assert (
+        "curl -fsSL "
+        f"https://raw.githubusercontent.com/{repository}/main/scripts/install.sh "
+        "| bash"
+    ) in out
+    assert "https://hermes-agent.nousresearch.com/install.sh" not in out
+
+
+def test_prepare_git_command_reinstall_keeps_public_installer(
+    tmp_path, monkeypatch, capsys
+):
+    from hermes_cli import main as hm
+
+    monkeypatch.setattr(hm, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(update_cmd.sys, "platform", "linux")
+    monkeypatch.delenv("HERMES_UPDATE_REPOSITORY", raising=False)
+    monkeypatch.delenv("HERMES_INSTALL_REPOSITORY", raising=False)
+    monkeypatch.delenv("LEMON_AI_DESKTOP_INTERNAL", raising=False)
+    monkeypatch.delenv("HERMES_DESKTOP_INTERNAL", raising=False)
+    monkeypatch.delenv("HERMES_DESKTOP_INTERNAL_PACKAGE", raising=False)
+
+    with pytest.raises(SystemExit) as exc_info:
+        update_cmd._prepare_git_command()
+
+    assert exc_info.value.code == 1
+    out = capsys.readouterr().out
+    assert "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash" in out
+    assert "raw.githubusercontent.com" not in out
 
 
 class TestCmdUpdateNpmLockfileCache:
@@ -1002,6 +1057,80 @@ class TestCmdUpdateCheckBranchFlag:
         # Compare ref is upstream/main (upstream fetch succeeded).
         rev_list_cmds = [c for c in commands if "rev-list" in c]
         assert any("upstream/main" in c for c in rev_list_cmds), rev_list_cmds
+
+    @patch("hermes_cli.config.detect_install_method", return_value="git")
+    @patch("subprocess.run")
+    def test_check_main_with_configured_repository_skips_upstream(
+        self, mock_run, _mock_method, monkeypatch
+    ):
+        """Lemon AI update checks must compare against origin, not Nous upstream."""
+        monkeypatch.setenv("HERMES_UPDATE_REPOSITORY", "DangLemon/hermes-agent")
+        mock_run.side_effect = self._check_side_effect(
+            target_branch="main", verify_ok=True, commit_count="0"
+        )
+        args = SimpleNamespace(check=True, branch=None)
+
+        cmd_update(args)
+
+        commands = [" ".join(str(a) for a in c.args[0]) for c in mock_run.call_args_list]
+        assert not any("fetch" in c and "upstream" in c for c in commands), commands
+        assert any("fetch" in c and "origin" in c for c in commands), commands
+        rev_list_cmds = [c for c in commands if "rev-list" in c]
+        assert any("origin/main" in c for c in rev_list_cmds), rev_list_cmds
+
+
+    @patch("hermes_cli.config.detect_install_method", return_value="git")
+    @patch("subprocess.run")
+    def test_check_main_with_internal_env_skips_upstream(
+        self, mock_run, _mock_method, monkeypatch
+    ):
+        """Internal Lemon installs infer DangLemon updates without Desktop child env."""
+        monkeypatch.delenv("HERMES_UPDATE_REPOSITORY", raising=False)
+        monkeypatch.delenv("HERMES_INSTALL_REPOSITORY", raising=False)
+        monkeypatch.setenv("LEMON_AI_DESKTOP_INTERNAL", "1")
+        check_side_effect = self._check_side_effect(
+            target_branch="main", verify_ok=True, commit_count="0"
+        )
+
+        def side_effect(cmd, **kwargs):
+            joined = " ".join(str(c) for c in cmd)
+            if "remote get-url origin" in joined:
+                return subprocess.CompletedProcess(
+                    cmd, 0, stdout="https://github.com/NousResearch/hermes-agent.git\n", stderr=""
+                )
+            if "remote set-url origin" in joined:
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            return check_side_effect(cmd, **kwargs)
+
+        mock_run.side_effect = side_effect
+        args = SimpleNamespace(check=True, branch=None)
+
+        cmd_update(args)
+
+        commands = [" ".join(str(a) for a in c.args[0]) for c in mock_run.call_args_list]
+        set_url_index = next(
+            (
+                index
+                for index, command in enumerate(commands)
+                if "remote set-url origin https://github.com/DangLemon/hermes-agent.git" in command
+            ),
+            None,
+        )
+        fetch_origin_index = next(
+            (
+                index
+                for index, command in enumerate(commands)
+                if "fetch" in command and "origin" in command
+            ),
+            None,
+        )
+        assert set_url_index is not None, commands
+        assert fetch_origin_index is not None, commands
+        assert set_url_index < fetch_origin_index, commands
+        assert not any("fetch" in c and "upstream" in c for c in commands), commands
+        rev_list_cmds = [c for c in commands if "rev-list" in c]
+        assert any("origin/main" in c for c in rev_list_cmds), rev_list_cmds
+
 
 
 class TestCmdUpdateZipBranchRefusal:

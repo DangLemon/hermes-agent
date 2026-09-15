@@ -339,6 +339,77 @@ def test_import_guard_flags_missing_first_party_module(monkeypatch, tmp_path):
     assert error is not None and "tools.nonexistent_module" in error
 
 
+@pytest.mark.parametrize(
+    ("repository", "is_windows", "expected_url"),
+    [
+        (None, False, "https://hermes-agent.nousresearch.com"),
+        (
+            "DangLemon/hermes-agent",
+            False,
+            "curl -fsSL https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.sh | bash -s -- --repo DangLemon/hermes-agent",
+        ),
+        (
+            "DangLemon/hermes-agent",
+            True,
+            "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.ps1))) -Repository 'DangLemon/hermes-agent'",
+        ),
+    ],
+)
+def test_dependency_sync_import_failure_reinstall_guidance_uses_configured_source(
+    repository, is_windows, expected_url, monkeypatch, tmp_path, capsys
+):
+    from hermes_cli import main as hm
+
+    if repository is None:
+        monkeypatch.delenv("HERMES_UPDATE_REPOSITORY", raising=False)
+        monkeypatch.delenv("HERMES_INSTALL_REPOSITORY", raising=False)
+        monkeypatch.delenv("LEMON_AI_DESKTOP_INTERNAL", raising=False)
+        monkeypatch.delenv("HERMES_DESKTOP_INTERNAL", raising=False)
+        monkeypatch.delenv("HERMES_DESKTOP_INTERNAL_PACKAGE", raising=False)
+    else:
+        monkeypatch.setenv("HERMES_UPDATE_REPOSITORY", repository)
+
+    monkeypatch.setattr(hm, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(hm, "_is_windows", lambda: is_windows)
+    monkeypatch.setattr(hm, "_abort_dependency_sync_if_self_locked", lambda _resume: None)
+    monkeypatch.setattr(hm, "_verify_core_dependencies_installed", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(hm, "_verify_console_scripts_installed", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(hm, "_clear_update_incomplete_marker", lambda: None)
+    monkeypatch.setattr(hm, "_reload_updated_runtime_modules", lambda: None)
+    monkeypatch.setattr(hm, "_upgrade_pip_before_lazy_refresh", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(hm, "_refresh_active_lazy_features", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(hm, "_clear_lazy_refresh_incomplete_marker", lambda: None)
+    monkeypatch.setattr(hm, "_restore_active_tool_dependencies", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(hm, "_refresh_active_memory_provider_dependencies", lambda: None)
+    monkeypatch.setattr(update_cmd_deps, "_refuse_update_if_venv_foreign_owned", lambda _root: None)
+    monkeypatch.setattr(update_cmd_deps, "_editable_install_is_current", lambda *_args: True)
+    monkeypatch.setattr(update_cmd, "_pip_install_prefix", lambda _uv_bin: (["python", "-m", "pip"], {}))
+    monkeypatch.setattr(update_cmd, "_sweep_bytecode_after_update", lambda _branch: None)
+    monkeypatch.setattr(update_cmd, "_write_update_incomplete_marker", lambda: None)
+    monkeypatch.setattr(update_cmd, "_write_lazy_refresh_incomplete_marker", lambda: None)
+    monkeypatch.setattr(
+        update_cmd,
+        "_validate_critical_modules_import",
+        lambda _root: (False, "hermes_cli.main", "ImportError: boom"),
+    )
+    monkeypatch.setattr("hermes_cli.managed_uv.update_managed_uv", lambda: None)
+    monkeypatch.setattr("hermes_cli.managed_uv.ensure_uv", lambda: "uv")
+
+    update_cmd_deps._sync_python_dependencies_after_pull(
+        ["git"],
+        "main",
+        "pre-pull-sha",
+        active_lazy_features=[],
+        active_tool_dependencies=[],
+        _windows_gateway_resume=None,
+    )
+
+    out = capsys.readouterr().out
+    assert expected_url in out
+    if repository is not None:
+        assert "https://hermes-agent.nousresearch.com" not in out
+
+
 @pytest.mark.parametrize("modname", ["agents", "agentops", "toolsets_x", "hermesx"])
 def test_hint_does_not_claim_partial_update_for_lookalike_third_party(modname):
     """``startswith`` would match third-party ``agents``/``agentops`` and blame

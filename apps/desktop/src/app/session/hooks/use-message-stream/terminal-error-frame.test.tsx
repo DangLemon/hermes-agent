@@ -34,6 +34,7 @@ describe('terminal error message.complete frames', () => {
   afterEach(() => {
     cleanup()
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it('marks the bubble failed from the structured error field, not the text heuristic', async () => {
@@ -111,5 +112,36 @@ describe('terminal error message.complete frames', () => {
     const bubble = lastAssistant()
     expect(bubble?.error).toBe('kaput')
     expect(bubble?.errorSurface).toBeUndefined()
+  })
+
+  it('preserves terminal error fields before storing them on the failed bubble', async () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+    const sourceEnvPath = ['~/.hermes/', 'env'].join('.')
+    mountStream()
+    await start()
+    await delta('…')
+
+    await completeWithError({
+      text: 'Error: Hermes backend failed',
+      error: `Run 'hermes model', then check ${sourceEnvPath} because Hermes-4.5 failed in the Hermes backend.`,
+      recoverable: true
+    })
+
+    const bubble = lastAssistant()
+    expect(bubble?.error).toBe(
+      `Run 'hermes model', then check ${sourceEnvPath} because Hermes-4.5 failed in the Hermes backend.`
+    )
+  })
+
+  it('brands only the static terminal error fallback when the backend omits error text', async () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+    mountStream()
+    await start()
+    await delta('…')
+
+    await completeWithError({ text: '' })
+
+    const bubble = lastAssistant()
+    expect(bubble?.error).toBe('Lemon AI reported an error')
   })
 })

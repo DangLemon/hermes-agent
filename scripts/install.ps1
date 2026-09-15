@@ -1,11 +1,11 @@
 # ============================================================================
-# Hermes Agent Installer for Windows
+# Lemon AI Installer for Windows
 # ============================================================================
 # Installation script for Windows (PowerShell).
 # Uses uv for fast Python provisioning and package management.
 #
 # Usage:
-#   iex (irm https://hermes-agent.nousresearch.com/install.ps1)
+#   iex (irm https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.ps1)
 #
 # Or download and run with options:
 #   .\install.ps1 -NoVenv -SkipSetup
@@ -183,13 +183,61 @@ function Test-InternalHarnessConfig {
         [string]$env:HERMES_DESKTOP_HARNESS_CONFIG
     }
 
-    # An explicit selector is authoritative. If it is invalid, stay in the
-    # public Hermes shape instead of falling through to checkout auto-detect.
     if (-not [string]::IsNullOrWhiteSpace($selected)) {
-        return (Test-InternalHarnessResource $selected)
+        if (Test-InternalHarnessResource $selected) { return $true }
+        return $true
     }
 
-    return (Test-CheckoutInternalHarnessConfig)
+    if (Test-RepositorySelectsInternalBuild) { return $true }
+
+    if (Test-CheckoutInternalHarnessConfig) { return $true }
+
+    return $true
+}
+
+function Get-InstallerBrandIdentity {
+    param([bool]$InternalBuild)
+
+    if ($InternalBuild) {
+        return [pscustomobject]@{
+            AgentName   = "Lemon AI"
+            CompanyName = "Lemon Digital"
+        }
+    }
+
+    return [pscustomobject]@{
+        AgentName   = "Hermes Agent"
+        CompanyName = "Nous Research"
+    }
+}
+
+function Get-DefaultSoulContent {
+    param(
+        [Parameter(Mandatory = $true)][string]$AgentName,
+        [Parameter(Mandatory = $true)][string]$CompanyName
+    )
+
+    return @"
+You are $AgentName, built by $CompanyName. Be direct: match the length of your reply to the weight of the ask -- a one-line question gets a one-line answer, and finished work gets a short report of what changed, what's verified, and what's left, never a replay of the process. No filler ("Great question," "I'd be happy to"), no restating the request back, no re-summarizing what you already said, no narrating tool calls the user can see. Plain claims over adjectives; when unsure, say so plainly. Agree because it's right, not because the user said it. Depth is earned -- give it when the user asks for detail, teaches, or the stakes demand it, not by default.
+"@
+}
+
+function Get-InstallerDiagnosticLines {
+    param(
+        [bool]$InternalBuild,
+        [Parameter(Mandatory = $true)][string]$HermesHome,
+        [Parameter(Mandatory = $true)][string]$InstallDir,
+        [Parameter(Mandatory = $true)][string]$RuntimeDirName,
+        [Parameter(Mandatory = $true)][string]$CliArgs
+    )
+
+    $identity = Get-InstallerBrandIdentity -InternalBuild $InternalBuild
+    return @(
+        "$($identity.AgentName) home: $HermesHome",
+        "$($identity.AgentName) install root: $InstallDir",
+        "$($identity.AgentName) runtime dir: $RuntimeDirName",
+        "$($identity.AgentName) CLI command: hermes $CliArgs"
+    )
 }
 
 function Test-InternalHarnessResource {
@@ -211,6 +259,21 @@ function Test-InternalHarnessResource {
     } catch {
         return $false
     }
+}
+
+function Test-RepositorySelectsInternalBuild {
+    $selectedRepository = if (-not [string]::IsNullOrWhiteSpace([string]$Repository)) {
+        [string]$Repository
+    } elseif (-not [string]::IsNullOrWhiteSpace([string]$env:HERMES_INSTALL_REPOSITORY)) {
+        [string]$env:HERMES_INSTALL_REPOSITORY
+    } else {
+        ""
+    }
+    return [string]::Equals(
+        $selectedRepository.Trim(),
+        "DangLemon/hermes-agent",
+        [StringComparison]::OrdinalIgnoreCase
+    )
 }
 
 function Test-CheckoutInternalHarnessConfig {
@@ -416,6 +479,11 @@ $script:NormalizedProfilePaths = Set-LongProfileEnvVars
 # rather than replaced, so a caller's choice is never overwritten by a default.
 # $PSBoundParameters is only meaningful at script scope, so this stays inline.
 $InternalDesktopBuild = Test-InternalHarnessConfig
+$InstallerBrandIdentity = Get-InstallerBrandIdentity -InternalBuild $InternalDesktopBuild
+$InstallerAgentName = $InstallerBrandIdentity.AgentName
+$InstallerCompanyName = $InstallerBrandIdentity.CompanyName
+$InstallerProductName = if ($InternalDesktopBuild) { "Lemon AI" } else { "Hermes" }
+$InstallerManagedRuntimeLabel = "$InstallerProductName-managed"
 $Repository = if ($Repository) {
     $Repository
 } elseif ($env:HERMES_INSTALL_REPOSITORY) {
@@ -467,11 +535,33 @@ if ($script:NormalizedProfilePaths) {
     Write-PathDiag "resolved install paths: HermesHome=$HermesHome InstallDir=$InstallDir"
 }
 
+function Test-RepositoryIdentity {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
+    if ($Value -match "^(https?:|git@)") { return $false }
+    if ($Value -like "*.git") { return $false }
+    if ($Value -like "*..*") { return $false }
+    if (($Value.Split("/")).Count -ne 2) { return $false }
+    return ($Value -match "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$")
+}
+
+function Get-RepositoryIdentityKey {
+    param([string]$Value)
+    return $Value.ToLowerInvariant()
+}
+
+if (-not (Test-RepositoryIdentity $Repository)) {
+    throw "-Repository expects a safe GitHub owner/repo identity, got: $Repository"
+}
+
+$RepoUrlSsh = "git@github.com:$Repository.git"
+$RepoUrlHttps = "https://github.com/$Repository.git"
+
 function Get-InstallerRecoveryUrl {
-    if ($InternalDesktopBuild) {
-        return "https://raw.githubusercontent.com/DangLemon/hermes-agent/main/scripts/install.ps1"
+    if ((Get-RepositoryIdentityKey $Repository) -eq (Get-RepositoryIdentityKey "NousResearch/hermes-agent")) {
+        return "https://hermes-agent.nousresearch.com/install.ps1"
     }
-    return "https://hermes-agent.nousresearch.com/install.ps1"
+    return "https://raw.githubusercontent.com/$Repository/main/scripts/install.ps1"
 }
 
 # Captured here, where the values are final, and emitted from the entry-point
@@ -488,10 +578,17 @@ $script:ResolvedPathReport = @{
     normalized        = $script:NormalizedPathRewrites
     resolver          = $script:LastResolver
     temp              = $env:TEMP
+    product_name      = $InstallerAgentName
     repository        = $Repository
     runtime_dir_name  = $RuntimeDirName
     bootstrap_marker  = if ($InternalDesktopBuild) { ".lemon-ai-bootstrap-complete" } else { ".hermes-bootstrap-complete" }
     recovery_url      = (Get-InstallerRecoveryUrl)
+    diagnostics       = @(Get-InstallerDiagnosticLines `
+        -InternalBuild $InternalDesktopBuild `
+        -HermesHome $HermesHome `
+        -InstallDir $InstallDir `
+        -RuntimeDirName $RuntimeDirName `
+        -CliArgs "desktop")
     hermes_home       = $HermesHome
     install_dir       = $InstallDir
 }
@@ -499,16 +596,6 @@ $script:ResolvedPathReport = @{
 # ============================================================================
 # Configuration
 # ============================================================================
-
-function Test-RepositoryIdentity {
-    param([string]$Value)
-    if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
-    if ($Value -match "^(https?:|git@)") { return $false }
-    if ($Value -like "*.git") { return $false }
-    if ($Value -like "*..*") { return $false }
-    if (($Value.Split("/")).Count -ne 2) { return $false }
-    return ($Value -match "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$")
-}
 
 function Get-GitHubRepositoryIdentity {
     param([string]$Url)
@@ -525,11 +612,6 @@ function Get-GitHubRepositoryIdentity {
 
     if ($repo -and (Test-RepositoryIdentity $repo)) { return $repo }
     return $null
-}
-
-function Get-RepositoryIdentityKey {
-    param([string]$Value)
-    return $Value.ToLowerInvariant()
 }
 
 function Ensure-ManagedOrigin {
@@ -556,6 +638,10 @@ function Ensure-ManagedOrigin {
         throw "Existing checkout origin $currentRepo does not match selected -Repository $Repository. No fetch was attempted, and local edits were left untouched. Use -Repository $currentRepo to update this checkout, or move it aside before installing $Repository."
     }
 
+    if ($currentUrl -match "^(git@github\.com:|ssh://git@github\.com/)") {
+        return
+    }
+
     if ($currentUrl -ne $RepoUrlHttps) {
         Write-Info "Normalizing managed origin URL to $RepoUrlHttps..."
         & git -c windows.appendAtomically=false remote set-url origin $RepoUrlHttps
@@ -565,12 +651,6 @@ function Ensure-ManagedOrigin {
     }
 }
 
-if (-not (Test-RepositoryIdentity $Repository)) {
-    throw "-Repository expects a safe GitHub owner/repo identity, got: $Repository"
-}
-
-$RepoUrlSsh = "git@github.com:$Repository.git"
-$RepoUrlHttps = "https://github.com/$Repository.git"
 $PythonVersion = "3.11"
 # Minor versions the installer accepts when the requested $PythonVersion isn't
 # available, in preference order. Only checkout-private uv-managed interpreters
@@ -1241,7 +1321,7 @@ function Update-ManagedNpm {
     # in-place upgrade would hit WinError 5 (Access denied) on npm.cmd
     # (#80926).  Defer; the next update with the app closed retries.
     if (Test-ManagedNodeInUse $NodeDir) {
-        Write-Warn "Hermes-managed Node.js is in use by a running app; skipping the bundled npm upgrade (applies on a later update with the app closed)."
+        Write-Warn "$InstallerManagedRuntimeLabel Node.js is in use by a running app; skipping the bundled npm upgrade (applies on a later update with the app closed)."
         return $false
     }
 
@@ -1427,7 +1507,7 @@ function Resolve-AvailablePythonVersion {
                 }
             }
         } catch {
-            throw "Failed to resolve Hermes-managed Python $ver`: $_"
+            throw "Failed to resolve $InstallerManagedRuntimeLabel Python $ver`: $_"
         } finally {
             if ($process) { $process.Dispose() }
         }
@@ -1606,7 +1686,7 @@ function New-GitBashAslrFailureReason {
         "Open PowerShell as Administrator and run:"
         "`$gitRoot = '$escapedRoot'"
         'Get-Item "$gitRoot\bin\bash.exe", "$gitRoot\usr\bin\*.exe" -ErrorAction SilentlyContinue | ForEach-Object { Set-ProcessMitigation -Name $_.FullName -Disable ForceRelocateImages }'
-        "Then rerun Hermes setup. If the override is blocked or later re-applied, ask your Windows administrator to allow this per-program exception."
+        "Then rerun $InstallerProductName setup. If the override is blocked or later re-applied, ask your Windows administrator to allow this per-program exception."
     ) -join [Environment]::NewLine
 }
 
@@ -1666,7 +1746,7 @@ function Install-Git {
         } else {
             Write-Warn "Git is on PATH, but its Git Bash installation could not be located."
         }
-        Write-Info "Trying a Hermes-managed PortableGit install instead..."
+        Write-Info "Trying a $InstallerManagedRuntimeLabel PortableGit install instead..."
     }
 
     # Download PortableGit into $HermesHome\git.  Always works as long as
@@ -1702,7 +1782,7 @@ function Install-Git {
         $gitVerTag = "$gitVer.windows.1"
 
         if ($arch -eq "32-bit-mingit") {
-            Write-Warn "32-bit Windows detected -- PortableGit is 64-bit only.  Installing MinGit 32-bit as a last resort; bash-dependent Hermes features (terminal tool, agent-browser) will not work on this machine."
+            Write-Warn "32-bit Windows detected -- PortableGit is 64-bit only.  Installing MinGit 32-bit as a last resort; bash-dependent $InstallerProductName features (terminal tool, agent-browser) will not work on this machine."
             $assetName    = "MinGit-$gitVer-32-bit.zip"
             $downloadIsZip = $true
         } elseif ($arch -eq "arm64") {
@@ -1799,7 +1879,7 @@ function Install-Git {
         Write-Err "Could not install portable Git: $_"
         Write-Info ""
         Write-Info "Fallback: install Git manually from https://git-scm.com/download/win"
-        Write-Info "then re-run this installer.  Hermes needs Git Bash on Windows to run"
+        Write-Info "then re-run this installer.  $InstallerProductName needs Git Bash on Windows to run"
         Write-Info "shell commands (same as Claude Code and other coding agents)."
         return $false
     }
@@ -1855,7 +1935,7 @@ function Set-GitBashEnvVar {
         }
     }
 
-    Write-Warn "Could not locate bash.exe -- Hermes may not find Git Bash."
+    Write-Warn "Could not locate bash.exe -- $InstallerProductName may not find Git Bash."
     Write-Info "If needed, set HERMES_GIT_BASH_PATH manually to your bash.exe path."
 }
 
@@ -1887,7 +1967,7 @@ function Test-SystemNodeReady {
     if (Test-NodeVersionOk $version) {
         Ensure-NodeExeOnPath | Out-Null
     } else {
-        Write-Warn "Node.js $version is unsupported (Hermes requires Node 22.22+, 24.11+, or 26+)"
+        Write-Warn "Node.js $version is unsupported ($InstallerProductName requires Node 22.22+, 24.11+, or 26+)"
         return $false
     }
 
@@ -1910,7 +1990,7 @@ function Test-SystemNodeReady {
     }
 
     if ($npmVersion) {
-        Write-Warn "Node.js $version uses npm $npmVersion, which does not satisfy Hermes requirement $npmRange"
+        Write-Warn "Node.js $version uses npm $npmVersion, which does not satisfy $InstallerProductName requirement $npmRange"
     } else {
         Write-Warn "Node.js $version was found, but npm is missing or could not report its version"
     }
@@ -1925,7 +2005,7 @@ function Test-Node {
         return $true
     }
 
-    Write-Info "Using a Hermes-managed Node.js installation instead..."
+    Write-Info "Using a $InstallerManagedRuntimeLabel Node.js installation instead..."
 
     # Prefer a Hermes-managed Node from a previous run over a too-old system one.
     $managedNode = "$HermesHome\node\node.exe"
@@ -1933,7 +2013,7 @@ function Test-Node {
         $version = & $managedNode --version
         $env:Path = "$HermesHome\node;$env:Path"
         Set-ManagedNodeFirstOnUserPath "$HermesHome\node"
-        Write-Success "Node.js $version found (Hermes-managed)"
+        Write-Success "Node.js $version found ($InstallerManagedRuntimeLabel)"
         # A tree from an older install still has that Node major's bundled
         # npm, which is below the current engines.npm floor. No-ops when the
         # npm is already in range, so reruns cost one --version probe.
@@ -1942,7 +2022,7 @@ function Test-Node {
         return $true
     }
 
-    Write-Info "Installing Hermes-managed Node.js $NodeVersion LTS..."
+    Write-Info "Installing $InstallerManagedRuntimeLabel Node.js $NodeVersion LTS..."
 
     # Try the portable-zip path FIRST -- no UAC, no admin, no winget MSI.
     # winget install OpenJS.NodeJS.LTS triggers a system-wide MSI install
@@ -2006,7 +2086,7 @@ function Test-Node {
                     try {
                         Rename-Item "$HermesHome\node" $backup -ErrorAction Stop
                     } catch {
-                        Write-Warn "Hermes-managed Node.js is in use by a running app; deferring its upgrade. Close the app and re-run the update."
+                        Write-Warn "$InstallerManagedRuntimeLabel Node.js is in use by a running app; deferring its upgrade. Close the app and re-run the update."
                         Remove-Item -Recurse -Force $staged -ErrorAction SilentlyContinue
                         Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue
                         Remove-Item -Force $tmpZip -ErrorAction SilentlyContinue
@@ -2506,7 +2586,7 @@ function Install-Repository {
                         if (($restoreExit -eq 0) -and ($conflictedFiles.Count -eq 0)) {
                             git -c windows.appendAtomically=false stash drop $autostashRef 2>$null
                             Write-Warn "Local changes were restored on top of the updated codebase."
-                            Write-Warn "Review git diff / git status if Hermes behaves unexpectedly."
+                            Write-Warn "Review git diff / git status if $InstallerProductName behaves unexpectedly."
                         } else {
                             Write-Err "Update pulled new code, but restoring local changes hit conflicts."
                             foreach ($line in $restoreOutput) {
@@ -2759,7 +2839,7 @@ function Install-Venv {
     # 3.11 even though the `python` stage reported success (issue #50769).
     $resolvedPython = Resolve-AvailablePythonVersion
     if (-not $resolvedPython) {
-        throw "Hermes-managed Python is unavailable. Run install.ps1 -Stage python first."
+        throw "$InstallerManagedRuntimeLabel Python is unavailable. Run install.ps1 -Stage python first."
     }
 
     Write-Info "Creating virtual environment with Python $($resolvedPython.Version)..."
@@ -2874,7 +2954,7 @@ function Install-Venv {
             $renameErr = $_.Exception.Message
             throw (
                 "Could not move the existing venv aside ($renameErr). " +
-                "A process still has the install directory open (often a non-Hermes " +
+                "A process still has the install directory open (often a process outside the $InstallerProductName " +
                 "python.exe that resolved into this venv via PATH). Close those " +
                 "processes and retry - the previous install was left intact."
             )
@@ -3150,7 +3230,12 @@ function Install-Dependencies {
 
     # Parse [project.optional-dependencies].all from pyproject.toml.
     # tomllib is stdlib on Python 3.11+ which the bootstrap guarantees.
-    $pythonExeForParse = if (-not $NoVenv) { "$InstallDir\venv\Scripts\python.exe" } else { (& $UvCmd python find $PythonVersion) }
+    $pythonExeForParse = if (-not $NoVenv) {
+        "$InstallDir\venv\Scripts\python.exe"
+    } else {
+        $resolvedPythonForParse = Resolve-AvailablePythonVersion
+        if ($resolvedPythonForParse) { [string]$resolvedPythonForParse.Path } else { "" }
+    }
     $allExtras = @()
     if (Test-Path $pythonExeForParse) {
         $parsed = & $pythonExeForParse -c @"
@@ -3212,7 +3297,7 @@ except Exception:
     if (-not $NoVenv) {
         $venvPython = "$InstallDir\venv\Scripts\python.exe"
         if (-not (Test-Path $venvPython)) {
-            throw "Install reported success but $venvPython does not exist. The dependency sync likely landed in a sibling .venv\ directory. Re-run the installer; if it persists, close Hermes processes and preserve existing venv directories before retrying. Do not delete venv in place."
+            throw "Install reported success but $venvPython does not exist. The dependency sync likely landed in a sibling .venv\ directory. Re-run the installer; if it persists, close $InstallerProductName processes and preserve existing venv directories before retrying. Do not delete venv in place."
         }
         # Relax EAP=Stop while running the import probe.  Python writes
         # deprecation warnings and import-system info to stderr; under
@@ -3228,7 +3313,7 @@ except Exception:
         if ($importExitCode -ne 0) {
             $sibling = "$InstallDir\.venv"
             $hint = if (Test-Path $sibling) {
-                "Detected sibling .venv\ at $sibling -- uv synced there instead of venv\. Close Hermes processes, preserve the existing venv, and rerun the installer so the transactional recovery path can move directories safely."
+                "Detected sibling .venv\ at $sibling -- uv synced there instead of venv\. Close $InstallerProductName processes, preserve the existing venv, and rerun the installer so the transactional recovery path can move directories safely."
             } else {
                 "Recover with: cd '$InstallDir'; `$env:UV_PROJECT_ENVIRONMENT='$InstallDir\venv'; uv sync --extra all --locked"
             }
@@ -3296,7 +3381,12 @@ print(','.join(scripts))
     # users hit and lazy-import errors from `hermes dashboard` are confusing.
     # If tier 1 failed (the common case), [web] was still picked up by tiers
     # 2-3; only tier 4 leaves you without it.
-    $pythonExe = if (-not $NoVenv) { "$InstallDir\venv\Scripts\python.exe" } else { (& $UvCmd python find $PythonVersion) }
+    $pythonExe = if (-not $NoVenv) {
+        "$InstallDir\venv\Scripts\python.exe"
+    } else {
+        $resolvedPythonForWeb = Resolve-AvailablePythonVersion
+        if ($resolvedPythonForWeb) { [string]$resolvedPythonForWeb.Path } else { "" }
+    }
     if (Test-Path $pythonExe) {
         $webOk = $false
         $webServerSyntaxOk = $false
@@ -3336,10 +3426,53 @@ print(','.join(scripts))
     Write-Success "All dependencies installed"
 }
 
+function Get-HermesLauncherRelativeSource {
+    param(
+        [Parameter(Mandatory=$true)] [string]$LauncherDirectory,
+        [Parameter(Mandatory=$true)] [string]$Source
+    )
+
+    try {
+        $base = [System.IO.Path]::GetFullPath($LauncherDirectory).TrimEnd('\') + '\'
+        $target = [System.IO.Path]::GetFullPath($Source)
+        $baseRoot = [System.IO.Path]::GetPathRoot($base)
+        $targetRoot = [System.IO.Path]::GetPathRoot($target)
+        if (
+            [string]::IsNullOrWhiteSpace($baseRoot) -or
+            [string]::IsNullOrWhiteSpace($targetRoot) -or
+            -not [string]::Equals($baseRoot.TrimEnd('\'), $targetRoot.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)
+        ) {
+            throw "launcher and source are on different filesystem roots"
+        }
+        $baseUri = [System.Uri]$base
+        $targetUri = [System.Uri]$target
+        if (
+            $baseUri.Scheme -ne $targetUri.Scheme -or
+            -not [string]::Equals($baseUri.Host, $targetUri.Host, [System.StringComparison]::OrdinalIgnoreCase)
+        ) {
+            throw "launcher and source are on different filesystem roots"
+        }
+        $relative = [System.Uri]::UnescapeDataString($baseUri.MakeRelativeUri($targetUri).ToString()).Replace('/', '\')
+        if ([System.IO.Path]::IsPathRooted($relative) -or [string]::IsNullOrWhiteSpace($relative)) {
+            throw "source path is not relative to launcher directory"
+        }
+        # The batch file is intentionally ASCII. %~dp0 expands the user's
+        # profile path at runtime, so non-ASCII profile names never enter the
+        # file bytes (and cannot be mangled by PowerShell 5.1's ASCII writer).
+        if ([System.Text.Encoding]::ASCII.GetString([System.Text.Encoding]::ASCII.GetBytes($relative)) -ne $relative) {
+            throw "relative source path contains non-ASCII characters"
+        }
+        return $relative
+    } catch {
+        throw "Cannot set up the hermes command: source path cannot be represented relative to launcher directory"
+    }
+}
+
 function Install-HermesCommandLaunchers {
     param(
         [Parameter(Mandatory=$true)] [string]$Root,
-        [Parameter(Mandatory=$true)] [string]$Destination
+        [Parameter(Mandatory=$true)] [string]$Destination,
+        [Parameter(Mandatory=$true)] [string]$Repository
     )
 
     # Expose ONLY the hermes launchers on PATH -- never the whole
@@ -3355,36 +3488,81 @@ function Install-HermesCommandLaunchers {
 
     New-Item -ItemType Directory -Force -Path $Destination | Out-Null
 
-    # Launcher form depends on the venv (keep in lockstep with
-    # hermes_cli/_install_repair.py): a normal venv's exe trampoline
-    # embeds an absolute interpreter path and survives copying; a
-    # relocatable venv's trampoline (managed_uv rebuilds use
-    # --relocatable) resolves relative to its own location, and a copy
-    # dies with 'uv trampoline failed to canonicalize script path' --
-    # those get a .cmd delegator invoking the in-venv exe instead.
-    $pyvenvCfg = Join-Path $Root "venv\pyvenv.cfg"
-    $venvRelocatable = $false
-    if (Test-Path -LiteralPath $pyvenvCfg) {
-        $venvRelocatable = [bool](Select-String -Path $pyvenvCfg -Pattern '^\s*relocatable\s*=\s*true\s*$' -Quiet)
-    }
+    # Each installation owns its update source. A command wrapper sets the
+    # existing HERMES_UPDATE_REPOSITORY contract only for the child process;
+    # setlocal prevents one installation from mutating another via HKCU or
+    # the caller's shell. Delegating to the in-venv executable works for
+    # both normal and relocatable uv trampolines.
     foreach ($launcher in @("hermes", "hermes-acp")) {
         $src = Join-Path $scriptsDir "$launcher.exe"
         if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { continue }
-        if ($venvRelocatable) {
-            Remove-Item (Join-Path $Destination "$launcher.exe") -Force -ErrorAction SilentlyContinue
-            Set-Content -Path (Join-Path $Destination "$launcher.cmd") -Value "@echo off`r`n`"$src`" %*" -Encoding Ascii
-        } else {
-            Remove-Item (Join-Path $Destination "$launcher.cmd") -Force -ErrorAction SilentlyContinue
-            Copy-Item -Force -LiteralPath $src -Destination (Join-Path $Destination "$launcher.exe")
+        $cmd = Join-Path $Destination "$launcher.cmd"
+        $relativeSource = Get-HermesLauncherRelativeSource -LauncherDirectory $Destination -Source $src
+        $body = @(
+            "@echo off"
+            "setlocal"
+            "set `"HERMES_UPDATE_REPOSITORY=$Repository`""
+            "`"%~dp0$relativeSource`" %*"
+            "exit /b %ERRORLEVEL%"
+        ) -join "`r`n"
+        Set-Content -Path $cmd -Value $body -Encoding Ascii
+        $shadowingExe = Join-Path $Destination "$launcher.exe"
+        if (Test-Path -LiteralPath $shadowingExe -PathType Leaf) {
+            try {
+                Remove-Item -LiteralPath $shadowingExe -Force -ErrorAction Stop
+            } catch {
+                throw "Cannot set up the hermes command: stale launcher blocks PATH resolution: $shadowingExe"
+            }
         }
     }
 
-    # Verify either staged form before the caller mutates PATH.
-    $requiredExe = Join-Path $Destination "hermes.exe"
+    # Verify the repository-aware form before the caller mutates PATH.
     $requiredCmd = Join-Path $Destination "hermes.cmd"
-    if (-not ((Test-Path -LiteralPath $requiredExe -PathType Leaf) -or
-              (Test-Path -LiteralPath $requiredCmd -PathType Leaf))) {
-        throw "Cannot set up the hermes command: launcher was not installed: $requiredExe"
+    if (-not (Test-Path -LiteralPath $requiredCmd -PathType Leaf)) {
+        throw "Cannot set up the hermes command: launcher was not installed: $requiredCmd"
+    }
+    return $Destination
+}
+
+function Install-HermesNoVenvCommandLauncher {
+    param(
+        [Parameter(Mandatory=$true)] [string]$Root,
+        [Parameter(Mandatory=$true)] [string]$Destination,
+        [Parameter(Mandatory=$true)] [string]$Repository,
+        [Parameter(Mandatory=$true)] [string]$PythonExe
+    )
+
+    $source = Join-Path $Root "hermes"
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+        throw "Cannot set up the hermes command: checkout launcher not found: $source"
+    }
+    if (-not (Test-Path -LiteralPath $PythonExe -PathType Leaf)) {
+        throw "Cannot set up the hermes command: Python not found: $PythonExe"
+    }
+
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    $cmd = Join-Path $Destination "hermes.cmd"
+    $relativeSource = Get-HermesLauncherRelativeSource -LauncherDirectory $Destination -Source $source
+    $relativePython = Get-HermesLauncherRelativeSource -LauncherDirectory $Destination -Source $PythonExe
+    $body = @(
+        "@echo off"
+        "setlocal"
+        "set `"HERMES_UPDATE_REPOSITORY=$Repository`""
+        "`"%~dp0$relativePython`" `"%~dp0$relativeSource`" %*"
+        "exit /b %ERRORLEVEL%"
+    ) -join "`r`n"
+    Set-Content -Path $cmd -Value $body -Encoding Ascii
+    $shadowingExe = Join-Path $Destination "hermes.exe"
+    if (Test-Path -LiteralPath $shadowingExe -PathType Leaf) {
+        try {
+            Remove-Item -LiteralPath $shadowingExe -Force -ErrorAction Stop
+        } catch {
+            throw "Cannot set up the hermes command: stale launcher blocks PATH resolution: $shadowingExe"
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $cmd -PathType Leaf)) {
+        throw "Cannot set up the hermes command: launcher was not installed: $cmd"
     }
     return $Destination
 }
@@ -3407,7 +3585,13 @@ function Set-PathVariable {
     Write-Info "Setting up hermes command..."
     
     if ($NoVenv) {
-        $hermesBin = "$InstallDir"
+        $resolvedPython = Resolve-AvailablePythonVersion
+        if (-not $resolvedPython -or [string]::IsNullOrWhiteSpace([string]$resolvedPython.Path)) {
+            throw "Cannot set up the hermes command: managed Python $PythonVersion was not found"
+        }
+        $hermesBin = "$HermesHome\bin"
+        Install-HermesNoVenvCommandLauncher -Root $InstallDir -Destination $hermesBin `
+            -Repository $Repository -PythonExe ([string]$resolvedPython.Path).Trim() | Out-Null
     } else {
         # $HermesHome\bin is the managed binary dir (shared with the managed
         # uv), OUTSIDE the git checkout: `hermes update`'s autostash
@@ -3418,7 +3602,7 @@ function Set-PathVariable {
         # Install-HermesCommandLaunchers, which throws BEFORE any PATH
         # mutation when the launchers cannot be staged.
         $hermesBin = "$HermesHome\bin"
-        Install-HermesCommandLaunchers -Root $InstallDir -Destination $hermesBin | Out-Null
+        Install-HermesCommandLaunchers -Root $InstallDir -Destination $hermesBin -Repository $Repository | Out-Null
     }
     
     $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -3606,12 +3790,13 @@ function Copy-ConfigTemplates {
     # PowerShell version.
     $soulPath = "$HermesHome\SOUL.md"
     if (-not (Test-Path $soulPath)) {
-        # MUST match DEFAULT_SOUL_MD in hermes_cli/default_soul.py. The runtime
-        # upgrades the old comment-only scaffold to this text on next run, so
-        # drift is self-healing, but keep them in sync to avoid first-run churn.
-        $soulContent = @"
-You are Hermes Agent, built by Nous Research. Be direct: match the length of your reply to the weight of the ask -- a one-line question gets a one-line answer, and finished work gets a short report of what changed, what's verified, and what's left, never a replay of the process. No filler ("Great question," "I'd be happy to"), no restating the request back, no re-summarizing what you already said, no narrating tool calls the user can see. Plain claims over adjectives; when unsure, say so plainly. Agree because it's right, not because the user said it. Depth is earned -- give it when the user asks for detail, teaches, or the stakes demand it, not by default.
-"@
+        # The ordinary identity must match DEFAULT_SOUL_MD in
+        # hermes_cli/default_soul.py; internal installs substitute only the
+        # agent/company names. The runtime upgrades the old comment-only
+        # scaffold on next run, so keep the shared copy in sync.
+        $soulContent = Get-DefaultSoulContent `
+            -AgentName $InstallerAgentName `
+            -CompanyName $InstallerCompanyName
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::WriteAllText($soulPath, $soulContent, $utf8NoBom)
         Write-Success "Created $soulPath (edit to customize personality)"
@@ -4239,6 +4424,19 @@ function Install-DesktopVoiceDeps {
     }
 }
 
+function Get-DesktopExecutableCandidates {
+    param(
+        [Parameter(Mandatory = $true)][string]$DesktopDir,
+        [bool]$InternalBuild
+    )
+
+    $executableName = if ($InternalBuild) { "Lemon AI.exe" } else { "Hermes.exe" }
+    return @(
+        (Join-Path (Join-Path (Join-Path $DesktopDir "release") "win-unpacked") $executableName),
+        (Join-Path (Join-Path (Join-Path $DesktopDir "release") "win-arm64-unpacked") $executableName)
+    )
+}
+
 function Install-Desktop {
     # Build apps/desktop into a launchable desktop executable. Only called from
     # Stage-Desktop, which is itself only included in the manifest when
@@ -4487,23 +4685,14 @@ function Install-Desktop {
     Pop-Location
 
     # 3. Sanity-check the produced binary. Probe both arches so this works
-    # on x64 and arm64 build machines. Ordinary builds keep Hermes-only
-    # discovery; internal builds prefer Lemon AI and retain Hermes fallback.
-    if ($InternalDesktopBuild) {
-        $exeCandidates = @(
-            "$desktopDir\release\win-unpacked\Lemon AI.exe",
-            "$desktopDir\release\win-arm64-unpacked\Lemon AI.exe",
-            "$desktopDir\release\win-unpacked\Hermes.exe",
-            "$desktopDir\release\win-arm64-unpacked\Hermes.exe"
-        )
-        $missingDesktopMessage = "Desktop build completed but no Lemon AI.exe or Hermes.exe was found under $desktopDir\release\*-unpacked\"
-    } else {
-        $exeCandidates = @(
-            "$desktopDir\release\win-unpacked\Hermes.exe",
-            "$desktopDir\release\win-arm64-unpacked\Hermes.exe"
-        )
-        $missingDesktopMessage = "Desktop build completed but no Hermes.exe was found under $desktopDir\release\*-unpacked\"
-    }
+    # on x64 and arm64 build machines. A fresh internal build must produce the
+    # Lemon executable; accepting Hermes.exe here would hide a packaging
+    # identity failure and create a newly branded Hermes shortcut.
+    $exeCandidates = @(Get-DesktopExecutableCandidates `
+        -DesktopDir $desktopDir `
+        -InternalBuild $InternalDesktopBuild)
+    $requiredDesktopExeName = if ($InternalDesktopBuild) { "Lemon AI.exe" } else { "Hermes.exe" }
+    $missingDesktopMessage = "Desktop build completed but no $requiredDesktopExeName was found under $desktopDir\release\*-unpacked\"
     $found = $false
     $desktopExe = $null
     foreach ($cand in $exeCandidates) {
@@ -4553,9 +4742,15 @@ function Install-Desktop {
 }
 
 function Get-DesktopShortcutIdentity {
-    param([Parameter(Mandatory = $true)][string]$TargetExe)
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetExe,
+        [bool]$InternalBuild = $InternalDesktopBuild
+    )
 
-    if ($InternalDesktopBuild -and ([System.IO.Path]::GetFileName($TargetExe) -ieq 'Lemon AI.exe')) {
+    if ($InternalBuild) {
+        if ([System.IO.Path]::GetFileName($TargetExe) -ine 'Lemon AI.exe') {
+            throw "Internal desktop shortcut creation requires Lemon AI.exe, got: $TargetExe"
+        }
         return [pscustomobject]@{
             LinkName    = 'Lemon AI.lnk'
             Description = 'Lemon AI'
@@ -4593,7 +4788,11 @@ function Test-ShortcutOwnsTarget {
 }
 
 function New-DesktopShortcuts {
-    param([Parameter(Mandatory = $true)][string]$TargetExe)
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetExe,
+        [string]$ProgramsFolder = [Environment]::GetFolderPath('Programs'),
+        [string]$DesktopFolder = [Environment]::GetFolderPath('Desktop')
+    )
 
     # Best-effort: a shortcut failure must never fail an otherwise-good install.
     try {
@@ -4616,8 +4815,8 @@ function New-DesktopShortcuts {
         }
 
         $targets = @(
-            (Join-Path ([Environment]::GetFolderPath('Programs')) $identity.LinkName),
-            (Join-Path ([Environment]::GetFolderPath('Desktop')) $identity.LinkName)
+            (Join-Path $ProgramsFolder $identity.LinkName),
+            (Join-Path $DesktopFolder $identity.LinkName)
         )
 
         foreach ($lnkPath in $targets) {
@@ -4640,8 +4839,8 @@ function New-DesktopShortcuts {
 
         if ($identity.LinkName -ne 'Hermes.lnk') {
             $legacyTargets = @(
-                (Join-Path ([Environment]::GetFolderPath('Programs')) 'Hermes.lnk'),
-                (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Hermes.lnk')
+                (Join-Path $ProgramsFolder 'Hermes.lnk'),
+                (Join-Path $DesktopFolder 'Hermes.lnk')
             )
             foreach ($legacyPath in $legacyTargets) {
                 try {
@@ -5356,6 +5555,10 @@ try {
         # profile from, so carry the product choice into the retry command.
         Write-Host "  `$env:HERMES_INSTALLER_BRAND='lemon'" -ForegroundColor Yellow
     }
-    Write-Host "  .\install.ps1" -ForegroundColor Yellow
+    if ((Get-RepositoryIdentityKey $Repository) -ne (Get-RepositoryIdentityKey "NousResearch/hermes-agent")) {
+        Write-Host "  .\install.ps1 -Repository '$Repository'" -ForegroundColor Yellow
+    } else {
+        Write-Host "  .\install.ps1" -ForegroundColor Yellow
+    }
     Write-Host ""
 }

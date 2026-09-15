@@ -219,8 +219,6 @@ fn desktop_exe_candidates(internal: bool) -> &'static [(&'static str, &'static s
             &[
                 ("win-unpacked", "Lemon AI.exe"),
                 ("win-arm64-unpacked", "Lemon AI.exe"),
-                ("win-unpacked", "Hermes.exe"),
-                ("win-arm64-unpacked", "Hermes.exe"),
             ]
         } else {
             &[
@@ -233,8 +231,6 @@ fn desktop_exe_candidates(internal: bool) -> &'static [(&'static str, &'static s
             &[
                 ("mac/Lemon AI.app/Contents/MacOS", "Lemon AI"),
                 ("mac-arm64/Lemon AI.app/Contents/MacOS", "Lemon AI"),
-                ("mac/Hermes.app/Contents/MacOS", "Hermes"),
-                ("mac-arm64/Hermes.app/Contents/MacOS", "Hermes"),
             ]
         } else {
             &[
@@ -254,10 +250,6 @@ fn linux_desktop_exe_candidates(internal: bool) -> &'static [(&'static str, &'st
             ("linux-arm64-unpacked", "Lemon AI"),
             ("linux-unpacked", "lemon-ai"),
             ("linux-arm64-unpacked", "lemon-ai"),
-            ("linux-unpacked", "hermes"),
-            ("linux-arm64-unpacked", "hermes"),
-            ("linux-unpacked", "Hermes"),
-            ("linux-arm64-unpacked", "Hermes"),
         ]
     } else {
         &[
@@ -575,6 +567,15 @@ async fn run_bootstrap(
         script.path.display(),
         source_note
     ));
+    for line in installer_diagnostic_lines(
+        crate::paths::product_name(),
+        &crate::paths::hermes_home(),
+        &crate::paths::install_root(),
+        &crate::paths::runtime_dir_name(),
+        "desktop",
+    ) {
+        emit_log(&format!("[bootstrap] {line}"));
+    }
 
     // 2. Fetch manifest
     //
@@ -903,6 +904,21 @@ fn should_retry_missing_stage_frame(exit_code: Option<i32>, killed: bool, attemp
     !killed && exit_code == Some(-1) && attempt < MAX_STAGE_ATTEMPTS
 }
 
+fn installer_diagnostic_lines(
+    product_name: &str,
+    hermes_home: &Path,
+    install_root: &Path,
+    runtime_dir_name: &str,
+    cli_args: &str,
+) -> [String; 4] {
+    [
+        format!("{product_name} home: {}", hermes_home.display()),
+        format!("{product_name} install root: {}", install_root.display()),
+        format!("{product_name} runtime dir: {runtime_dir_name}"),
+        format!("{product_name} CLI command: hermes {cli_args}"),
+    ]
+}
+
 async fn retry_backoff_cancelled(cancel_rx: Option<&mut mpsc::Receiver<()>>) -> bool {
     let backoff = tokio::time::sleep(std::time::Duration::from_millis(500));
     tokio::pin!(backoff);
@@ -1127,28 +1143,35 @@ mod tests {
         if cfg!(target_os = "windows") {
             assert_eq!(ordinary[0], ("win-unpacked", "Hermes.exe"));
             assert_eq!(internal[0], ("win-unpacked", "Lemon AI.exe"));
-            assert!(internal.contains(&("win-unpacked", "Hermes.exe")));
+            assert!(!internal.contains(&("win-unpacked", "Hermes.exe")));
+            assert!(!internal.contains(&("win-arm64-unpacked", "Hermes.exe")));
         } else if cfg!(target_os = "macos") {
             assert_eq!(ordinary[0], ("mac/Hermes.app/Contents/MacOS", "Hermes"));
             assert_eq!(internal[0], ("mac/Lemon AI.app/Contents/MacOS", "Lemon AI"));
-            assert!(internal.contains(&("mac/Hermes.app/Contents/MacOS", "Hermes")));
+            assert!(!internal.contains(&("mac/Hermes.app/Contents/MacOS", "Hermes")));
+            assert!(!internal.contains(&("mac-arm64/Hermes.app/Contents/MacOS", "Hermes")));
         } else {
             assert_eq!(ordinary[0], ("linux-unpacked", "hermes"));
             assert_eq!(internal[0], ("linux-unpacked", "Lemon AI"));
-            assert!(internal.contains(&("linux-unpacked", "hermes")));
+            assert!(!internal.contains(&("linux-unpacked", "hermes")));
+            assert!(!internal.contains(&("linux-arm64-unpacked", "hermes")));
+            assert!(!internal.contains(&("linux-unpacked", "Hermes")));
+            assert!(!internal.contains(&("linux-arm64-unpacked", "Hermes")));
         }
     }
 
     #[test]
-    fn linux_internal_desktop_candidates_prefer_lemon_and_keep_hermes_fallbacks() {
+    fn linux_internal_desktop_candidates_only_accept_lemon_artifacts() {
         let ordinary = linux_desktop_exe_candidates(false);
         let internal = linux_desktop_exe_candidates(true);
 
         assert_eq!(ordinary[0], ("linux-unpacked", "hermes"));
         assert_eq!(internal[0], ("linux-unpacked", "Lemon AI"));
         assert!(internal.contains(&("linux-unpacked", "lemon-ai")));
-        assert!(internal.contains(&("linux-unpacked", "hermes")));
-        assert!(internal.contains(&("linux-unpacked", "Hermes")));
+        assert!(!internal.contains(&("linux-unpacked", "hermes")));
+        assert!(!internal.contains(&("linux-arm64-unpacked", "hermes")));
+        assert!(!internal.contains(&("linux-unpacked", "Hermes")));
+        assert!(!internal.contains(&("linux-arm64-unpacked", "Hermes")));
     }
 
     #[test]
@@ -1163,11 +1186,18 @@ mod tests {
 
         assert_eq!(
             resolve_desktop_exe_from_candidates(&root, linux_desktop_exe_candidates(true)),
-            Some(lemon)
+            Some(lemon.clone())
         );
         assert_eq!(
             resolve_desktop_exe_from_candidates(&root, linux_desktop_exe_candidates(false)),
-            Some(legacy)
+            Some(legacy.clone())
+        );
+
+        std::fs::remove_file(&lemon).unwrap();
+        assert_eq!(
+            resolve_desktop_exe_from_candidates(&root, linux_desktop_exe_candidates(true)),
+            None,
+            "internal builds must not fall back to a Hermes executable"
         );
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1180,6 +1210,24 @@ mod tests {
             .starts_with("Couldn't find a built Lemon AI desktop at "));
         assert!(missing_desktop_message("Hermes", release)
             .starts_with("Couldn't find a built Hermes desktop at "));
+    }
+
+    #[test]
+    fn installer_diagnostics_label_lemon_paths_and_keep_hermes_command() {
+        let home = Path::new(r"C:\Users\tester\AppData\Local\Lemon AI");
+        let root = home.join("lemon-agent");
+        let lines = installer_diagnostic_lines("Lemon AI", home, &root, "lemon-agent", "desktop");
+
+        assert_eq!(
+            lines[0],
+            r"Lemon AI home: C:\Users\tester\AppData\Local\Lemon AI"
+        );
+        assert_eq!(
+            lines[1],
+            format!("Lemon AI install root: {}", root.display())
+        );
+        assert_eq!(lines[2], "Lemon AI runtime dir: lemon-agent");
+        assert_eq!(lines[3], "Lemon AI CLI command: hermes desktop");
     }
 
     #[test]

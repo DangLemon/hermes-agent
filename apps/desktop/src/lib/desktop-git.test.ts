@@ -31,6 +31,26 @@ const api = vi.fn(async ({ path }: { path: string }) => {
   return { ok: true }
 })
 
+function forceInternalHarnessForTest(): () => void {
+  const key = '__HERMES_DESKTOP_HARNESS__'
+  const previous = Object.getOwnPropertyDescriptor(globalThis, key)
+
+  Object.defineProperty(globalThis, key, {
+    configurable: true,
+    enumerable: previous?.enumerable ?? false,
+    value: 'internal',
+    writable: true
+  })
+
+  return () => {
+    if (previous) {
+      Object.defineProperty(globalThis, key, previous)
+    } else {
+      Reflect.deleteProperty(globalThis, key)
+    }
+  }
+}
+
 describe('desktop git facade', () => {
   beforeEach(() => {
     vi.stubGlobal('window', { hermesDesktop: { api, git: localGit } })
@@ -48,6 +68,20 @@ describe('desktop git facade', () => {
     vi.stubGlobal('window', undefined)
 
     expect(desktopGit()).toBeUndefined()
+  })
+
+  it('brands missing bridge errors for internal builds without changing remote git routing', async () => {
+    const restoreHarness = forceInternalHarnessForTest()
+    vi.stubGlobal('window', {})
+    $connection.set({ mode: 'remote' } as never)
+
+    try {
+      await expect(Promise.resolve().then(() => desktopGit()?.repoStatus('/work'))).rejects.toThrow(
+        'Lemon AI bridge is unavailable'
+      )
+    } finally {
+      restoreHarness()
+    }
   })
 
   it('uses Electron git locally', async () => {

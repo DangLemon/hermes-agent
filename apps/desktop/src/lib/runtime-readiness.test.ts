@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
+import { lemonAppBrand } from './app-brand'
 import {
   evaluateRuntimeReadiness,
   fetchRuntimeReadinessSignals,
   interpretRuntimeReadiness,
-  runtimeReadinessDisplay
+  runtimeReadinessDisplay,
+  runtimeReadinessForBrand
 } from './runtime-readiness'
 
 describe('interpretRuntimeReadiness', () => {
@@ -37,6 +39,26 @@ describe('interpretRuntimeReadiness', () => {
     expect(result.checksDisagree).toBe(true)
     expect(result.reason).toContain('No provider can serve the selected model.')
     expect(result.reason).toContain('setup.status reports configured credentials')
+  })
+
+  it('preserves auth.py setup guidance from runtime_check for the Lemon renderer', () => {
+    const source =
+      "No inference provider configured. Run 'hermes model' to choose a provider and model, or set an API key (OPENROUTER_API_KEY, OPENAI_API_KEY, etc.) in ~/.hermes/.env for Hermes-4.5."
+
+    const lemon = interpretRuntimeReadiness(
+      {
+        setup: { provider_configured: true },
+        setupError: null,
+        runtime: { error: source, ok: false },
+        runtimeError: null
+      },
+      { brand: lemonAppBrand }
+    )
+
+    expect(lemon.reason).toContain(source)
+    expect(lemon.reason).toContain('~/.hermes/.env')
+    expect(lemon.reason).toContain('Hermes-4.5')
+    expect(lemon.reason).not.toContain('~/.lemon-ai/.env')
   })
 
   it('falls back to setup.status when runtime_check has no boolean result', () => {
@@ -112,6 +134,20 @@ describe('evaluateRuntimeReadiness', () => {
     const result = await evaluateRuntimeReadiness(requestGateway, { requestedProvider: 'nous' })
 
     expect(result.ready).toBe(true)
+  })
+})
+
+describe('runtimeReadinessForBrand', () => {
+  it('preserves an existing readiness result because the reason may be backend data', () => {
+    const status = {
+      checksDisagree: false,
+      ready: false,
+      reason: 'Check ~/.hermes/.env before restarting Hermes-4.5 through the Hermes gateway.',
+      source: 'setup_status' as const
+    }
+
+    expect(runtimeReadinessForBrand(status, lemonAppBrand)).toBe(status)
+    expect(runtimeReadinessForBrand(status, lemonAppBrand)?.reason).toBe(status.reason)
   })
 })
 

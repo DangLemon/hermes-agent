@@ -4,8 +4,10 @@ import { type CSSProperties } from 'react'
 
 import { Button } from '../components/button'
 import {
+  $hermesHome,
   $logPath,
   $mode,
+  $productName,
   type BootstrapStateModel,
   openLogDir,
   startInstall,
@@ -25,7 +27,9 @@ interface FailureProps {
  */
 export default function Failure({ bootstrap }: FailureProps) {
   const logPath = useStore($logPath)
+  const hermesHome = useStore($hermesHome)
   const mode = useStore($mode)
+  const productName = useStore($productName)
   const isUpdate = mode === 'update'
 
   return (
@@ -42,34 +46,43 @@ export default function Failure({ bootstrap }: FailureProps) {
           }
         >
           <span>
-            <span>{isUpdate ? 'Update didn\u2019t finish' : 'Install didn\u2019t finish'}</span>
+            <span>{isUpdate ? 'Chưa cập nhật xong' : 'Chưa cài đặt xong'}</span>
           </span>
-          <span aria-hidden="true">{isUpdate ? 'Update didn\u2019t finish' : 'Install didn\u2019t finish'}</span>
+          <span aria-hidden="true">{isUpdate ? 'Chưa cập nhật xong' : 'Chưa cài đặt xong'}</span>
         </p>
 
         <p className="m-0 mx-auto max-w-xl text-center text-sm leading-normal tracking-tight text-muted-foreground">
           {bootstrap.error ??
             (isUpdate
-              ? 'Something went wrong during the update.'
-              : 'Something went wrong during installation.')}
+              ? 'Đã có lỗi trong lúc cập nhật.'
+              : 'Đã có lỗi trong lúc cài đặt.')}
         </p>
       </div>
 
       <div className="flex items-center gap-3">
         <Button className="gap-1.5" onClick={() => void (isUpdate ? startUpdate() : startInstall())}>
           <RefreshCw />
-          {isUpdate ? 'Retry update' : 'Retry install'}
+          {isUpdate ? 'Thử cập nhật lại' : 'Thử cài lại'}
         </Button>
         <Button className="gap-1.5" onClick={() => void openLogDir()} variant="text">
           <FileText />
-          Open logs
+          Mở log
         </Button>
       </div>
 
-      {logPath && (
-        <p className="max-w-lg text-center text-xs text-muted-foreground/70">
-          Log: <code className="font-mono">{logPath}</code>
-        </p>
+      {(logPath || hermesHome) && (
+        <div className="space-y-1 text-center text-xs text-muted-foreground/70">
+          {hermesHome && (
+            <p>
+              Thư mục {productName}: <code className="font-mono">{hermesHome}</code>
+            </p>
+          )}
+          {logPath && (
+            <p>
+              Log: <code className="font-mono">{logPath}</code>
+            </p>
+          )}
+        </div>
       )}
     </div>
   )

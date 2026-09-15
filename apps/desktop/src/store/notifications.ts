@@ -1,6 +1,7 @@
 import { atom } from 'nanostores'
 
 import { translateNow } from '@/i18n'
+import { appBrand, replaceHermesBrandTerms } from '@/lib/app-brand'
 
 export type NotificationKind = 'error' | 'warning' | 'info' | 'success'
 
@@ -76,6 +77,21 @@ function cleanErrorText(value: string) {
   return value.replace(/^Error:\s*/, '').trim()
 }
 
+function brandCopy(value: string): string {
+  return replaceHermesBrandTerms(value, appBrand())
+}
+
+function brandAction(action?: NotificationAction): NotificationAction | undefined {
+  if (!action) {
+    return undefined
+  }
+
+  return {
+    ...action,
+    label: brandCopy(action.label)
+  }
+}
+
 /** True when an error string is a disk-full / ENOSPC / SQLITE_FULL failure. */
 export function isDiskFullErrorMessage(message: string): boolean {
   return (
@@ -149,13 +165,16 @@ function summarizeErrorMessage(message: string, fallback: string) {
 // Exported so flows that surface errors inline (e.g. ConfirmDialog's onConfirm
 // rethrow) can reuse the same IPC-unwrapping + summarizing as notifyError.
 export function readableError(error: unknown, fallback: string): { message: string; detail?: string } {
-  const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : fallback
+  const rawInput = error instanceof Error ? error.message : typeof error === 'string' ? error : null
+  const hasRawInput = Boolean(rawInput?.trim())
+  const raw = hasRawInput ? rawInput! : fallback
   const unwrapped = raw.match(/Error invoking remote method '[^']+': Error: (.+)$/)?.[1] ?? raw
   const cleaned = cleanErrorText(unwrapped)
   const detail = cleaned.match(/"detail"\s*:\s*"([^"]+)"/)?.[1] ?? cleaned
   const summary = summarizeErrorMessage(detail, fallback)
+  const message = summary === detail && hasRawInput ? summary : brandCopy(summary)
 
-  return { message: summary, detail: detail === summary ? undefined : detail }
+  return { message, detail: detail && detail !== summary ? detail : undefined }
 }
 
 export function notify(input: NotificationInput): string {
@@ -168,10 +187,10 @@ export function notify(input: NotificationInput): string {
     icon: input.icon,
     accentColor: input.accentColor,
     meta: input.meta,
-    title: input.title,
+    title: input.title ? brandCopy(input.title) : input.title,
     message: input.message,
     detail: input.detail,
-    action: input.action,
+    action: brandAction(input.action),
     onDismiss: input.onDismiss,
     createdAt: Date.now(),
     placement: input.placement ?? defaultPlacement(kind, input.action)
@@ -198,7 +217,7 @@ export function notifyError(error: unknown, fallback: string): string {
 
   return notify({
     kind: 'error',
-    title: fallback,
+    title: brandCopy(fallback),
     message: readable.message,
     detail: readable.detail
   })

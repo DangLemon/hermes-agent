@@ -2,6 +2,7 @@ import type { BillingBlock } from '@hermes/shared'
 
 import { burstVibeHearts } from '@/components/chat/vibe-hearts'
 import { translateNow } from '@/i18n'
+import { appBrand, replaceHermesBrandTerms } from '@/lib/app-brand'
 import { coerceGatewayText, coerceThinkingText } from '@/lib/chat-runtime'
 import { playCompletionSound } from '@/lib/completion-sound'
 import { parseErrorSurface } from '@/lib/error-surface'
@@ -18,6 +19,10 @@ import { pruneFinishedSessionSubagents } from '@/store/subagents'
 import { clearActiveSessionTodos } from '@/store/todos'
 
 import type { GatewayEventContext } from './types'
+
+function brandCopy(value: string): string {
+  return replaceHermesBrandTerms(value, appBrand())
+}
 
 function firstBillingLine(text: string): string {
   return (text || '').split('\n')[0]?.trim() ?? ''
@@ -342,7 +347,7 @@ export function handleMessageStreamEvent(ctx: GatewayEventContext): boolean {
     const failure =
       payload?.status === 'error'
         ? {
-            error: coerceGatewayText(payload.error).trim() || finalText || 'Hermes reported an error',
+            error: coerceGatewayText(payload.error).trim() || finalText || brandCopy('Hermes reported an error'),
             partial: Boolean(payload.partial),
             surface: parseErrorSurface(payload.error_surface)
           }

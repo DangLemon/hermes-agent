@@ -43,7 +43,30 @@ function resolveCommitLogSelection({ branch, isShallow }) {
 // i.e. exactly the behind count the shallow clone lost. Unauthenticated, no
 // clone depth required. Pure URL builder + response parser here; the network
 // call lives with the caller.
-function compareApiUrl({ currentSha, originUrl, targetSha }) {
+const GITHUB_REPOSITORY_RE =
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$/
+
+function canonicalRepositoryForCompare(sourceRepository) {
+  if (!sourceRepository) {
+    return null
+  }
+
+  const repository = String(sourceRepository).trim()
+
+  if (
+    !GITHUB_REPOSITORY_RE.test(repository) ||
+    repository.includes('..') ||
+    repository.endsWith('.git') ||
+    repository.startsWith('-') ||
+    /^(https?:|git@)/i.test(repository)
+  ) {
+    return null
+  }
+
+  return repository
+}
+
+function compareApiUrl({ currentSha, originUrl, sourceRepository = null, targetSha }) {
   const sha = /^[0-9a-f]{40}$/i
 
   if (!sha.test(currentSha || '') || !sha.test(targetSha || '')) {
@@ -52,7 +75,7 @@ function compareApiUrl({ currentSha, originUrl, targetSha }) {
 
   // Only GitHub remotes have a compare API. Reuse the canonical form the
   // official-remote check produces: `github.com/<owner>/<repo>`.
-  const canonical = canonicalRemoteForCompare(originUrl)
+  const canonical = canonicalRepositoryForCompare(sourceRepository) || canonicalRemoteForCompare(originUrl)
 
   if (!canonical) {
     return null

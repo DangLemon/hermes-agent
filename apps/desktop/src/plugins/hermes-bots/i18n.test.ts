@@ -6,7 +6,8 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { BOTS_LOCALES } from './i18n'
+import { BOTS_LOCALES, type BotsMessages, brandBotsLocaleBundlesForEnv } from './i18n'
+import { botModeProductName, brandDisplayString } from './labels'
 
 type Leaf = string | ((...args: never[]) => string)
 
@@ -20,10 +21,14 @@ function leafEntries(node: unknown, prefix = ''): Array<[string, Leaf]> {
   )
 }
 
-const en = BOTS_LOCALES.en
-const ja = BOTS_LOCALES.ja
-const zh = BOTS_LOCALES.zh
-const zhHant = BOTS_LOCALES['zh-hant']
+type BotsLocaleSet = Record<'en' | 'ja' | 'zh' | 'zh-hant', BotsMessages>
+
+const locales = BOTS_LOCALES as BotsLocaleSet
+const en = locales.en
+const ja = locales.ja
+const zh = locales.zh
+const zhHant = locales['zh-hant']
+const internalEnv = { VITE_HERMES_DESKTOP_HARNESS: 'internal' }
 
 describe('BOTS_LOCALES', () => {
   it('covers the English key tree in every shipped locale', () => {
@@ -66,5 +71,57 @@ describe('BOTS_LOCALES', () => {
       expect(bothFn(sentinel, gateway)).toContain(gateway)
       expect(reasonFn(sentinel)).toContain(sentinel)
     }
+  })
+
+  it('keeps upstream display branding by default', () => {
+    expect(botModeProductName({})).toBe('Hermes')
+    expect(brandDisplayString('Update Hermes Desktop to open another Bot chat.', {})).toBe(
+      'Update Hermes Desktop to open another Bot chat.'
+    )
+    expect(brandDisplayString('Set up Hermes Agent before creating bots.', {})).toBe(
+      'Set up Hermes Agent before creating bots.'
+    )
+    expect(en.bot.openAnotherChatUnsupported).toBe('Update Hermes Desktop to open another Bot chat.')
+  })
+
+  it('brands internal display copy as Lemon AI without changing lowercase technical commands', () => {
+    const internal = brandBotsLocaleBundlesForEnv(internalEnv) as BotsLocaleSet
+
+    expect(botModeProductName(internalEnv)).toBe('Lemon AI')
+    expect(brandDisplayString('Update Hermes Desktop to open another Bot chat.', internalEnv)).toBe(
+      'Update Lemon AI Desktop to open another Bot chat.'
+    )
+    expect(brandDisplayString('Set up Hermes Agent before creating bots.', internalEnv)).toBe(
+      'Set up Lemon AI before creating bots.'
+    )
+    expect(brandDisplayString('Provider not configured — run hermes model', internalEnv)).toBe(
+      'Provider not configured — run hermes model'
+    )
+    expect(internal.en.bot.openAnotherChatUnsupported).toBe('Update Lemon AI Desktop to open another Bot chat.')
+    expect(internal.en.tools.skillsHub).toBe('Lemon AI Skills Hub')
+    expect(internal.ja.tools.skillsHub).toBe('Lemon AI スキルハブ')
+    expect(internal.zh.tools.skillsHub).toBe('Lemon AI 技能中心')
+    expect(internal['zh-hant'].tools.skillsHub).toBe('Lemon AI 技能中心')
+  })
+
+  it('brands wrapped locale interpolators while preserving their arguments', () => {
+    const internal = brandBotsLocaleBundlesForEnv(internalEnv) as BotsLocaleSet
+    const reason = 'REASON_SENTINEL'
+    const query = 'QUERY_SENTINEL'
+    const gateway = 'GATEWAY_SENTINEL'
+
+    expect(internal.en.roster.rosterUnavailable(reason)).toContain('Lemon AI')
+    expect(internal.en.roster.rosterUnavailable(reason)).toContain(reason)
+    expect(internal.en.roster.noMatchQueryOn(query, gateway)).toContain(query)
+    expect(internal.en.roster.noMatchQueryOn(query, gateway)).toContain(gateway)
+  })
+
+  it('does not rewrite Hermes inside Bot Mode interpolation values', () => {
+    const internal = brandBotsLocaleBundlesForEnv(internalEnv) as BotsLocaleSet
+    const userQuery = 'Hermes onboarding'
+    const userGateway = 'Hermes gateway profile'
+
+    expect(internal.en.roster.noMatchQueryOn(userQuery, userGateway)).toContain(userQuery)
+    expect(internal.en.roster.noMatchQueryOn(userQuery, userGateway)).toContain(userGateway)
   })
 })

@@ -93,6 +93,36 @@ export interface Translations {
     off: string
   }
 
+  uninstall: {
+    cancel: string
+    confirm: string
+    confirmDescription: (consequence: string) => string
+    confirmTitle: string
+    dangerTitle: string
+    heading: string
+    intro: string
+    loading: string
+    running: string
+    startError: string
+    options: {
+      gui: {
+        title: string
+        description: string
+        consequence: string
+      }
+      lite: {
+        title: string
+        description: string
+        consequence: string
+      }
+      full: {
+        title: string
+        description: string
+        consequence: string
+      }
+    }
+  }
+
   fileMenu: {
     revealFinder: string
     revealExplorer: string
@@ -1314,6 +1344,9 @@ export interface Translations {
     skillUpdated: string
     edit: string
     archive: string
+    archiveSkillConfirmDescription: string
+    archiveSkillConfirmTitle: (name: string) => string
+    archiveSkillFailed: string
     skillArchivedTitle: string
     skillArchivedMessage: string
     officialCatalog: string
