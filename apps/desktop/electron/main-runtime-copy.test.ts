@@ -54,7 +54,9 @@ test('main active backend label uses the runtime desktop product name', () => {
   const source = mainSource()
 
   assert.match(source, /label: `\$\{DESKTOP_RUNTIME_IDENTITY\.appName\} at \$\{ACTIVE_HERMES_ROOT\}`/)
+  assert.match(source, /backend\.label = `\$\{DESKTOP_RUNTIME_IDENTITY\.appName\} at \$\{ACTIVE_HERMES_ROOT\} \(venv: \$\{VENV_ROOT\}\)`/)
   assert.doesNotMatch(source, /label: `Hermes at \$\{ACTIVE_HERMES_ROOT\}`/)
+  assert.doesNotMatch(source, /backend\.label = `Hermes at \$\{ACTIVE_HERMES_ROOT\} \(venv:/)
 })
 
 test('legacy manual update path stops when the internal origin cannot be normalized', () => {
