@@ -18,6 +18,7 @@ describe('live transcript timeline events', () => {
   afterEach(() => {
     cleanup()
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it('records commentary, tool, resumed text, and turn-stop boundaries', () => {
@@ -72,6 +73,20 @@ describe('live transcript timeline events', () => {
 
     expect(system?.timestamp).toBe(401.625)
     expect(system?.parts[0].timestamp).toBe(401.625)
+  })
+
+  it('brands gateway review summaries before storing the system row', () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+
+    event('review.summary', 402.625, {
+      text: "💾 Self-improvement review: Run 'hermes model' before reopening Hermes Desktop."
+    })
+
+    const system = stream.state(SID).messages.find(message => message.role === 'system')
+
+    expect(system?.parts[0]).toMatchObject({
+      text: "review:Self-improvement review: Run 'hermes model' before reopening Lemon AI."
+    })
   })
 
   it('uses session.info time when it is the only stop boundary', () => {
