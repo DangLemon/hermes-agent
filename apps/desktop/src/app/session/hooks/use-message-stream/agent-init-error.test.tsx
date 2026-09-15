@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { textPart } from '@/lib/chat-messages'
 import { createClientSessionState } from '@/lib/chat-runtime'
 import { $notifications, clearNotifications } from '@/store/notifications'
+import { setActiveSessionId } from '@/store/session'
 
 import { type MessageStreamHarness, renderMessageStream } from './test-harness'
 
@@ -13,6 +14,11 @@ let stream: MessageStreamHarness
 
 function mountStream() {
   stream = renderMessageStream(SID)
+}
+
+function setWindowState({ focused = true, hidden = false }: { focused?: boolean; hidden?: boolean }) {
+  Object.defineProperty(document, 'hidden', { configurable: true, value: hidden })
+  Object.defineProperty(document, 'hasFocus', { configurable: true, value: () => focused })
 }
 
 /** Seed the session as it looks right after a first-message submit: the
@@ -36,6 +42,7 @@ describe('useMessageStream agent-init error surfacing (#63078)', () => {
     cleanup()
     clearNotifications()
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it('renders an agent-init failure as a visible in-transcript error and keeps the optimistic first message', async () => {
@@ -90,5 +97,56 @@ describe('useMessageStream agent-init error surfacing (#63078)', () => {
     expect(state.messages.some(m => m.role === 'assistant' && m.error?.includes('cancelled'))).toBe(true)
     expect(state.messages.some(m => m.id === 'user-123-abc')).toBe(true)
     expect(state.busy).toBe(false)
+  })
+
+  it('brands only the static gateway error fallback when the backend omits error text', () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+    mountStream()
+    seedOptimisticFirstMessage()
+
+    act(() =>
+      stream.handleEvent({
+        payload: {},
+        session_id: SID,
+        type: 'error'
+      })
+    )
+
+    const expected = 'Lemon AI reported an error'
+    const state = stream.state()
+
+    expect(state.messages.some(m => m.role === 'assistant' && m.error === expected)).toBe(true)
+    expect($notifications.get().some(n => n.title === 'Lemon AI error' && n.message === expected)).toBe(true)
+  })
+
+  it('preserves raw gateway error payloads in transcript, toast, and native notification storage', () => {
+    const notify = vi.fn().mockResolvedValue(true)
+    const sourceEnvPath = ['~/.hermes/', 'env'].join('.')
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+    Object.defineProperty(window, 'hermesDesktop', {
+      configurable: true,
+      value: { notify }
+    })
+    setWindowState({ focused: false, hidden: true })
+    setActiveSessionId(SID)
+    mountStream()
+    seedOptimisticFirstMessage()
+
+    act(() =>
+      stream.handleEvent({
+        payload: {
+          message: `Run 'hermes model', then check ${sourceEnvPath} because Hermes-4.5 failed in the Hermes gateway.`
+        },
+        session_id: SID,
+        type: 'error'
+      })
+    )
+
+    const expected = `Run 'hermes model', then check ${sourceEnvPath} because Hermes-4.5 failed in the Hermes gateway.`
+    const state = stream.state()
+
+    expect(state.messages.some(m => m.role === 'assistant' && m.error === expected)).toBe(true)
+    expect($notifications.get().some(n => n.title === 'Lemon AI error' && n.message === expected)).toBe(true)
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ body: expected, kind: 'turnError' }))
   })
 })

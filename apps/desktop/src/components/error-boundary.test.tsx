@@ -31,6 +31,7 @@ describe('ErrorBoundary assistant-ui lookup recovery', () => {
     cleanup()
     vi.useRealTimers()
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it.each([
@@ -216,5 +217,22 @@ describe('ErrorBoundary assistant-ui lookup recovery', () => {
 
     expect(screen.getByRole(RELOAD_WINDOW.role, { name: RELOAD_WINDOW.name })).toBeTruthy()
     expect(recoveryWarningCount(warnSpy.mock.calls)).toBe(0)
+  })
+
+  it('preserves raw root fallback error messages before displaying them', () => {
+    vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+    const sourceEnvPath = ['~/.hermes/', 'env'].join('.')
+    const raw = `Run 'hermes model', then check ${sourceEnvPath} because Hermes-4.5 failed in the Hermes backend.`
+
+    const Bomb = makeBomb({ error: new Error(raw) })
+
+    render(
+      <RootErrorBoundary>
+        <Bomb />
+      </RootErrorBoundary>
+    )
+
+    expect(screen.getByText(raw)).toBeTruthy()
+    expect(screen.queryByText(/~\/\.lemon-ai\/\.env/)).toBeNull()
   })
 })

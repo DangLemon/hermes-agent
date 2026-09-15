@@ -34,7 +34,7 @@ const LEVEL_TO_TOAST_KIND: Record<string, NotificationKind> = {
   warn: 'warning'
 }
 
-function brandNoticeText(text: string): string {
+function brandStaticNoticeText(text: string): string {
   return replaceHermesBrandTerms(text, appBrand())
 }
 
@@ -139,8 +139,8 @@ export function noticeToToast(payload: AgentNoticePayload | undefined): Notifica
     durationMs: isTtl ? ttl : 0,
     id: payload?.key || payload?.id,
     kind: LEVEL_TO_TOAST_KIND[payload?.level ?? 'info'] ?? 'info',
-    message: brandNoticeText(primary),
-    meta: meta ? brandNoticeText(meta) : undefined
+    message: primary,
+    meta
   }
 }
 
@@ -203,9 +203,9 @@ export function nativeNoticeInput(
   }
 
   return {
-    body: brandNoticeText(text),
+    body: text,
     global: true,
     kind: 'credits',
-    title: brandNoticeText(title)
+    title: brandStaticNoticeText(title)
   }
 }

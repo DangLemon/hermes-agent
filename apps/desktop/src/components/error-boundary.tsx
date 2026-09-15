@@ -141,6 +141,7 @@ export function RootErrorBoundary({ children }: { children: ReactNode }) {
 
 function RootErrorFallback({ error, reset }: ErrorBoundaryFallbackProps) {
   const { t } = useI18n()
+  const description = error.message || t.errors.boundaryDesc
 
   return (
     <div
@@ -149,11 +150,7 @@ function RootErrorFallback({ error, reset }: ErrorBoundaryFallbackProps) {
       // `[data-glass-opaque]` in styles.css.
       data-glass-opaque=""
     >
-      <ErrorState
-        className="w-full max-w-[28rem]"
-        description={error.message || t.errors.boundaryDesc}
-        title={t.errors.boundaryTitle}
-      >
+      <ErrorState className="w-full max-w-[28rem]" description={description} title={t.errors.boundaryTitle}>
         <Button className="font-semibold" onClick={reset} size="lg">
           {t.common.retry}
         </Button>

@@ -1,9 +1,13 @@
-import { beforeEach, expect, test } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
-import { $notifications, clearNotifications, isDiskFullErrorMessage, notifyError } from './notifications'
+import { $notifications, clearNotifications, isDiskFullErrorMessage, notify, notifyError } from './notifications'
 
 beforeEach(() => {
   clearNotifications()
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
 })
 
 function lastMessage(): string {
@@ -67,4 +71,55 @@ test('code-skew 503 unwraps to a restart-required summary, not raw IPC JSON', ()
   expect(lastMessage()).toMatch(/running old code after an update/i)
   expect(lastMessage()).not.toMatch(/hermes:api/)
   expect(lastMessage()).not.toMatch(/systemctl/)
+})
+
+test('notifyError brands static titles but preserves raw backend messages', () => {
+  vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+  const sourceEnvPath = ['~/.hermes/', 'env'].join('.')
+
+  notifyError(
+    new Error(`Run 'hermes model', then check ${sourceEnvPath} because Hermes-4.5 failed in the Hermes backend.`),
+    'Hermes error'
+  )
+
+  const toast = $notifications.get()[0]
+  expect(toast?.title).toBe('Lemon AI error')
+  expect(toast?.message).toBe(
+    `Run 'hermes model', then check ${sourceEnvPath} because Hermes-4.5 failed in the Hermes backend.`
+  )
+  expect(toast?.message).toContain('~/.hermes/.env')
+  expect(toast?.message).toContain('Hermes-4.5')
+})
+
+test('notifyError preserves raw backend detail when the summary is a static fallback', () => {
+  vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+  const sourceEnvPath = ['~/.hermes/', 'env'].join('.')
+  const raw = `Error invoking remote method 'hermes:api': Error: ${'x'.repeat(181)} ${sourceEnvPath} Hermes-4.5`
+
+  notifyError(new Error(raw), 'Hermes error')
+
+  const toast = $notifications.get()[0]
+  expect(toast?.title).toBe('Lemon AI error')
+  expect(toast?.message).toBe('Lemon AI error')
+  expect(toast?.detail).toContain('~/.hermes/.env')
+  expect(toast?.detail).toContain('Hermes-4.5')
+})
+
+test('direct notifications brand title and action labels without rewriting payload fields', () => {
+  vi.stubGlobal('__HERMES_DESKTOP_HARNESS__', 'internal')
+
+  notify({
+    title: 'Update Hermes Desktop',
+    message: 'Hermes Desktop is ready for Hermes-4.5.',
+    detail: 'Hermes gateway reads ~/.hermes/.env.',
+    meta: 'Hermes Agent / Hermes-4.5',
+    action: { label: 'Open Hermes Desktop', onClick: () => {} }
+  })
+
+  const toast = $notifications.get()[0]
+  expect(toast?.title).toBe('Update Lemon AI')
+  expect(toast?.message).toBe('Hermes Desktop is ready for Hermes-4.5.')
+  expect(toast?.detail).toBe('Hermes gateway reads ~/.hermes/.env.')
+  expect(toast?.meta).toBe('Hermes Agent / Hermes-4.5')
+  expect(toast?.action?.label).toBe('Open Lemon AI')
 })
