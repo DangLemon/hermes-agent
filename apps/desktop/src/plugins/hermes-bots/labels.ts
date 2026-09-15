@@ -16,9 +16,22 @@ export type BrandEnv = {
 }
 
 function envString(env: BrandEnv, key: string): string {
+  const value = env[key]
+
+  // Callers may pass an explicit environment snapshot in tests or when
+  // rendering a locale bundle. It must win over the process-wide compiled
+  // global; otherwise a stale global from another test/build masks the
+  // requested profile.
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim()
+  }
+
   const globalKey = key.replace(/^VITE_/, '__') + '__'
   const globalValue = (globalThis as unknown as Partial<Record<string, unknown>>)[globalKey]
-  const value = typeof globalValue === 'string' ? globalValue : env[key]
+
+  if (typeof globalValue === 'string' && globalValue.trim()) {
+    return globalValue.trim()
+  }
 
   return typeof value === 'string' ? value.trim() : ''
 }

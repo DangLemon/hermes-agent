@@ -4712,6 +4712,23 @@ async function applyUpdatesPosixHandoff(opts: any) {
   const handoff = resolvePosixScriptHandoff(updateRoot)
 
   if (!handoff) {
+    const updateRepository = resolveDesktopUpdateRepository()
+
+    try {
+      const originReady = await ensureUpdateOriginRepository(updateRoot, updateRepository)
+
+      if (!originReady.ok) {
+        emitUpdateProgress({ stage: 'error', message: originReady.message, percent: null })
+
+        return { ok: false, error: 'origin-config-failed', message: originReady.message }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      emitUpdateProgress({ stage: 'error', message, percent: null })
+
+      return { ok: false, error: 'origin-config-failed', message }
+    }
+
     emitUpdateProgress({ stage: 'manual', message: 'hermes update', percent: null })
 
     return { ok: true, manual: true, command: 'hermes update', hermesRoot: updateRoot }
