@@ -249,13 +249,13 @@ def test_install_sh_checkout_manifest_reports_lemon_stage_titles(tmp_path: Path)
 
     manifest = json.loads(result.stdout)
     titles = {stage["name"]: stage["title"] for stage in manifest["stages"]}
-    assert titles["repository"] == "Download Lemon AI"
-    assert titles["path"] == "Install command line launcher"
-    assert titles["config"] == "Prepare Lemon AI config and skills"
-    assert titles["setup"] == "Configure Lemon AI API keys and settings"
-    assert titles["gateway"] == "Configure Lemon AI gateway service"
-    assert titles["desktop"] == "Build Lemon AI desktop app"
-    assert titles["complete"] == "Finish Lemon AI install"
+    assert titles["repository"] == "Tải Lemon AI"
+    assert titles["path"] == "Cài lệnh terminal"
+    assert titles["config"] == "Chuẩn bị cấu hình Lemon AI và skills"
+    assert titles["setup"] == "Cấu hình API key và cài đặt Lemon AI"
+    assert titles["gateway"] == "Cấu hình gateway Lemon AI"
+    assert titles["desktop"] == "Build app Lemon AI"
+    assert titles["complete"] == "Hoàn tất cài Lemon AI"
     assert [stage["name"] for stage in manifest["stages"]] == [
         "prerequisites",
         "repository",

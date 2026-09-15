@@ -41,11 +41,11 @@ export default function Welcome() {
         </p>
 
         <p className="m-0 text-center text-base leading-normal tracking-tight text-muted-foreground">
-          The agent that grows with you. We&rsquo;ll set things up in the background &mdash; takes a few minutes.
+          Trợ lý nội bộ cho công việc hằng ngày. Lemon AI sẽ tự cài nền trong vài phút.
         </p>
       </div>
 
-      <HackeryButton label="Install" onClick={() => void startInstall()} />
+      <HackeryButton label="Cài đặt" onClick={() => void startInstall()} />
     </div>
   )
 }

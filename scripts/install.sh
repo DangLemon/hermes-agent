@@ -191,12 +191,37 @@ PYTHON_VERSION="3.11"
 NODE_VERSION="26"
 INSTALLER_DISPLAY_NAME="Hermes Agent Installer"
 INSTALLER_PRODUCT_NAME="Hermes"
+INSTALLER_AGENT_NAME="Hermes Agent"
+INSTALLER_COMPANY_NAME="Nous Research"
+INSTALLER_DESKTOP_APP_NAME="Hermes.app"
 INSTALLER_DESCRIPTION="An open source AI agent by Nous Research."
 if [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
     INSTALLER_DISPLAY_NAME="Lemon AI Installer"
     INSTALLER_PRODUCT_NAME="Lemon AI"
+    INSTALLER_AGENT_NAME="Lemon AI"
+    INSTALLER_COMPANY_NAME="Lemon Digital"
+    INSTALLER_DESKTOP_APP_NAME="Lemon AI.app"
     INSTALLER_DESCRIPTION="Internal AI desktop harness by Lemon Digital."
 fi
+
+installer_diagnostic_lines() {
+    local cli_args="${1:-}"
+    printf '%s home: %s\n' "$INSTALLER_PRODUCT_NAME" "$HERMES_HOME"
+    printf '%s install root: %s\n' "$INSTALLER_PRODUCT_NAME" "$INSTALL_DIR"
+    printf '%s runtime dir: %s\n' "$INSTALLER_PRODUCT_NAME" "$RUNTIME_DIR_NAME"
+    if [ -n "$cli_args" ]; then
+        printf '%s CLI command: hermes %s\n' "$INSTALLER_PRODUCT_NAME" "$cli_args"
+    else
+        printf '%s CLI command: hermes\n' "$INSTALLER_PRODUCT_NAME"
+    fi
+}
+
+log_installer_diagnostics() {
+    local cli_args="${1:-}"
+    installer_diagnostic_lines "$cli_args" | while IFS= read -r line; do
+        log_info "$line"
+    done
+}
 
 # FHS-style root install layout (set by resolve_install_layout when applicable):
 #   code at /usr/local/lib/hermes-agent, command at /usr/local/bin/hermes,
@@ -332,7 +357,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --stage NAME   Run one desktop bootstrap stage"
             echo "  --json         Print a JSON result frame for --stage"
             echo "  --non-interactive  Skip stages that require user input"
-            echo "  --include-desktop  Also build the desktop app (apps/desktop -> Lemon AI.app or Hermes.app)"
+            echo "  --include-desktop  Also build the desktop app (apps/desktop -> $INSTALLER_DESKTOP_APP_NAME)"
             echo "  --dir PATH     Installation directory"
             echo "                   default (non-root):  $DEFAULT_HERMES_HOME/$RUNTIME_DIR_NAME"
             echo "                   default (root, Linux): /usr/local/lib/$RUNTIME_DIR_NAME"
@@ -680,13 +705,13 @@ emit_manifest() {
     local desktop_title="Build desktop app"
     local complete_title="Finish install"
     if [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
-        repository_title="Download Lemon AI"
-        path_title="Install command line launcher"
-        config_title="Prepare Lemon AI config and skills"
-        setup_title="Configure Lemon AI API keys and settings"
-        gateway_title="Configure Lemon AI gateway service"
-        desktop_title="Build Lemon AI desktop app"
-        complete_title="Finish Lemon AI install"
+        repository_title="Tải Lemon AI"
+        path_title="Cài lệnh terminal"
+        config_title="Chuẩn bị cấu hình Lemon AI và skills"
+        setup_title="Cấu hình API key và cài đặt Lemon AI"
+        gateway_title="Cấu hình gateway Lemon AI"
+        desktop_title="Build app Lemon AI"
+        complete_title="Hoàn tất cài Lemon AI"
     fi
     if [ "$INCLUDE_DESKTOP" = true ]; then
         desktop_stage='{"name":"desktop","title":"'"$desktop_title"'","category":"runtime","needs_user_input":false},'
@@ -1035,7 +1060,7 @@ check_python() {
             fi
         done
 
-        log_error "Termux Python $PYTHON_FOUND_VERSION is not supported; Hermes requires Python >=3.11,<3.14"
+        log_error "Termux Python $PYTHON_FOUND_VERSION is not supported; $INSTALLER_PRODUCT_NAME requires Python >=3.11,<3.14"
         log_info "Install a supported interpreter and re-run this script:"
         log_info "  pkg install tur-repo && pkg install python3.13"
         exit 1
@@ -1362,7 +1387,7 @@ check_node() {
             return 0
         fi
         log_warn "npm $(npm --version) cannot honor this repo's .npmrc (npm 11.10-11.16 ignore"
-        log_warn "min-release-age-exclude) — installing Hermes-managed Node $NODE_VERSION instead..."
+        log_warn "min-release-age-exclude) — installing $INSTALLER_PRODUCT_NAME-managed Node $NODE_VERSION instead..."
         install_node
         return
     fi
@@ -1371,15 +1396,15 @@ check_node() {
     if [ -x "$HERMES_HOME/node/bin/node" ] && [ -x "$HERMES_HOME/node/bin/npm" ] \
         && node_satisfies_build "$("$HERMES_HOME/node/bin/node" --version)"; then
         export PATH="$HERMES_HOME/node/bin:$PATH"
-        log_success "Node.js $("$HERMES_HOME/node/bin/node" --version) found (Hermes-managed)"
+        log_success "Node.js $("$HERMES_HOME/node/bin/node" --version) found ($INSTALLER_PRODUCT_NAME-managed)"
         HAS_NODE=true
         return 0
     fi
 
     if command -v node &> /dev/null && ! command -v npm &> /dev/null; then
-        log_warn "node found but npm is not on PATH (stray node symlink?) — installing Hermes-managed Node $NODE_VERSION LTS..."
+        log_warn "node found but npm is not on PATH (stray node symlink?) — installing $INSTALLER_PRODUCT_NAME-managed Node $NODE_VERSION LTS..."
     elif command -v node &> /dev/null; then
-        log_warn "Node.js $(node --version) is unsupported (Hermes requires Node 22.22+, 24.11+, or 26+) — installing Hermes-managed Node $NODE_VERSION..."
+        log_warn "Node.js $(node --version) is unsupported ($INSTALLER_PRODUCT_NAME requires Node 22.22+, 24.11+, or 26+) — installing $INSTALLER_PRODUCT_NAME-managed Node $NODE_VERSION..."
     elif [ "$DISTRO" = "termux" ]; then
         log_info "Node.js not found — installing Node.js via pkg..."
     else
@@ -1632,7 +1657,7 @@ check_network_prerequisites() {
         log_info "If mirrors are stale: termux-change-repo"
         log_info "Then test: curl -I https://pypi.org/simple/ && curl -I https://duckduckgo.com/"
     else
-        log_warn "Network checks failed. Hermes install may complete, but web search and dependency downloads can fail."
+        log_warn "Network checks failed. $INSTALLER_PRODUCT_NAME install may complete, but web search and dependency downloads can fail."
         log_info "Verify internet/DNS and retry if pip install fails."
     fi
 }
@@ -1756,7 +1781,7 @@ install_system_packages() {
             if [ "$IS_INTERACTIVE" = true ]; then
                 echo ""
                 log_info "sudo is needed ONLY to install optional system packages (${pkgs[*]}) via your package manager."
-                log_info "Hermes Agent itself does not require or retain root access."
+                log_info "$INSTALLER_AGENT_NAME itself does not require or retain root access."
                 if prompt_yes_no "Install ${description}? (requires sudo)" "no"; then
                     if sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a $install_cmd; then
                         [ "$need_ripgrep" = true ] && HAS_RIPGREP=true && log_success "ripgrep installed"
@@ -1772,7 +1797,7 @@ install_system_packages() {
                 # but opening fails with ENXIO. See #16746.
                 echo ""
                 log_info "sudo is needed ONLY to install optional system packages (${pkgs[*]}) via your package manager."
-                log_info "Hermes Agent itself does not require or retain root access."
+                log_info "$INSTALLER_AGENT_NAME itself does not require or retain root access."
                 if prompt_yes_no "Install ${description}?" "yes"; then
                     if sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a $install_cmd < /dev/tty; then
                         [ "$need_ripgrep" = true ] && HAS_RIPGREP=true && log_success "ripgrep installed"
@@ -1848,7 +1873,7 @@ clone_repo() {
     fi
 
     if [ -d "$INSTALL_DIR" ]; then
-    if [ -d "$INSTALL_DIR/.git" ]; then
+        if [ -d "$INSTALL_DIR/.git" ]; then
             log_info "Existing installation found, updating..."
             cd "$INSTALL_DIR"
 
@@ -1923,7 +1948,7 @@ clone_repo() {
                     if [ "$restore_ok" = "yes" ] && [ -z "$conflicted_files" ]; then
                         git stash drop "$autostash_ref" >/dev/null
                         log_warn "Local changes were restored on top of the updated codebase."
-                        log_warn "Review git diff / git status if Hermes behaves unexpectedly."
+                        log_warn "Review git diff / git status if $INSTALLER_PRODUCT_NAME behaves unexpectedly."
                     else
                         log_error "Update pulled new code, but restoring local changes hit conflicts."
                         if [ -n "$restore_output" ]; then
@@ -2241,7 +2266,7 @@ install_deps() {
                     log_success "Build tools installed"
                 else
                     log_info "sudo is needed ONLY to install build tools (build-essential, python3-dev, libffi-dev) via apt."
-                    log_info "Hermes Agent itself does not require or retain root access."
+                    log_info "$INSTALLER_AGENT_NAME itself does not require or retain root access."
                     if prompt_yes_no "Install build tools?" "yes"; then
                         sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq build-essential python3-dev libffi-dev >/dev/null 2>&1 || true
                         log_success "Build tools installed"
@@ -2418,7 +2443,7 @@ PY
 }
 
 setup_path() {
-    log_info "Setting up hermes command..."
+    log_info "Setting up $INSTALLER_PRODUCT_NAME command line launcher..."
 
     if [ "$USE_VENV" = true ]; then
         HERMES_BIN="$INSTALL_DIR/venv/bin/python"
@@ -2426,14 +2451,14 @@ setup_path() {
     else
         HERMES_BIN="$(which hermes 2>/dev/null || echo "")"
         if [ -z "$HERMES_BIN" ]; then
-            log_warn "hermes not found on PATH after install"
+            log_warn "hermes command not found on PATH after install"
             return 0
         fi
     fi
 
     # Verify the interpreter and the checked-in entrypoint needed by the launcher.
     if [ ! -x "$HERMES_BIN" ] || { [ "$USE_VENV" = true ] && [ ! -f "$HERMES_ENTRYPOINT" ]; }; then
-        log_warn "Hermes launcher prerequisites not found"
+        log_warn "$INSTALLER_PRODUCT_NAME launcher prerequisites not found"
         log_info "This usually means the Python package install didn't complete successfully."
         if [ "$DISTRO" = "termux" ]; then
             log_info "Try: cd $INSTALL_DIR && python -m pip install -e '.[termux-all]' -c constraints-termux.txt"
@@ -2545,7 +2570,7 @@ EOF
     if [ "$DISTRO" = "termux" ]; then
         export PATH="$command_link_dir:$PATH"
         log_info "$command_link_display_dir is the native Termux command path"
-        log_success "hermes command ready"
+        log_success "$INSTALLER_PRODUCT_NAME command line launcher ready"
         return 0
     fi
 
@@ -2563,13 +2588,13 @@ EOF
         if env -i HOME="$HOME" TERM="${TERM:-dumb}" bash -i -c 'command -v hermes' \
                 >/dev/null 2>&1; then
             log_info "/usr/local/bin is already on PATH for all shells"
-            log_success "hermes command ready"
+            log_success "$INSTALLER_PRODUCT_NAME command line launcher ready"
             return 0
         fi
 
-        log_info "hermes not on PATH in non-login shells (common on RHEL-family)"
+        log_info "hermes command not on PATH in non-login shells (common on RHEL-family)"
         PATH_LINE='export PATH="/usr/local/bin:$PATH"'
-        PATH_COMMENT='# Hermes Agent — ensure /usr/local/bin is on PATH (RHEL non-login shells)'
+        PATH_COMMENT="# $INSTALLER_AGENT_NAME — ensure /usr/local/bin is on PATH (RHEL non-login shells)"
         for SHELL_CONFIG in "$HOME/.bashrc" "$HOME/.bash_profile"; do
             [ -f "$SHELL_CONFIG" ] || continue
             if ! grep -v '^[[:space:]]*#' "$SHELL_CONFIG" 2>/dev/null \
@@ -2580,7 +2605,7 @@ EOF
                 log_success "Added /usr/local/bin to PATH in $SHELL_CONFIG"
             fi
         done
-        log_success "hermes command ready"
+        log_success "$INSTALLER_PRODUCT_NAME command line launcher ready"
         return 0
     fi
 
@@ -2626,7 +2651,7 @@ EOF
         for SHELL_CONFIG in "${SHELL_CONFIGS[@]}"; do
             if ! grep -v '^[[:space:]]*#' "$SHELL_CONFIG" 2>/dev/null | grep -qE 'PATH=.*\.local/bin'; then
                 echo "" >> "$SHELL_CONFIG"
-                echo "# Hermes Agent — ensure ~/.local/bin is on PATH" >> "$SHELL_CONFIG"
+                echo "# $INSTALLER_AGENT_NAME — ensure ~/.local/bin is on PATH" >> "$SHELL_CONFIG"
                 echo "$PATH_LINE" >> "$SHELL_CONFIG"
                 log_success "Added ~/.local/bin to PATH in $SHELL_CONFIG"
             fi
@@ -2636,7 +2661,7 @@ EOF
         if [ "$IS_FISH" = "true" ]; then
             if ! grep -q 'fish_add_path.*\.local/bin' "$FISH_CONFIG" 2>/dev/null; then
                 echo "" >> "$FISH_CONFIG"
-                echo "# Hermes Agent — ensure ~/.local/bin is on PATH" >> "$FISH_CONFIG"
+                echo "# $INSTALLER_AGENT_NAME — ensure ~/.local/bin is on PATH" >> "$FISH_CONFIG"
                 echo 'fish_add_path "$HOME/.local/bin"' >> "$FISH_CONFIG"
                 log_success "Added ~/.local/bin to PATH in $FISH_CONFIG"
             fi
@@ -2653,7 +2678,7 @@ EOF
     # Export for current session so hermes works immediately
     export PATH="$command_link_dir:$PATH"
 
-    log_success "hermes command ready"
+    log_success "$INSTALLER_PRODUCT_NAME command line launcher ready"
 }
 
 copy_config_templates() {
@@ -2696,8 +2721,8 @@ copy_config_templates() {
     # "never customized" and upgrades it to this text on next run, so any drift
     # here is self-healing, but keep them in sync to avoid a churn on first run.
     if [ ! -f "$HERMES_HOME/SOUL.md" ]; then
-        cat > "$HERMES_HOME/SOUL.md" << 'SOUL_EOF'
-You are Hermes Agent, built by Nous Research. Be direct: match the length of your reply to the weight of the ask — a one-line question gets a one-line answer, and finished work gets a short report of what changed, what's verified, and what's left, never a replay of the process. No filler ("Great question," "I'd be happy to"), no restating the request back, no re-summarizing what you already said, no narrating tool calls the user can see. Plain claims over adjectives; when unsure, say so plainly. Agree because it's right, not because the user said it. Depth is earned — give it when the user asks for detail, teaches, or the stakes demand it, not by default.
+        cat > "$HERMES_HOME/SOUL.md" << SOUL_EOF
+You are $INSTALLER_AGENT_NAME, built by $INSTALLER_COMPANY_NAME. Be direct: match the length of your reply to the weight of the ask — a one-line question gets a one-line answer, and finished work gets a short report of what changed, what's verified, and what's left, never a replay of the process. No filler ("Great question," "I'd be happy to"), no restating the request back, no re-summarizing what you already said, no narrating tool calls the user can see. Plain claims over adjectives; when unsure, say so plainly. Agree because it's right, not because the user said it. Depth is earned — give it when the user asks for detail, teaches, or the stakes demand it, not by default.
 SOUL_EOF
         log_success "Created $HERMES_HOME/SOUL.md (edit to customize personality)"
     fi
@@ -2779,10 +2804,10 @@ strip_snap_browser_override() {
 
     local tmp
     tmp="$(mktemp)" || return 0
-    if grep -Ev '^AGENT_BROWSER_EXECUTABLE_PATH=/snap/|^# Hermes Agent browser tools' "$env_file" > "$tmp"; then
+    if grep -Ev '^AGENT_BROWSER_EXECUTABLE_PATH=/snap/|^# (Hermes Agent|Lemon AI) browser tools' "$env_file" > "$tmp"; then
         mv "$tmp" "$env_file"
         log_warn "Removed stale Snap browser override (AGENT_BROWSER_EXECUTABLE_PATH=/snap/...) from $env_file"
-        log_info "Hermes will use the bundled Chromium instead."
+        log_info "$INSTALLER_PRODUCT_NAME will use the bundled Chromium instead."
         # Drop it from this process too so the rest of the run doesn't re-detect it.
         unset AGENT_BROWSER_EXECUTABLE_PATH
     else
@@ -3003,7 +3028,7 @@ configure_browser_env_from_system_browser() {
 
     {
         echo ""
-        echo "# Hermes Agent browser tools — explicit browser override."
+        echo "# $INSTALLER_AGENT_NAME browser tools — explicit browser override."
         echo "AGENT_BROWSER_EXECUTABLE_PATH=$browser_path"
     } >> "$env_file"
     log_success "Configured browser tools to use $browser_path"
@@ -3376,7 +3401,7 @@ maybe_start_gateway() {
 
     echo ""
     log_info "Messaging platform token detected!"
-    log_info "The gateway needs to be running for Hermes to send/receive messages."
+    log_info "The gateway needs to be running for $INSTALLER_PRODUCT_NAME to send/receive messages."
 
     # If WhatsApp is enabled and no session exists yet, run foreground first for QR scan
     WHATSAPP_VAL=$(grep "^WHATSAPP_ENABLED=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2-)
@@ -3507,45 +3532,81 @@ write_bootstrap_marker() {
 }
 
 print_success() {
+    local done_title="✓ Installation Complete!"
+    local files_title="📁 Your files:"
+    local commands_title="🚀 Commands:"
+    local config_label="Config:"
+    local api_label="API Keys:"
+    local data_label="Data:"
+    local code_label="Code:"
+    local cmd_chat="Start chatting"
+    local cmd_setup="Configure API keys & settings"
+    local cmd_config="View/edit configuration"
+    local cmd_config_edit="Open config in editor"
+    local cmd_gateway="Install gateway service (messaging + cron)"
+    local cmd_update="Update to latest version"
+    local termux_ready="'hermes' was linked into $(get_command_link_display_dir), which is already on PATH in Termux."
+    local fhs_ready="'hermes' was linked into /usr/local/bin and is ready to use — no shell reload needed."
+    local reload_hint="Reload your shell to use 'hermes' command:"
+
+    if [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
+        done_title="✓ Cài đặt Lemon AI hoàn tất!"
+        files_title="📁 Tệp cấu hình:"
+        commands_title="🚀 Lệnh kỹ thuật:"
+        config_label="Cấu hình:"
+        api_label="API key:"
+        data_label="Dữ liệu:"
+        code_label="Mã nguồn:"
+        cmd_chat="Mở chat"
+        cmd_setup="Cấu hình API key và cài đặt"
+        cmd_config="Xem/sửa cấu hình"
+        cmd_config_edit="Mở cấu hình bằng editor"
+        cmd_gateway="Cài gateway cho messaging và cron"
+        cmd_update="Cập nhật phiên bản mới nhất"
+        termux_ready="Lệnh kỹ thuật 'hermes' đã được liên kết vào $(get_command_link_display_dir), Termux dùng được ngay."
+        fhs_ready="Lệnh kỹ thuật 'hermes' đã được liên kết vào /usr/local/bin và dùng được ngay."
+        reload_hint="Reload shell để dùng lệnh kỹ thuật 'hermes':"
+    fi
+
     echo ""
     echo -e "${GREEN}${BOLD}"
     echo "┌─────────────────────────────────────────────────────────┐"
-    echo "│              ✓ Installation Complete!                   │"
+    printf "│ %-55s │\n" "$done_title"
     echo "└─────────────────────────────────────────────────────────┘"
     echo -e "${NC}"
     echo ""
 
     # Show file locations
-    echo -e "${CYAN}${BOLD}📁 Your files:${NC}"
+    echo -e "${CYAN}${BOLD}$files_title${NC}"
     echo ""
-    echo -e "   ${YELLOW}Config:${NC}    $HERMES_HOME/config.yaml"
-    echo -e "   ${YELLOW}API Keys:${NC}  $HERMES_HOME/.env"
-    echo -e "   ${YELLOW}Data:${NC}      $HERMES_HOME/cron/, sessions/, logs/"
-    echo -e "   ${YELLOW}Code:${NC}      $INSTALL_DIR"
+    echo -e "   ${YELLOW}$config_label${NC}    $HERMES_HOME/config.yaml"
+    echo -e "   ${YELLOW}$api_label${NC}  $HERMES_HOME/.env"
+    echo -e "   ${YELLOW}$data_label${NC}      $HERMES_HOME/cron/, sessions/, logs/"
+    echo -e "   ${YELLOW}$code_label${NC}      $INSTALL_DIR"
     echo ""
 
     echo -e "${CYAN}─────────────────────────────────────────────────────────${NC}"
     echo ""
-    echo -e "${CYAN}${BOLD}🚀 Commands:${NC}"
+    echo -e "${CYAN}${BOLD}$commands_title${NC}"
     echo ""
-    echo -e "   ${GREEN}hermes${NC}              Start chatting"
-    echo -e "   ${GREEN}hermes setup${NC}        Configure API keys & settings"
-    echo -e "   ${GREEN}hermes config${NC}       View/edit configuration"
-    echo -e "   ${GREEN}hermes config edit${NC}  Open config in editor"
-    echo -e "   ${GREEN}hermes gateway install${NC} Install gateway service (messaging + cron)"
-    echo -e "   ${GREEN}hermes update${NC}       Update to latest version"
+    echo -e "   ${GREEN}hermes${NC}              $cmd_chat"
+    echo -e "   ${GREEN}hermes setup${NC}        $cmd_setup"
+    echo -e "   ${GREEN}hermes config${NC}       $cmd_config"
+    echo -e "   ${GREEN}hermes config edit${NC}  $cmd_config_edit"
+    echo -e "   ${GREEN}hermes gateway install${NC} $cmd_gateway"
+    echo -e "   ${GREEN}hermes update${NC}       $cmd_update"
     echo ""
 
     echo -e "${CYAN}─────────────────────────────────────────────────────────${NC}"
     echo ""
     if [ "$DISTRO" = "termux" ]; then
-        echo -e "${YELLOW}⚡ 'hermes' was linked into $(get_command_link_display_dir), which is already on PATH in Termux.${NC}"
+        echo -e "${YELLOW}⚡ $termux_ready${NC}"
         echo ""
     elif [ "$ROOT_FHS_LAYOUT" = true ]; then
-        echo -e "${YELLOW}⚡ 'hermes' was linked into /usr/local/bin and is ready to use — no shell reload needed.${NC}"
+        echo -e "${YELLOW}⚡ $fhs_ready${NC}"
         echo ""
     else
-        echo -e "${YELLOW}⚡ Reload your shell to use 'hermes' command:${NC}"
+        echo -e "${YELLOW}⚡ $reload_hint${NC}"
         echo ""
         LOGIN_SHELL="$(basename "${SHELL:-/bin/bash}")"
         if [ "$LOGIN_SHELL" = "zsh" ]; then
@@ -4023,27 +4084,26 @@ install_desktop() {
             app="$desktop_dir/release/linux-unpacked/Lemon AI"
         elif [ "$INTERNAL_DESKTOP_BUILD" = true ] && [ -x "$desktop_dir/release/linux-unpacked/lemon-ai" ]; then
             app="$desktop_dir/release/linux-unpacked/lemon-ai"
-        elif [ -x "$desktop_dir/release/linux-unpacked/Hermes" ]; then
+        elif [ "$INTERNAL_DESKTOP_BUILD" != true ] && [ -x "$desktop_dir/release/linux-unpacked/Hermes" ]; then
             app="$desktop_dir/release/linux-unpacked/Hermes"
-        elif [ -x "$desktop_dir/release/linux-unpacked/hermes" ]; then
+        elif [ "$INTERNAL_DESKTOP_BUILD" != true ] && [ -x "$desktop_dir/release/linux-unpacked/hermes" ]; then
             app="$desktop_dir/release/linux-unpacked/hermes"
         fi
     elif [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
         app="$(select_newest_macos_app \
             "$desktop_dir/release/mac-arm64/Lemon AI.app" \
             "$desktop_dir/release/mac/Lemon AI.app")"
-        if [ -z "$app" ]; then
-            app="$(select_newest_macos_app \
-                "$desktop_dir/release/mac-arm64/Hermes.app" \
-                "$desktop_dir/release/mac/Hermes.app")"
-        fi
     else
         app="$(select_newest_macos_app \
             "$desktop_dir/release/mac-arm64/Hermes.app" \
             "$desktop_dir/release/mac/Hermes.app")"
     fi
     if [ -z "$app" ]; then
-        log_error "Desktop build completed but no app was found under $desktop_dir/release/"
+        if [ "$INTERNAL_DESKTOP_BUILD" = true ]; then
+            log_error "Desktop build completed but no Lemon AI app was found under $desktop_dir/release/"
+        else
+            log_error "Desktop build completed but no app was found under $desktop_dir/release/"
+        fi
         return 1
     fi
     log_success "Desktop app built: $app"
@@ -4250,6 +4310,10 @@ run_stage_protocol() {
         return 0
     fi
 
+    detect_os
+    resolve_install_layout
+    log_installer_diagnostics "$stage"
+
     # Run the stage body in a subshell so a stage helper that calls `exit 1`
     # on failure (clone_repo, install_deps, etc. were written for the monolithic
     # flow) only exits the subshell — the parent still reaches the JSON result
@@ -4280,6 +4344,7 @@ main() {
 
     detect_os
     resolve_install_layout
+    log_installer_diagnostics "install"
     install_uv
     check_python
     check_git

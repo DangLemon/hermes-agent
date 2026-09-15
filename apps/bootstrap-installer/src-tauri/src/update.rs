@@ -410,6 +410,12 @@ async fn run_update(app: AppHandle) -> Result<()> {
     update_args.push("--force".into());
     update_args.push("--branch".into());
     update_args.push(update_branch);
+    emit_update_diagnostics(
+        &app,
+        "update",
+        &install_root,
+        &format_cli_args(&update_args),
+    );
 
     emit_stage(&app, "update", StageState::Running, None, None);
     let started = Instant::now();
@@ -515,8 +521,9 @@ async fn run_update(app: AppHandle) -> Result<()> {
             return Err(anyhow!(msg));
         }
         other => {
+            let product_name = crate::paths::product_name();
             let msg = format!(
-                "hermes update failed (exit {:?}). See {} for details.",
+                "{product_name} update failed (exit {:?}). See {} for details.",
                 other,
                 crate::paths::hermes_home()
                     .join("logs")
@@ -547,6 +554,12 @@ async fn run_update(app: AppHandle) -> Result<()> {
     emit_stage(&app, "rebuild", StageState::Running, None, None);
     let started = Instant::now();
     let rebuild_args: Vec<String> = vec!["desktop".into(), "--build-only".into()];
+    emit_update_diagnostics(
+        &app,
+        "rebuild",
+        &install_root,
+        &format_cli_args(&rebuild_args),
+    );
     let mut rebuild = run_streamed(
         &app,
         &hermes,
@@ -847,20 +860,22 @@ fn desktop_app_payload_paths_for(install_root: &Path, internal: bool) -> Vec<Pat
                     .join("app.asar"),
             ]);
         }
-        paths.extend([
-            release
-                .join("mac")
-                .join("Hermes.app")
-                .join("Contents")
-                .join("Resources")
-                .join("app.asar"),
-            release
-                .join("mac-arm64")
-                .join("Hermes.app")
-                .join("Contents")
-                .join("Resources")
-                .join("app.asar"),
-        ]);
+        if !internal {
+            paths.extend([
+                release
+                    .join("mac")
+                    .join("Hermes.app")
+                    .join("Contents")
+                    .join("Resources")
+                    .join("app.asar"),
+                release
+                    .join("mac-arm64")
+                    .join("Hermes.app")
+                    .join("Contents")
+                    .join("Resources")
+                    .join("app.asar"),
+            ]);
+        }
         paths
     } else {
         vec![release
@@ -998,6 +1013,39 @@ fn is_locked(path: &Path) -> bool {
 /// second run resolves.
 fn rebuild_needs_retry(exit_code: Option<i32>) -> bool {
     exit_code != Some(0)
+}
+
+fn format_cli_args(args: &[String]) -> String {
+    args.join(" ")
+}
+
+fn update_diagnostic_lines(
+    product_name: &str,
+    hermes_home: &Path,
+    install_root: &Path,
+    cli_args: &str,
+) -> [String; 3] {
+    [
+        format!("{product_name} home: {}", hermes_home.display()),
+        format!("{product_name} install root: {}", install_root.display()),
+        format!("{product_name} CLI command: hermes {cli_args}"),
+    ]
+}
+
+fn emit_update_diagnostics(app: &AppHandle, stage: &str, install_root: &Path, cli_args: &str) {
+    for line in update_diagnostic_lines(
+        crate::paths::product_name(),
+        &crate::paths::hermes_home(),
+        install_root,
+        cli_args,
+    ) {
+        emit_log(
+            app,
+            Some(stage),
+            LogStream::Stdout,
+            &format!("[{stage}] {line}"),
+        );
+    }
 }
 
 /// Spawn `hermes <args>` from `cwd`, stream stdout/stderr as Log events on the
@@ -1211,7 +1259,8 @@ async fn install_macos_app_update(
     let rebuilt_app =
         crate::bootstrap::resolve_hermes_desktop_app(install_root).ok_or_else(|| {
             anyhow!(
-                "desktop rebuild succeeded but no Lemon AI.app or Hermes.app was found under {}",
+                "desktop rebuild succeeded but no {} app was found under {}",
+                crate::paths::product_name(),
                 install_root
                     .join("apps")
                     .join("desktop")
@@ -1507,6 +1556,34 @@ mod tests {
     }
 
     #[test]
+    fn update_diagnostics_label_lemon_paths_and_keep_hermes_command() {
+        let home = Path::new(r"C:\Users\tester\AppData\Local\Lemon AI");
+        let root = home.join("lemon-agent");
+        let args = vec![
+            "update".to_string(),
+            "--yes".to_string(),
+            "--gateway".to_string(),
+            "--force".to_string(),
+            "--branch".to_string(),
+            "main".to_string(),
+        ];
+        let lines = update_diagnostic_lines("Lemon AI", home, &root, &format_cli_args(&args));
+
+        assert_eq!(
+            lines[0],
+            r"Lemon AI home: C:\Users\tester\AppData\Local\Lemon AI"
+        );
+        assert_eq!(
+            lines[1],
+            format!("Lemon AI install root: {}", root.display())
+        );
+        assert_eq!(
+            lines[2],
+            "Lemon AI CLI command: hermes update --yes --gateway --force --branch main"
+        );
+    }
+
+    #[test]
     fn lock_probe_paths_include_desktop_app_payload() {
         let root = Path::new("/x/hermes-agent");
         let probes = install_lock_probe_paths(root);
@@ -1535,7 +1612,7 @@ mod tests {
         if cfg!(target_os = "macos") {
             assert!(ordinary[0].to_string_lossy().contains("Hermes.app"));
             assert!(internal[0].to_string_lossy().contains("Lemon AI.app"));
-            assert!(internal
+            assert!(!internal
                 .iter()
                 .any(|p| p.to_string_lossy().contains("Hermes.app")));
         } else {

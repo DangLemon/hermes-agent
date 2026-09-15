@@ -192,6 +192,51 @@ function Test-InternalHarnessConfig {
     return (Test-CheckoutInternalHarnessConfig)
 }
 
+function Get-InstallerBrandIdentity {
+    param([bool]$InternalBuild)
+
+    if ($InternalBuild) {
+        return [pscustomobject]@{
+            AgentName   = "Lemon AI"
+            CompanyName = "Lemon Digital"
+        }
+    }
+
+    return [pscustomobject]@{
+        AgentName   = "Hermes Agent"
+        CompanyName = "Nous Research"
+    }
+}
+
+function Get-DefaultSoulContent {
+    param(
+        [Parameter(Mandatory = $true)][string]$AgentName,
+        [Parameter(Mandatory = $true)][string]$CompanyName
+    )
+
+    return @"
+You are $AgentName, built by $CompanyName. Be direct: match the length of your reply to the weight of the ask -- a one-line question gets a one-line answer, and finished work gets a short report of what changed, what's verified, and what's left, never a replay of the process. No filler ("Great question," "I'd be happy to"), no restating the request back, no re-summarizing what you already said, no narrating tool calls the user can see. Plain claims over adjectives; when unsure, say so plainly. Agree because it's right, not because the user said it. Depth is earned -- give it when the user asks for detail, teaches, or the stakes demand it, not by default.
+"@
+}
+
+function Get-InstallerDiagnosticLines {
+    param(
+        [bool]$InternalBuild,
+        [Parameter(Mandatory = $true)][string]$HermesHome,
+        [Parameter(Mandatory = $true)][string]$InstallDir,
+        [Parameter(Mandatory = $true)][string]$RuntimeDirName,
+        [Parameter(Mandatory = $true)][string]$CliArgs
+    )
+
+    $identity = Get-InstallerBrandIdentity -InternalBuild $InternalBuild
+    return @(
+        "$($identity.AgentName) home: $HermesHome",
+        "$($identity.AgentName) install root: $InstallDir",
+        "$($identity.AgentName) runtime dir: $RuntimeDirName",
+        "$($identity.AgentName) CLI command: hermes $CliArgs"
+    )
+}
+
 function Test-InternalHarnessResource {
     param([string]$Selected)
     if ([string]::IsNullOrWhiteSpace($Selected) -or -not (Test-Path -LiteralPath $Selected -PathType Leaf)) {
@@ -416,6 +461,11 @@ $script:NormalizedProfilePaths = Set-LongProfileEnvVars
 # rather than replaced, so a caller's choice is never overwritten by a default.
 # $PSBoundParameters is only meaningful at script scope, so this stays inline.
 $InternalDesktopBuild = Test-InternalHarnessConfig
+$InstallerBrandIdentity = Get-InstallerBrandIdentity -InternalBuild $InternalDesktopBuild
+$InstallerAgentName = $InstallerBrandIdentity.AgentName
+$InstallerCompanyName = $InstallerBrandIdentity.CompanyName
+$InstallerProductName = if ($InternalDesktopBuild) { "Lemon AI" } else { "Hermes" }
+$InstallerManagedRuntimeLabel = "$InstallerProductName-managed"
 $Repository = if ($Repository) {
     $Repository
 } elseif ($env:HERMES_INSTALL_REPOSITORY) {
@@ -510,10 +560,17 @@ $script:ResolvedPathReport = @{
     normalized        = $script:NormalizedPathRewrites
     resolver          = $script:LastResolver
     temp              = $env:TEMP
+    product_name      = $InstallerAgentName
     repository        = $Repository
     runtime_dir_name  = $RuntimeDirName
     bootstrap_marker  = if ($InternalDesktopBuild) { ".lemon-ai-bootstrap-complete" } else { ".hermes-bootstrap-complete" }
     recovery_url      = (Get-InstallerRecoveryUrl)
+    diagnostics       = @(Get-InstallerDiagnosticLines `
+        -InternalBuild $InternalDesktopBuild `
+        -HermesHome $HermesHome `
+        -InstallDir $InstallDir `
+        -RuntimeDirName $RuntimeDirName `
+        -CliArgs "desktop")
     hermes_home       = $HermesHome
     install_dir       = $InstallDir
 }
@@ -1246,7 +1303,7 @@ function Update-ManagedNpm {
     # in-place upgrade would hit WinError 5 (Access denied) on npm.cmd
     # (#80926).  Defer; the next update with the app closed retries.
     if (Test-ManagedNodeInUse $NodeDir) {
-        Write-Warn "Hermes-managed Node.js is in use by a running app; skipping the bundled npm upgrade (applies on a later update with the app closed)."
+        Write-Warn "$InstallerManagedRuntimeLabel Node.js is in use by a running app; skipping the bundled npm upgrade (applies on a later update with the app closed)."
         return $false
     }
 
@@ -1432,7 +1489,7 @@ function Resolve-AvailablePythonVersion {
                 }
             }
         } catch {
-            throw "Failed to resolve Hermes-managed Python $ver`: $_"
+            throw "Failed to resolve $InstallerManagedRuntimeLabel Python $ver`: $_"
         } finally {
             if ($process) { $process.Dispose() }
         }
@@ -1671,7 +1728,7 @@ function Install-Git {
         } else {
             Write-Warn "Git is on PATH, but its Git Bash installation could not be located."
         }
-        Write-Info "Trying a Hermes-managed PortableGit install instead..."
+        Write-Info "Trying a $InstallerManagedRuntimeLabel PortableGit install instead..."
     }
 
     # Download PortableGit into $HermesHome\git.  Always works as long as
@@ -1892,7 +1949,7 @@ function Test-SystemNodeReady {
     if (Test-NodeVersionOk $version) {
         Ensure-NodeExeOnPath | Out-Null
     } else {
-        Write-Warn "Node.js $version is unsupported (Hermes requires Node 22.22+, 24.11+, or 26+)"
+        Write-Warn "Node.js $version is unsupported ($InstallerProductName requires Node 22.22+, 24.11+, or 26+)"
         return $false
     }
 
@@ -1915,7 +1972,7 @@ function Test-SystemNodeReady {
     }
 
     if ($npmVersion) {
-        Write-Warn "Node.js $version uses npm $npmVersion, which does not satisfy Hermes requirement $npmRange"
+        Write-Warn "Node.js $version uses npm $npmVersion, which does not satisfy $InstallerProductName requirement $npmRange"
     } else {
         Write-Warn "Node.js $version was found, but npm is missing or could not report its version"
     }
@@ -1930,7 +1987,7 @@ function Test-Node {
         return $true
     }
 
-    Write-Info "Using a Hermes-managed Node.js installation instead..."
+    Write-Info "Using a $InstallerManagedRuntimeLabel Node.js installation instead..."
 
     # Prefer a Hermes-managed Node from a previous run over a too-old system one.
     $managedNode = "$HermesHome\node\node.exe"
@@ -1938,7 +1995,7 @@ function Test-Node {
         $version = & $managedNode --version
         $env:Path = "$HermesHome\node;$env:Path"
         Set-ManagedNodeFirstOnUserPath "$HermesHome\node"
-        Write-Success "Node.js $version found (Hermes-managed)"
+        Write-Success "Node.js $version found ($InstallerManagedRuntimeLabel)"
         # A tree from an older install still has that Node major's bundled
         # npm, which is below the current engines.npm floor. No-ops when the
         # npm is already in range, so reruns cost one --version probe.
@@ -1947,7 +2004,7 @@ function Test-Node {
         return $true
     }
 
-    Write-Info "Installing Hermes-managed Node.js $NodeVersion LTS..."
+    Write-Info "Installing $InstallerManagedRuntimeLabel Node.js $NodeVersion LTS..."
 
     # Try the portable-zip path FIRST -- no UAC, no admin, no winget MSI.
     # winget install OpenJS.NodeJS.LTS triggers a system-wide MSI install
@@ -2011,7 +2068,7 @@ function Test-Node {
                     try {
                         Rename-Item "$HermesHome\node" $backup -ErrorAction Stop
                     } catch {
-                        Write-Warn "Hermes-managed Node.js is in use by a running app; deferring its upgrade. Close the app and re-run the update."
+                        Write-Warn "$InstallerManagedRuntimeLabel Node.js is in use by a running app; deferring its upgrade. Close the app and re-run the update."
                         Remove-Item -Recurse -Force $staged -ErrorAction SilentlyContinue
                         Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue
                         Remove-Item -Force $tmpZip -ErrorAction SilentlyContinue
@@ -2511,7 +2568,7 @@ function Install-Repository {
                         if (($restoreExit -eq 0) -and ($conflictedFiles.Count -eq 0)) {
                             git -c windows.appendAtomically=false stash drop $autostashRef 2>$null
                             Write-Warn "Local changes were restored on top of the updated codebase."
-                            Write-Warn "Review git diff / git status if Hermes behaves unexpectedly."
+                            Write-Warn "Review git diff / git status if $InstallerProductName behaves unexpectedly."
                         } else {
                             Write-Err "Update pulled new code, but restoring local changes hit conflicts."
                             foreach ($line in $restoreOutput) {
@@ -2764,7 +2821,7 @@ function Install-Venv {
     # 3.11 even though the `python` stage reported success (issue #50769).
     $resolvedPython = Resolve-AvailablePythonVersion
     if (-not $resolvedPython) {
-        throw "Hermes-managed Python is unavailable. Run install.ps1 -Stage python first."
+        throw "$InstallerManagedRuntimeLabel Python is unavailable. Run install.ps1 -Stage python first."
     }
 
     Write-Info "Creating virtual environment with Python $($resolvedPython.Version)..."
@@ -3715,12 +3772,13 @@ function Copy-ConfigTemplates {
     # PowerShell version.
     $soulPath = "$HermesHome\SOUL.md"
     if (-not (Test-Path $soulPath)) {
-        # MUST match DEFAULT_SOUL_MD in hermes_cli/default_soul.py. The runtime
-        # upgrades the old comment-only scaffold to this text on next run, so
-        # drift is self-healing, but keep them in sync to avoid first-run churn.
-        $soulContent = @"
-You are Hermes Agent, built by Nous Research. Be direct: match the length of your reply to the weight of the ask -- a one-line question gets a one-line answer, and finished work gets a short report of what changed, what's verified, and what's left, never a replay of the process. No filler ("Great question," "I'd be happy to"), no restating the request back, no re-summarizing what you already said, no narrating tool calls the user can see. Plain claims over adjectives; when unsure, say so plainly. Agree because it's right, not because the user said it. Depth is earned -- give it when the user asks for detail, teaches, or the stakes demand it, not by default.
-"@
+        # The ordinary identity must match DEFAULT_SOUL_MD in
+        # hermes_cli/default_soul.py; internal installs substitute only the
+        # agent/company names. The runtime upgrades the old comment-only
+        # scaffold on next run, so keep the shared copy in sync.
+        $soulContent = Get-DefaultSoulContent `
+            -AgentName $InstallerAgentName `
+            -CompanyName $InstallerCompanyName
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::WriteAllText($soulPath, $soulContent, $utf8NoBom)
         Write-Success "Created $soulPath (edit to customize personality)"
@@ -4348,6 +4406,19 @@ function Install-DesktopVoiceDeps {
     }
 }
 
+function Get-DesktopExecutableCandidates {
+    param(
+        [Parameter(Mandatory = $true)][string]$DesktopDir,
+        [bool]$InternalBuild
+    )
+
+    $executableName = if ($InternalBuild) { "Lemon AI.exe" } else { "Hermes.exe" }
+    return @(
+        (Join-Path (Join-Path (Join-Path $DesktopDir "release") "win-unpacked") $executableName),
+        (Join-Path (Join-Path (Join-Path $DesktopDir "release") "win-arm64-unpacked") $executableName)
+    )
+}
+
 function Install-Desktop {
     # Build apps/desktop into a launchable desktop executable. Only called from
     # Stage-Desktop, which is itself only included in the manifest when
@@ -4596,23 +4667,14 @@ function Install-Desktop {
     Pop-Location
 
     # 3. Sanity-check the produced binary. Probe both arches so this works
-    # on x64 and arm64 build machines. Ordinary builds keep Hermes-only
-    # discovery; internal builds prefer Lemon AI and retain Hermes fallback.
-    if ($InternalDesktopBuild) {
-        $exeCandidates = @(
-            "$desktopDir\release\win-unpacked\Lemon AI.exe",
-            "$desktopDir\release\win-arm64-unpacked\Lemon AI.exe",
-            "$desktopDir\release\win-unpacked\Hermes.exe",
-            "$desktopDir\release\win-arm64-unpacked\Hermes.exe"
-        )
-        $missingDesktopMessage = "Desktop build completed but no Lemon AI.exe or Hermes.exe was found under $desktopDir\release\*-unpacked\"
-    } else {
-        $exeCandidates = @(
-            "$desktopDir\release\win-unpacked\Hermes.exe",
-            "$desktopDir\release\win-arm64-unpacked\Hermes.exe"
-        )
-        $missingDesktopMessage = "Desktop build completed but no Hermes.exe was found under $desktopDir\release\*-unpacked\"
-    }
+    # on x64 and arm64 build machines. A fresh internal build must produce the
+    # Lemon executable; accepting Hermes.exe here would hide a packaging
+    # identity failure and create a newly branded Hermes shortcut.
+    $exeCandidates = @(Get-DesktopExecutableCandidates `
+        -DesktopDir $desktopDir `
+        -InternalBuild $InternalDesktopBuild)
+    $requiredDesktopExeName = if ($InternalDesktopBuild) { "Lemon AI.exe" } else { "Hermes.exe" }
+    $missingDesktopMessage = "Desktop build completed but no $requiredDesktopExeName was found under $desktopDir\release\*-unpacked\"
     $found = $false
     $desktopExe = $null
     foreach ($cand in $exeCandidates) {
@@ -4662,9 +4724,15 @@ function Install-Desktop {
 }
 
 function Get-DesktopShortcutIdentity {
-    param([Parameter(Mandatory = $true)][string]$TargetExe)
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetExe,
+        [bool]$InternalBuild = $InternalDesktopBuild
+    )
 
-    if ($InternalDesktopBuild -and ([System.IO.Path]::GetFileName($TargetExe) -ieq 'Lemon AI.exe')) {
+    if ($InternalBuild) {
+        if ([System.IO.Path]::GetFileName($TargetExe) -ine 'Lemon AI.exe') {
+            throw "Internal desktop shortcut creation requires Lemon AI.exe, got: $TargetExe"
+        }
         return [pscustomobject]@{
             LinkName    = 'Lemon AI.lnk'
             Description = 'Lemon AI'
@@ -4702,7 +4770,11 @@ function Test-ShortcutOwnsTarget {
 }
 
 function New-DesktopShortcuts {
-    param([Parameter(Mandatory = $true)][string]$TargetExe)
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetExe,
+        [string]$ProgramsFolder = [Environment]::GetFolderPath('Programs'),
+        [string]$DesktopFolder = [Environment]::GetFolderPath('Desktop')
+    )
 
     # Best-effort: a shortcut failure must never fail an otherwise-good install.
     try {
@@ -4725,8 +4797,8 @@ function New-DesktopShortcuts {
         }
 
         $targets = @(
-            (Join-Path ([Environment]::GetFolderPath('Programs')) $identity.LinkName),
-            (Join-Path ([Environment]::GetFolderPath('Desktop')) $identity.LinkName)
+            (Join-Path $ProgramsFolder $identity.LinkName),
+            (Join-Path $DesktopFolder $identity.LinkName)
         )
 
         foreach ($lnkPath in $targets) {
@@ -4749,8 +4821,8 @@ function New-DesktopShortcuts {
 
         if ($identity.LinkName -ne 'Hermes.lnk') {
             $legacyTargets = @(
-                (Join-Path ([Environment]::GetFolderPath('Programs')) 'Hermes.lnk'),
-                (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Hermes.lnk')
+                (Join-Path $ProgramsFolder 'Hermes.lnk'),
+                (Join-Path $DesktopFolder 'Hermes.lnk')
             )
             foreach ($legacyPath in $legacyTargets) {
                 try {
