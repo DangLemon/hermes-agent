@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import type { DesktopUninstallMode, DesktopUninstallSummary } from '@/global'
-import { type AppBrand, appBrandForEnv } from '@/lib/app-brand'
+import { TRANSLATIONS } from '@/i18n/catalog'
+import { type AppBrand, appBrandForEnv, replaceHermesBrandTerms } from '@/lib/app-brand'
 import { AlertTriangle, Loader2, Trash2 } from '@/lib/icons'
 import { cn } from '@/lib/utils'
+import { type Translations, useI18n } from '@/i18n'
 
 import { SectionHeading } from './primitives'
 
@@ -17,30 +19,6 @@ interface ModeOption {
   /** True when the option removes the Python agent (hidden if no agent). */
   needsAgent: boolean
 }
-
-const UPSTREAM_OPTIONS: ModeOption[] = [
-  {
-    mode: 'gui',
-    title: 'Uninstall Chat GUI only',
-    description: 'Remove this desktop app. The Hermes agent, your config, and chats all stay.',
-    consequence: 'the desktop Chat GUI (this app and its data)',
-    needsAgent: false
-  },
-  {
-    mode: 'lite',
-    title: 'Uninstall GUI + agent, keep my data',
-    description: 'Remove the app and the Hermes agent, but keep config, chats, and secrets for a future reinstall.',
-    consequence: 'the Chat GUI and the Hermes agent (config, chats, and secrets are kept)',
-    needsAgent: true
-  },
-  {
-    mode: 'full',
-    title: 'Uninstall everything',
-    description: 'Remove the app, the agent, and all user data — config, chats, scheduled jobs, secrets, logs.',
-    consequence: 'EVERYTHING — the Chat GUI, the Hermes agent, and all of your config, chats, secrets, and logs',
-    needsAgent: true
-  }
-]
 
 interface UninstallCopy {
   cancelLabel: string
@@ -56,60 +34,32 @@ interface UninstallCopy {
   startError: string
 }
 
-export function uninstallCopyForBrand(brand: AppBrand = appBrandForEnv()): UninstallCopy {
-  if (brand.mode === 'upstream') {
-    return {
-      cancelLabel: 'Cancel',
-      confirmButtonLabel: 'Yes, uninstall',
-      confirmDescription: consequence => `This removes ${consequence}. This can't be undone.`,
-      confirmTitle: 'Confirm uninstall',
-      dangerTitle: 'Danger zone',
-      heading: 'Uninstall Hermes',
-      intro: 'Choose how much to remove. The app closes to finish the job; reopen the installer any time to come back.',
-      loadingLabel: "Checking what's installed…",
-      options: UPSTREAM_OPTIONS,
-      runningLabel: 'Uninstalling…',
-      startError: 'Uninstall could not start.'
-    }
-  }
+export function uninstallCopyForBrand(
+  brand: AppBrand = appBrandForEnv(),
+  translations: Translations = brand.mode === 'internal-harness' ? TRANSLATIONS.vi : TRANSLATIONS.en
+): UninstallCopy {
+  const copy = translations.uninstall
+  const text = (value: string): string => replaceHermesBrandTerms(value, brand)
+  const option = (mode: DesktopUninstallMode, value: (typeof copy.options)[keyof typeof copy.options]): ModeOption => ({
+    mode,
+    title: text(value.title),
+    description: text(value.description),
+    consequence: text(value.consequence),
+    needsAgent: mode !== 'gui'
+  })
 
   return {
-    cancelLabel: 'Hủy',
-    confirmButtonLabel: 'Đồng ý gỡ',
-    confirmDescription: consequence => `Thao tác này sẽ gỡ ${consequence}. Không thể hoàn tác.`,
-    confirmTitle: 'Xác nhận gỡ cài đặt',
-    dangerTitle: 'Khu vực nhạy cảm',
-    heading: 'Gỡ Lemon AI',
-    intro: 'Chọn mức dữ liệu cần gỡ. Ứng dụng sẽ đóng để hoàn tất; bạn có thể cài lại bất cứ lúc nào.',
-    loadingLabel: 'Đang kiểm tra thành phần đã cài…',
-    options: [
-      {
-        mode: 'gui',
-        title: 'Chỉ gỡ ứng dụng desktop',
-        description: 'Gỡ ứng dụng này. Agent Lemon AI, cấu hình và cuộc trò chuyện vẫn được giữ lại.',
-        consequence: 'ứng dụng desktop Lemon AI (ứng dụng này và dữ liệu của ứng dụng)',
-        needsAgent: false
-      },
-      {
-        mode: 'lite',
-        title: 'Gỡ ứng dụng và agent, giữ dữ liệu',
-        description:
-          'Gỡ ứng dụng và agent Lemon AI, nhưng giữ cấu hình, cuộc trò chuyện và khóa truy cập để cài lại sau.',
-        consequence: 'ứng dụng desktop Lemon AI và agent Lemon AI (giữ cấu hình, cuộc trò chuyện và khóa truy cập)',
-        needsAgent: true
-      },
-      {
-        mode: 'full',
-        title: 'Gỡ tất cả',
-        description:
-          'Gỡ ứng dụng, agent và toàn bộ dữ liệu người dùng: cấu hình, cuộc trò chuyện, lịch công việc, khóa truy cập, log.',
-        consequence:
-          'TOÀN BỘ: ứng dụng desktop Lemon AI, agent Lemon AI, cấu hình, cuộc trò chuyện, khóa truy cập và log',
-        needsAgent: true
-      }
-    ],
-    runningLabel: 'Đang gỡ…',
-    startError: 'Không thể bắt đầu gỡ cài đặt.'
+    cancelLabel: text(copy.cancel),
+    confirmButtonLabel: text(copy.confirm),
+    confirmDescription: consequence => text(copy.confirmDescription(consequence)),
+    confirmTitle: text(copy.confirmTitle),
+    dangerTitle: text(copy.dangerTitle),
+    heading: text(copy.heading),
+    intro: text(copy.intro),
+    loadingLabel: text(copy.loading),
+    options: [option('gui', copy.options.gui), option('lite', copy.options.lite), option('full', copy.options.full)],
+    runningLabel: text(copy.running),
+    startError: text(copy.startError)
   }
 }
 
@@ -118,6 +68,7 @@ export function uninstallOptionsForBrand(brand: AppBrand = appBrandForEnv(), age
 }
 
 export function UninstallSection() {
+  const { t } = useI18n()
   const [summary, setSummary] = useState<DesktopUninstallSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [pending, setPending] = useState<DesktopUninstallMode | null>(null)
@@ -157,7 +108,7 @@ export function UninstallSection() {
 
   const bridge = window.hermesDesktop?.uninstall
   const brand = appBrandForEnv()
-  const copy = uninstallCopyForBrand(brand)
+  const copy = uninstallCopyForBrand(brand, t)
 
   if (!bridge) {
     return null
