@@ -326,9 +326,9 @@ Assert-Equal -Expected 'lemon-runtime' -Actual $result.RuntimeDirName -Label "ch
 
 $invalidHarness = Join-Path ([System.IO.Path]::GetTempPath()) "missing-harness-selector-$PID.json"
 $result = Invoke-Normalization -Environment @{ LEMON_AI_DESKTOP_HARNESS_CONFIG = $invalidHarness }
-Assert-Equal -Expected "NousResearch/hermes-agent" -Actual $result.Repository -Label "invalid explicit selector keeps the Hermes repository"
-Assert-Equal -Expected "hermes-agent" -Actual $result.RuntimeDirName -Label "invalid explicit selector keeps the Hermes runtime directory"
-Assert-Equal -Expected ".hermes-bootstrap-complete" -Actual $result.BootstrapMarker -Label "invalid explicit selector keeps the Hermes bootstrap marker"
+Assert-Equal -Expected "DangLemon/hermes-agent" -Actual $result.Repository -Label "invalid explicit selector keeps the Lemon repository"
+Assert-Equal -Expected "lemon-agent" -Actual $result.RuntimeDirName -Label "invalid explicit selector keeps the Lemon runtime directory"
+Assert-Equal -Expected ".lemon-ai-bootstrap-complete" -Actual $result.BootstrapMarker -Label "invalid explicit selector keeps the Lemon bootstrap marker"
 
 $result = Invoke-Normalization -Environment @{ HERMES_INSTALLER_BRAND = 'hermes' }
 Assert-Equal -Expected "NousResearch/hermes-agent" -Actual $result.Repository -Label "brand=hermes overrides checkout manifest"
