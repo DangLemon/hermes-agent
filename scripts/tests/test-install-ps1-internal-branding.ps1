@@ -184,16 +184,22 @@ Write-Host 'isolated config-templates stage and shortcut smoke'
 
 $env:HERMES_INSTALLER_BRAND = 'lemon'
 $powerShellExe = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh.exe' } else { 'powershell.exe' }
-$stageOutput = @(& $powerShellExe `
-    -NoProfile `
-    -ExecutionPolicy Bypass `
-    -File $installPs1 `
-    -Stage 'config-templates' `
-    -NonInteractive `
-    -Json `
-    -HermesHome $smokeHome `
-    -InstallDir $smokeInstall 2>&1)
-$stageExit = $LASTEXITCODE
+$previousErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    $stageOutput = @(& $powerShellExe `
+        -NoProfile `
+        -ExecutionPolicy Bypass `
+        -File $installPs1 `
+        -Stage 'config-templates' `
+        -NonInteractive `
+        -Json `
+        -HermesHome $smokeHome `
+        -InstallDir $smokeInstall 2>&1)
+    $stageExit = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+}
 Assert-Equal 0 $stageExit 'config-templates stage exits successfully for a clean profile'
 
 $stageFrame = $stageOutput |
