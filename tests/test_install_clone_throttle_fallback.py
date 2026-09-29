@@ -2,12 +2,13 @@
 
 GitHub throttles packfile generation for this repo with repo-scoped HTTP
 429s (not client IP limits): the single big pack behind `--depth 1` dies
-mid-transfer with "RPC failed; HTTP 429 / expected 'packfile'", and
-clone_repo's HTTPS branch had no retry and no fallback — a fresh install
-on an ordinary unauthenticated machine exited 1 at the download stage
-(same throttle as the update path in #89287).
+mid-transfer with "RPC failed; HTTP 429 / expected 'packfile'." The HTTPS
+path retries bounded direct clones, falls back to a blobless checkout, then
+downloads a GitHub archive if needed (same throttle as update path #89287).
 
 The contract pinned here:
+- Each HTTPS clone attempt has a hard 300-second wall-clock cap and a timed-out clone follows the existing retry/fallback path.
+- The timeout is a fixed installer policy, not an environment override.
 - The HTTPS clone is retried with backoff before giving up.
 - A failed direct attempt is retried after removing the partial clone.
 - When every direct attempt fails, the installer degrades to a blobless
@@ -27,6 +28,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -66,6 +68,38 @@ def test_https_clone_is_retried_with_backoff():
         r"rm -rf \"\$INSTALL_DIR\" 2>/dev/null  # partial clone is unusable",
         branch,
     ), "each failed direct attempt must clean up the partial clone"
+
+
+def test_https_clone_attempts_are_wall_clock_bounded():
+    branch = _https_branch()
+    assert "local clone_timeout=300" in branch
+    assert re.search(r'run_with_timeout "\$clone_timeout" git clone', branch), (
+        "a stalled HTTPS clone must be killed so existing retries and archive fallback can run"
+    )
+    assert "LEMON_GIT_CLONE_TIMEOUT" not in branch
+
+
+def test_run_with_timeout_allows_a_real_local_git_clone(tmp_path: Path):
+    script = f'''set -e
+eval "$(sed -n '/^run_with_timeout() {{/,/^}}$/p' "{INSTALL_SH}")"
+git init --bare "$1/origin.git" >/dev/null
+git init "$1/work" >/dev/null
+git -C "$1/work" config user.email test@example.invalid
+git -C "$1/work" config user.name test
+printf ok > "$1/work/README"
+git -C "$1/work" add README
+git -C "$1/work" commit -qm initial
+git -C "$1/work" push -q "$1/origin.git" HEAD:main
+run_with_timeout 10 git clone -q --branch main "$1/origin.git" "$1/clone"
+test "$(cat "$1/clone/README")" = ok
+'''
+    result = subprocess.run(
+        ["bash", "-c", script, "bash", str(tmp_path)],
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_blobless_partial_clone_fallback_exists():
