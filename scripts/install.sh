@@ -2042,9 +2042,11 @@ EOF
             local clone_ok=false
             local attempt=0
             local max_attempts=4
+            local clone_timeout=300
             for attempt in $(seq 1 "$max_attempts"); do
+                # Bound each direct clone so stalled GitHub transfers reach the existing retries and archive fallback.
                 [ "$attempt" -gt 1 ] && log_info "Retrying HTTPS clone (attempt $attempt/$max_attempts)..."
-                if git clone --depth 1 --single-branch --branch "$BRANCH" \
+                if run_with_timeout "$clone_timeout" git clone --depth 1 --single-branch --branch "$BRANCH" \
                      "$REPO_URL_HTTPS" "$INSTALL_DIR"; then
                     clone_ok=true
                     break
