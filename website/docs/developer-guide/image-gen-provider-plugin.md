@@ -12,6 +12,60 @@ Image-gen provider plugins register a backend that services every `image_generat
 Image-gen is one of several **backend plugins** Lemon AI supports. The others (with more specialized ABCs) are [Memory Provider Plugins](/developer-guide/memory-provider-plugin), [Context Engine Plugins](/developer-guide/context-engine-plugin), and [Model Provider Plugins](/developer-guide/model-provider-plugin). General tool/hook/CLI plugins live in [Build a Lemon AI Plugin](/developer-guide/plugins).
 :::
 
+## Custom-provider catalog metadata
+
+A custom chat provider can expose image generation without a separate plugin
+by publishing model capabilities in its OpenAI-compatible `GET /models`
+response. Keep the existing `object: "list"` and `data` envelope:
+
+```json
+{
+  "object": "list",
+  "data": [{
+    "id": "studio-render",
+    "object": "model",
+    "input_modalities": ["text"],
+    "output_modalities": ["image"],
+    "image_generation": {
+      "protocol": "images",
+      "default": true,
+      "priority": 10
+    }
+  }]
+}
+```
+
+`input_modalities` and `output_modalities` are independent string lists. A
+vision model with image input but text-only output is not an image generator.
+Neither model names nor `kind` imply a wire protocol. Discovery preserves
+canonical metadata through caching and refresh, including updates where IDs
+stay the same. Do not advertise capabilities that the authenticated caller
+cannot use.
+
+`default` is an optional boolean; `priority` is an optional integer, lower
+first. Defaults sort before non-defaults, then explicit priorities before
+missing priorities, then original catalog order. Publish stable ordering and
+at most one default per caller-visible catalog.
+
+Supported text-to-image protocol contracts:
+
+- `images`: `POST /images/generations` with the catalog model ID, `prompt`,
+  `size`, and `n: 1`. Return `data[].b64_json` or a downloadable `data[].url`.
+- `chat_completions`: `POST /chat/completions` with the catalog model ID,
+  a user text message, and `modalities: ["image"]`. Return images in
+  `choices[].message.images[].image_url.url`; HTTP(S) and base64 image data
+  URLs are supported. Ordinary text URLs are not generated images.
+- `responses`: declare `image_generation.request_model` for the orchestration
+  model. `POST /responses` uses that as `model`, the prompt as `input`, and an
+  `image_generation` tool specifying the catalog image model. Return final
+  `image_generation_call.result` base64 output. Do not label an image-only
+  model as the orchestration model unless the endpoint supports that contract.
+
+Requests reuse the custom provider's endpoint and credentials. Failure does
+not switch to another provider. Missing or unsupported metadata does not
+activate automatic image generation; explicit image backend selections remain
+authoritative.
+
 ## How discovery works
 
 Lemon AI scans for image-gen backends in three places:

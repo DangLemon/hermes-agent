@@ -207,7 +207,7 @@ def _discover_named_custom_models(provider_info: dict, api_key: str, configured_
     """Live catalog probe for a named custom endpoint (native ``/api/tags`` for Ollama).
     Returns ``(models, native_catalog_empty)``; persists the live catalog as a side effect."""
     from lemon_cli.config import normalize_extra_headers
-    from lemon_cli.models import fetch_api_models, _get_ollama_native_headers
+    from lemon_cli.models import cached_fetch_api_models_with_catalog, _get_ollama_native_headers
     from lemon_cli.models_local import (
         fetch_ollama_local_models,
         _normalize_openai_base_url,
@@ -215,7 +215,7 @@ def _discover_named_custom_models(provider_info: dict, api_key: str, configured_
     )
 
     name, base_url = provider_info["name"], provider_info["base_url"]
-    api_mode = provider_info.get("api_mode", "")
+    api_mode = provider_info.get("api_mode") or None
     provider_key = (provider_info.get("provider_key") or "").strip()
     print("Fetching available models...")
     fetch_kwargs = {"timeout": 8.0}
@@ -237,6 +237,7 @@ def _discover_named_custom_models(provider_info: dict, api_key: str, configured_
     use_native = should_use_ollama_native_catalog(native_catalog_provider, base_url, headers=candidate_headers or None)
     native_headers_arg = candidate_headers or None if use_native else (extra_headers or None)
     native_catalog_empty = False
+    model_catalog = {}
     if use_native:
         if explicit_catalog and configured_models:
             live_models = configured_models
@@ -244,18 +245,24 @@ def _discover_named_custom_models(provider_info: dict, api_key: str, configured_
             live_models = fetch_ollama_local_models(base_url, timeout=8.0, headers=native_headers_arg)
             native_catalog_empty = live_models == []
             if live_models is None:
-                live_models = fetch_api_models(api_key, _normalize_openai_base_url(base_url), headers=native_headers_arg, **fetch_kwargs)
+                live_models, model_catalog = cached_fetch_api_models_with_catalog(
+                    api_key, _normalize_openai_base_url(base_url), headers=native_headers_arg,
+                    force_refresh=True, **fetch_kwargs)
                 native_catalog_empty = False
     else:
-        live_models = fetch_api_models(api_key, base_url, headers=native_headers_arg, **fetch_kwargs)
+        live_models, model_catalog = cached_fetch_api_models_with_catalog(
+            api_key, base_url, headers=native_headers_arg, force_refresh=True, **fetch_kwargs)
     models = configured_models if explicit_catalog else [] if native_catalog_empty else (live_models or configured_models)
     # Persist the live catalog to the custom_providers entry so no-probe surfaces
     # (dashboard, desktop, ACP) show the full list; mirrors model_switch.py's
     # _save_discovered_models_to_config. A failed save is non-fatal.
-    if live_models:
+    if live_models is not None:
         with contextlib.suppress(Exception):
             from lemon_cli.model_switch_providers import _save_discovered_models_to_config
-            _save_discovered_models_to_config(base_url, live_models, api_mode=api_mode, headers=extra_headers or None)
+            identity = str(provider_info.get("api_key") or "").strip() or (f"env:{provider_info.get('key_env')}" if provider_info.get("key_env") else "")
+            _save_discovered_models_to_config(
+                base_url, live_models, api_mode=api_mode, headers=extra_headers or None,
+                model_catalog=model_catalog, credential_identity=identity)
     return models, native_catalog_empty
 
 

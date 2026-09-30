@@ -730,6 +730,15 @@ def _toolset_has_keys(
     """Check if a toolset's required API keys are configured."""
     if config is None:
         config = load_config()
+    if ts_key == "image_gen":
+        try:
+            from tools.image_generation_tool import resolve_auto_custom_image_binding
+
+            binding = resolve_auto_custom_image_binding(config, include_runtime=False)
+            if binding and binding.get("is_available"):
+                return True
+        except Exception:
+            logger.debug("auto custom image readiness check failed", exc_info=True)
     if ts_key == "vision":
         try:
             from agent.auxiliary_client import resolve_vision_provider_client

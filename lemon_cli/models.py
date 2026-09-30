@@ -73,6 +73,53 @@ COPILOT_EDITOR_VERSION = "vscode/1.104.1"
 COPILOT_REASONING_EFFORTS_GPT5 = ["minimal", "low", "medium", "high"]
 COPILOT_REASONING_EFFORTS_O_SERIES = ["low", "medium", "high"]
 
+
+def _model_catalog_from_rows(rows: Any) -> dict[str, dict[str, Any]]:
+    """Provider /models rows normalized to ``{model_id: metadata}`` for cache/config storage."""
+    if not isinstance(rows, list):
+        return {}
+    try:
+        from lemon_cli.model_image_metadata import normalize_image_metadata
+    except Exception:
+        return {}
+    catalog: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        metadata = normalize_image_metadata(row)
+        model_id = str(metadata.pop("id", "") or "").strip()
+        if model_id:
+            catalog[model_id] = metadata
+    return catalog
+
+
+def model_catalog_from_cached_entry(entry: Any) -> dict[str, dict[str, Any]]:
+    """Read normalized model metadata from a cache row; ID-only legacy rows return ``{}``."""
+    if not isinstance(entry, dict):
+        return {}
+    catalog = entry.get("model_catalog")
+    if not isinstance(catalog, dict):
+        return {}
+    try:
+        from lemon_cli.model_image_metadata import catalog_from_models_config
+        return catalog_from_models_config(catalog)
+    except Exception:
+        return {}
+
+
+def cached_api_model_catalog(
+    api_key: Optional[str], base_url: Optional[str], *, api_mode: Optional[str] = None,
+    headers: Optional[dict[str, str]] = None) -> dict[str, dict[str, Any]]:
+    """Read-only custom-endpoint metadata catalog from disk cache, without probing the network."""
+    normalized_url = str(base_url or "").strip().rstrip("/").lower()
+    if not normalized_url:
+        return {}
+    entry = _load_provider_models_cache().get(f"custom:{normalized_url}")
+    fp = _custom_endpoint_fingerprint(api_key, api_mode, headers)
+    if not _cache_entry_valid(entry, fp):
+        return {}
+    return model_catalog_from_cached_entry(entry)
+
 def _urlopen_model_catalog_request(req: urllib.request.Request, *, timeout: float, ssl_context=None):
     """Open catalog requests without forwarding headers across origins."""
     return open_credentialed_url(req, timeout=timeout, ssl_context=ssl_context)
@@ -1339,9 +1386,15 @@ _swr_refresh_inflight: set = set()
 _swr_refresh_lock = threading.Lock()
 
 
-def _cache_entry(fp: str, models: list[str], at: Optional[float] = None) -> dict:
-    """One provider row of the disk cache: credential fingerprint, write time, model ids."""
-    return {"fp": fp, "at": time.time() if at is None else at, "models": list(models)}
+def _cache_entry(
+    fp: str, models: list[str], at: Optional[float] = None,
+    model_catalog: Optional[dict[str, dict[str, Any]]] = None,
+) -> dict:
+    """One provider row of the disk cache: credential fingerprint, write time, ids, and metadata."""
+    entry = {"fp": fp, "at": time.time() if at is None else at, "models": list(models)}
+    if model_catalog is not None:
+        entry["model_catalog"] = {mid: dict(meta) for mid, meta in model_catalog.items()}
+    return entry
 
 
 def _ollama_native_probe_reachable() -> bool:
@@ -2096,10 +2149,12 @@ def github_model_reasoning_efforts(
 
 
 def _probe_result(
-    models, probed_url, resolved_base_url, suggested_base_url=None, used_fallback=False
+    models, probed_url, resolved_base_url, suggested_base_url=None, used_fallback=False,
+    model_catalog: Optional[dict[str, dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     return {
         "models": models,
+        "model_catalog": model_catalog or {},
         "probed_url": probed_url,
         "resolved_base_url": resolved_base_url,
         "suggested_base_url": suggested_base_url,
@@ -2155,9 +2210,11 @@ def probe_api_models(
             data = _get_json(url, timeout=timeout, headers=headers, **_open_kwargs)
         except Exception:
             continue
+        rows = data.get("data", [])
         return _probe_result(
-            [m.get("id", "") for m in data.get("data", [])], url, candidate_base.rstrip("/"),
-            alternate_base if alternate_base != candidate_base else normalized, is_fallback)
+            [m.get("id", "") for m in rows if isinstance(m, dict)], url, candidate_base.rstrip("/"),
+            alternate_base if alternate_base != candidate_base else normalized, is_fallback,
+            _model_catalog_from_rows(rows))
     return _probe_result(
         None, tried[0] if tried else normalized.rstrip("/") + "/models", normalized,
         alternate_base if alternate_base != normalized else None)
@@ -2299,6 +2356,10 @@ def fetch_api_models(
     result = probe_api_models(api_key, base_url, timeout=timeout, api_mode=api_mode, request_headers=headers)
     return result.get("models")
 
+_ORIGINAL_FETCH_API_MODELS = fetch_api_models
+
+
+
 
 def _custom_endpoint_fingerprint(
     api_key: Optional[str], api_mode: Optional[str], headers: Optional[dict[str, str]]) -> str:
@@ -2325,20 +2386,26 @@ def _cache_entry_valid(
         and not isinstance(entry.get("at"), bool))
 
 
-def cached_fetch_api_models(
+def cached_fetch_api_models_with_catalog(
     api_key: Optional[str], base_url: Optional[str], *, timeout: float = 5.0,
     api_mode: Optional[str] = None, headers: Optional[dict[str, str]] = None,
     force_refresh: bool = False, cache_only: bool = False,
-    ttl_seconds: int = _PROVIDER_MODELS_CACHE_TTL) -> Optional[list[str]]:
-    """Disk-cached :func:`fetch_api_models` for custom endpoints. ``cache_only`` callers (GUI picker
-    opens that must not block on a stopped local endpoint) still get a warm catalog instead of
-    collapsing to the config-declared subset."""
-    def _live():
-        return fetch_api_models(api_key, base_url, timeout=timeout, api_mode=api_mode, headers=headers)
+    ttl_seconds: int = _PROVIDER_MODELS_CACHE_TTL) -> tuple[Optional[list[str]], dict[str, dict[str, Any]]]:
+    """Disk-cached custom-endpoint catalog as one snapshot: model ids plus matching metadata."""
+    def _live_result():
+        # Preserve the fetch_api_models patch seam used by existing tests/callers. When it is patched,
+        # the live result is a plain ID list with no metadata; the cache entry deliberately drops stale
+        # metadata for those IDs instead of carrying old image capabilities forward.
+        if fetch_api_models is not _ORIGINAL_FETCH_API_MODELS:
+            return fetch_api_models(api_key, base_url, timeout=timeout, api_mode=api_mode, headers=headers), {}
+        result = probe_api_models(api_key, base_url, timeout=timeout, api_mode=api_mode, request_headers=headers)
+        return result.get("models"), result.get("model_catalog") or {}
 
     normalized_url = str(base_url or "").strip().rstrip("/").lower()
     if not normalized_url:  # nothing to key the cache on
-        return None if cache_only else _live()
+        if cache_only:
+            return None, {}
+        return _live_result()
 
     cache_key = f"custom:{normalized_url}"
     fp = _custom_endpoint_fingerprint(api_key, api_mode, headers)
@@ -2348,30 +2415,45 @@ def cached_fetch_api_models(
     valid = not force_refresh and _cache_entry_valid(entry, fp)
 
     if cache_only:
-        # Same trust window as the SWR tier below, minus the revalidation.
-        return list(entry["models"]) if valid and now - entry["at"] < _PROVIDER_MODELS_STALE_SERVE_MAX else None
+        if valid and now - entry["at"] < _PROVIDER_MODELS_STALE_SERVE_MAX:
+            return list(entry["models"]), model_catalog_from_cached_entry(entry)
+        return None, {}
 
     if valid:
         age = now - entry["at"]
         if age < ttl_seconds:
-            return list(entry["models"])
+            return list(entry["models"]), model_catalog_from_cached_entry(entry)
         if age < _PROVIDER_MODELS_STALE_SERVE_MAX:
             # Stale-while-revalidate: serve now, refresh off-thread for the next open.
             def _refresh_custom():
-                live = _live()
-                return _cache_entry(fp, live) if live else None
+                live, catalog = _live_result()
+                return _cache_entry(fp, live or [], model_catalog=catalog) if live is not None else None
 
             _spawn_swr_refresh(cache_key, _refresh_custom)
-            return list(entry["models"])
+            return list(entry["models"]), model_catalog_from_cached_entry(entry)
 
-    live = _live()
-    if live:
-        _store_cache_entry(cache_key, _cache_entry(fp, live, now), cache)
-        return list(live)
+    live, catalog = _live_result()
+    if live is not None:
+        _store_cache_entry(cache_key, _cache_entry(fp, live, now, model_catalog=catalog), cache)
+        return list(live), catalog
     # Live returned nothing (offline, timeout, auth hiccup): a stale same-fingerprint entry beats it.
     if _cache_entry_valid(entry, fp):
-        return list(entry["models"])
-    return live
+        return list(entry["models"]), model_catalog_from_cached_entry(entry)
+    return live, {}
+
+
+def cached_fetch_api_models(
+    api_key: Optional[str], base_url: Optional[str], *, timeout: float = 5.0,
+    api_mode: Optional[str] = None, headers: Optional[dict[str, str]] = None,
+    force_refresh: bool = False, cache_only: bool = False,
+    ttl_seconds: int = _PROVIDER_MODELS_CACHE_TTL) -> Optional[list[str]]:
+    """Disk-cached :func:`fetch_api_models` for custom endpoints. ``cache_only`` callers (GUI picker
+    opens that must not block on a stopped local endpoint) still get a warm catalog instead of
+    collapsing to the config-declared subset."""
+    models, _catalog = cached_fetch_api_models_with_catalog(
+        api_key, base_url, timeout=timeout, api_mode=api_mode, headers=headers,
+        force_refresh=force_refresh, cache_only=cache_only, ttl_seconds=ttl_seconds)
+    return models
 
 
 # ---- BEGIN PLUGIN-COMPAT (revert-scheduled; see COMPAT_MANIFEST.md) ----

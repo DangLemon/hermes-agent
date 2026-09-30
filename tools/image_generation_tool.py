@@ -12,7 +12,7 @@ import os
 import datetime
 import threading
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
 # Imported lazily by _load_fal_client() (~64 ms on every CLI cold start); a test-monkeypatched
 # value short-circuits the loader.
@@ -183,6 +183,118 @@ def _plugin_provider_name() -> Optional[str]:
     if not configured or configured in ("fal", NOUS_MANAGED_PROVIDER):
         return None
     return configured
+
+
+def _iter_declared_custom_provider_rows(entry: Dict[str, Any], resolved: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
+    """Catalog rows declared on the custom provider config, preserving provider order."""
+    for key in ("model", "default_model"):
+        value = entry.get(key) or resolved.get(key)
+        if isinstance(value, str) and value.strip():
+            yield {"id": value.strip()}
+    catalog = entry.get("models")
+    if isinstance(catalog, dict):
+        for model_id, meta in catalog.items():
+            row: Dict[str, Any] = dict(meta) if isinstance(meta, dict) else {}
+            row.setdefault("id", str(model_id).strip())
+            if row["id"]:
+                yield row
+    elif isinstance(catalog, list):
+        for item in catalog:
+            if isinstance(item, dict):
+                row = dict(item)
+                value = row.get("id") or row.get("name") or row.get("model")
+                if isinstance(value, str) and value.strip():
+                    row["id"] = value.strip()
+                    yield row
+            elif isinstance(item, str) and item.strip():
+                yield {"id": item.strip()}
+
+
+def _select_custom_image_model(entry: Dict[str, Any], resolved: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Metadata-based image model selection from ``lemon_cli.model_image_metadata``.
+
+    ``kind: image`` and model-name heuristics are intentionally ignored; activation requires
+    explicit image output plus a supported ``image_generation.protocol`` declaration.
+    """
+    try:
+        from lemon_cli.model_image_metadata import select_image_model
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Custom image metadata selector unavailable: %s", exc)
+        return None
+    selected = select_image_model(list(_iter_declared_custom_provider_rows(entry, resolved)))
+    return selected if isinstance(selected, dict) else None
+
+
+def _image_gen_has_explicit_selection(config: Optional[Dict[str, Any]] = None) -> bool:
+    if config is None:
+        if _read_configured_image_provider() or _read_configured_image_model():
+            return True
+        try:
+            from lemon_cli.config import load_config
+
+            config = load_config()
+        except Exception:
+            config = None
+    section = config.get("image_gen") if isinstance(config, dict) else None
+    if not isinstance(section, dict):
+        return False
+    if isinstance(section.get("provider"), str) and section["provider"].strip():
+        return True
+    if isinstance(section.get("model"), str) and section["model"].strip():
+        return True
+    return "use_gateway" in section
+
+
+def resolve_auto_custom_image_binding(
+    config: Optional[Dict[str, Any]] = None, *, include_runtime: bool = True,
+) -> Optional[Dict[str, Any]]:
+    """Implicit image route from the configured main custom provider.
+
+    Activates only when image_gen has no explicit provider/model/legacy use_gateway selection.
+    Selection is metadata-only: explicit image output plus ``image_generation.protocol``.
+    When ``include_runtime`` is false, the returned binding contains no credentials and performs
+    no runtime credential lookup.
+    """
+    if _image_gen_has_explicit_selection(config):
+        return None
+    from tools.image_generation_custom_provider import configured_main_custom_provider_entry
+
+    provider_info = configured_main_custom_provider_entry(config)
+    if provider_info is None:
+        return None
+    provider_name, entry, resolved = provider_info
+    selected = _select_custom_image_model(entry, resolved)
+    if not selected:
+        return None
+    model = str(selected.get("model") or "").strip()
+    protocol = str(selected.get("protocol") or "").strip()
+    binding: Dict[str, Any] = {
+        "provider_name": provider_name,
+        "model": model,
+        "protocol": protocol,
+        "is_available": True,
+    }
+    request_model = selected.get("request_model")
+    if isinstance(request_model, str) and request_model.strip():
+        binding["request_model"] = request_model.strip()
+    if not include_runtime:
+        return binding
+    try:
+        from lemon_cli.runtime_provider_custom import _resolve_named_custom_runtime
+
+        runtime = _resolve_named_custom_runtime(requested_provider=provider_name, target_model=model)
+    except Exception as exc:  # noqa: BLE001
+        binding["error"] = f"Could not resolve image provider '{provider_name}': {exc}"
+        return binding
+    if not runtime or not str(runtime.get("base_url") or "").strip():
+        binding["error"] = f"Could not resolve image provider '{provider_name}'"
+        return binding
+    binding["runtime"] = runtime
+    return binding
+
+
+def _auto_custom_image_binding() -> Optional[Dict[str, Any]]:
+    return resolve_auto_custom_image_binding()
 
 
 def _resolve_fal_model() -> tuple:
@@ -520,7 +632,9 @@ def _get_plugin_provider(name: str, *, force: bool = False):
 
 
 def check_image_generation_requirements() -> bool:
-    """True if FAL or the explicitly configured image backend is available."""
+    """True if FAL, an explicit image backend, or an automatic custom image route is available."""
+    if resolve_auto_custom_image_binding(include_runtime=False) is not None:
+        return True
     try:
         if check_fal_api_key():
             # Lazy import doubles as the SDK presence check: ImportError falls through to plugins.
@@ -654,6 +768,38 @@ def _dispatch_to_plugin_provider(
     return _provider_result(result, "Provider returned a non-dict result")
 
 
+
+def _dispatch_to_auto_custom_provider(
+    prompt: str, aspect_ratio: str, image_url: Optional[str] = None,
+    reference_image_urls: Optional[list] = None, upscale: Optional[bool] = None,
+) -> Optional[str]:
+    """JSON result for the implicit main-custom-provider image route, or None when inactive."""
+    binding = _auto_custom_image_binding()
+    if binding is None:
+        return None
+    from agent.image_gen_provider import normalize_reference_images
+    from tools.image_generation_custom_provider import dispatch_metadata_protocol
+
+    model = str(binding["model"])
+    if binding.get("error"):
+        return _provider_error(binding["error"], "auth_required")
+    if image_url or normalize_reference_images(reference_image_urls):
+        from agent.image_gen_provider import resolve_aspect_ratio
+        from tools.image_generation_custom_provider import image_error
+
+        aspect = resolve_aspect_ratio(aspect_ratio)
+        prompt_clean = (prompt or "").strip()
+        return _provider_result(image_error(
+            aspect, model, prompt_clean,
+            "Automatic custom-provider image generation supports text-to-image only. Configure an explicit image_gen backend for image editing.",
+            "modality_unsupported"), "Custom image provider returned a non-dict result")
+    if upscale is not None:
+        logger.debug("Ignoring unsupported upscale option for automatic custom image provider")
+    result = dispatch_metadata_protocol(
+        runtime=binding["runtime"], binding=binding, prompt=prompt, aspect_ratio=aspect_ratio)
+    return _provider_result(result, "Custom image provider returned a non-dict result")
+
+
 # Native ``krea-2-*`` ids are served by the Krea managed gateway (managed mode only —
 # direct/BYO users keep their pipeline); ``fal-ai/krea/v2/*`` catalog ids stay on FAL.
 _KREA_NATIVE_MODELS = {"krea-2-medium", "krea-2-large", "krea-2-medium-turbo"}
@@ -736,12 +882,14 @@ def _handle_image_generate(args, **kw):
         args.get("image_url"), args.get("reference_image_urls"), task_id)
     if confine_error is not None:
         return confine_error
-    # Order matters: explicit plugin provider (incl. "krea"), then model-driven managed Krea
-    # interception (only when no provider is set, so BYO/direct FAL stays untouched), then FAL.
+    # Order matters: explicit plugin provider (incl. "krea"), then automatic custom provider
+    # only when image_gen is unset, then model-driven managed Krea, then FAL. A selected route
+    # returns an error JSON on failure; no cross-provider fallback after activation.
     sources = dict(image_url=image_url, reference_image_urls=reference_image_urls,
                    upscale=upscale if isinstance(upscale, bool) else None)
     raw = None
-    for route in (_dispatch_to_plugin_provider, _maybe_route_managed_krea, image_generate_tool):
+    for route in (_dispatch_to_plugin_provider, _dispatch_to_auto_custom_provider,
+                  _maybe_route_managed_krea, image_generate_tool):
         raw = route(prompt, aspect_ratio, **sources)
         if raw is not None:
             break
@@ -761,6 +909,11 @@ def _active_image_capabilities() -> Dict[str, Any]:
     catalog. Fail-closed: an undeclared capability is advertised as absent.
     """
     info: Dict[str, Any] = dict(_NO_CAPABILITIES)
+    auto_custom = resolve_auto_custom_image_binding(include_runtime=False)
+    if auto_custom is not None:
+        info["provider"] = "Custom"
+        info["model"] = auto_custom["model"]
+        return info
     configured_provider = _read_configured_image_provider()
     if configured_provider and configured_provider != "fal":
         try:
