@@ -225,6 +225,15 @@ def _toolset_needs_configuration_prompt(ts_key: str, config: dict, *, force_fres
     if selection_key:
         section = config.get(ts_key, {})
         return not isinstance(section, dict) or selection_key not in section
+    if ts_key == "image_gen":
+        try:
+            from tools.image_generation_tool import resolve_auto_custom_image_binding
+
+            binding = resolve_auto_custom_image_binding(config, include_runtime=False)
+            if binding and binding.get("is_available"):
+                return False
+        except Exception:
+            pass
     if ts_key == "image_gen":  # in-tree FAL backend OR any available plugin image gen provider satisfies
         return not fal_key_is_configured() and not _any_plugin_provider_available("agent.image_gen_registry")
     if ts_key == "video_gen":  # no in-tree fallback — every video backend is a plugin

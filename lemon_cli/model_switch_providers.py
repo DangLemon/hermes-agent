@@ -25,59 +25,144 @@ _UNCAPPED_PICKER_PROVIDERS: frozenset[str] = frozenset({"opencode-zen", "opencod
 
 def _save_discovered_models_to_config(
     api_url: str, model_ids: list[str], *, api_mode: Optional[str] = None,
-    headers: Optional[dict[str, str]] = None) -> None:
+    headers: Optional[dict[str, str]] = None,
+    model_catalog: Optional[dict[str, dict[str, Any]]] = None,
+    credential_identity: Optional[str] = None) -> None:
     """Persist a successful ``/v1/models`` probe into the matching ``custom_providers`` entry.
 
     Matches by base_url (slash-normalised), api_mode and headers. A failed config write is
     swallowed — the picker still shows the live models for this session."""
-    from lemon_cli.model_switch import _extra_headers_from_config
-    if not api_url or not model_ids:
+    if not api_url or model_ids is None:
         return
     try:
         from lemon_cli.config import load_config, save_config
+        from lemon_cli.model_switch import _extra_headers_from_config
         cfg = load_config()
-        providers = cfg.get("custom_providers") or []
-        if not isinstance(providers, list):
-            return
-
         norm_url = api_url.strip().rstrip("/").lower()
-        changed = False
-        for entry in providers:
-            if not isinstance(entry, dict):
-                continue
-            entry_url = (entry.get("base_url", "") or entry.get("url", "")).strip()
+
+
+        def _matches(entry: dict) -> bool:
+            entry_url = (entry.get("base_url", "") or entry.get("url", "") or entry.get("api", "")).strip()
             if entry_url.rstrip("/").lower() != norm_url or _entry_api_mode(entry) != api_mode:
-                continue
-            if headers is not None and _extra_headers_from_config(entry) != headers:
-                continue
-            if not _discovered_catalog_stale(entry, model_ids):
-                continue
-            entry["models"] = {model_id: {} for model_id in model_ids}
-            entry["models_discovered"] = True
-            changed = True
+                return False
+            if _extra_headers_from_config(entry) != (headers or {}):
+                return False
+            if credential_identity is None:
+                return True
+            inline_api_key, key_env, entry_identity = _entry_credentials(entry, "key_env", "api_key_env")
+            return entry_identity == credential_identity
+
+        def _store(entry: dict) -> bool:
+            discovered_entry = _entry_models_are_discovered(entry)
+            updated_models = _updated_models_config_for_discovery(entry, model_ids, model_catalog)
+            if updated_models is None:
+                return False
+            entry["models"] = updated_models
+            if discovered_entry:
+                entry["models_discovered"] = True
+            return True
+
+        changed = False
+        providers = cfg.get("custom_providers") or []
+        if isinstance(providers, list):
+            for entry in providers:
+                if not isinstance(entry, dict) or not _matches(entry):
+                    continue
+                if not _store(entry):
+                    continue
+                changed = True
+            if changed:
+                cfg["custom_providers"] = providers
+
+        provider_map = cfg.get("providers")
+        if isinstance(provider_map, dict):
+            for entry in provider_map.values():
+                if not isinstance(entry, dict) or not _matches(entry):
+                    continue
+                if not _store(entry):
+                    continue
+                changed = True
 
         if changed:
-            cfg["custom_providers"] = providers
             save_config(cfg)
     except Exception:
         pass
 
 
-def _discovered_catalog_stale(entry: dict, model_ids: list[str]) -> bool:
-    """Whether a live probe may overwrite ``entry["models"]``.
 
-    A ``models`` mapping or list of dicts is user-curated per-model metadata — never replaced.
-    A mapping Lemon AI itself discovered (entry flag or legacy in-mapping sentinel) is ours to
-    refresh, but only when stale; a legacy-shape entry is always rewritten so the save migrates
-    it to the clean entry-level flag."""
+
+_MODEL_METADATA_KEYS = frozenset({"kind", "input_modalities", "output_modalities", "image_generation"})
+
+
+def _entry_models_are_discovered(entry: dict) -> bool:
     existing = entry.get("models")
-    legacy_discovered = isinstance(existing, dict) and existing.get("__discovered_model_catalog__") is True
-    entry_discovered = entry.get("models_discovered") is True or legacy_discovered
-    if isinstance(existing, dict):
-        return entry_discovered and (legacy_discovered or list(existing) != model_ids)
-    if isinstance(existing, list):
-        return not any(isinstance(m, dict) for m in existing) and existing != model_ids
-    return True
+    return bool(
+        entry.get("models_discovered") is True
+        or (isinstance(existing, dict) and existing.get("__discovered_model_catalog__") is True)
+        or existing is None)
+
+
+def _merge_live_model_metadata(existing: Any, live: dict[str, Any]) -> dict[str, Any]:
+    """Live canonical metadata wins; user non-image metadata (context_length, notes, etc.) survives."""
+    merged = dict(existing) if isinstance(existing, dict) else {}
+    for key in _MODEL_METADATA_KEYS:
+        merged.pop(key, None)
+    merged.update(live)
+    return merged
+
+
+def _updated_models_config_for_discovery(
+    entry: dict, model_ids: list[str], model_catalog: Optional[dict[str, dict[str, Any]]]) -> Optional[Any]:
+    existing = entry.get("models")
+    if _entry_models_are_discovered(entry):
+        catalog = model_catalog or {}
+        existing_models = existing if isinstance(existing, dict) else {}
+        return {
+            model_id: (_merge_live_model_metadata(existing_models.get(model_id), catalog[model_id])
+                       if model_id in catalog else dict(existing_models.get(model_id) or {}))
+            for model_id in model_ids
+        }
+    existing_was_list = isinstance(existing, list)
+    if not isinstance(existing, dict):
+        try:
+            from lemon_cli.config_providers import _normalize_provider_models
+            existing, _ = _normalize_provider_models(existing)
+        except Exception:
+            existing = {}
+        if not existing:
+            return None
+    # Manual model dictionaries are user-owned. Refresh metadata for declared/current IDs. Dict
+    # metadata catalogs may learn live image aliases; list catalogs remain explicit allowlists.
+    target_ids = {model_id for model_id in existing if isinstance(model_id, str) and not model_id.startswith("__")}
+    active = entry.get("model") or entry.get("default_model")
+    if isinstance(active, str) and active.strip():
+        target_ids.add(active.strip())
+    if not model_catalog and model_ids:
+        return None
+    live_ids = [
+        model_id for model_id in model_ids
+        if model_id in target_ids or (not existing_was_list and model_catalog.get(model_id))
+    ]
+    stale_ids = [model_id for model_id in target_ids if model_id not in model_ids]
+    if not live_ids and not stale_ids:
+        return None
+    existing_models = {
+        model_id: (dict(meta) if isinstance(meta, dict) else {})
+        for model_id, meta in existing.items()
+        if isinstance(model_id, str) and not model_id.startswith("__")
+    }
+    updated: dict[str, dict[str, Any]] = {}
+    for model_id in model_ids:
+        if model_id in live_ids:
+            updated[model_id] = _merge_live_model_metadata(existing_models.get(model_id), model_catalog.get(model_id, {}))
+        elif model_id in existing_models:
+            updated[model_id] = existing_models[model_id]
+    for model_id, meta in existing_models.items():
+        if model_id not in updated:
+            updated[model_id] = _merge_live_model_metadata(meta, {}) if model_id in stale_ids else meta
+    if existing_was_list:
+        return [dict({"id": model_id}, **meta) for model_id, meta in updated.items()]
+    return updated
 
 
 class _NativePickerModelList(list[str]):
@@ -502,14 +587,14 @@ def _group_display_name(display_name: str) -> str:
 def _discover_endpoint_models(
     api_key: str, api_url: str, native_catalog_provider: str, has_explicit_models: bool, *,
     headers: dict | None, api_mode: str | None, probe_live: bool, discovery_allowed: bool,
-    for_picker: bool) -> tuple[list | None, bool]:
-    """Return ``(models, native_catalog_empty)`` for a custom endpoint row.
+    for_picker: bool) -> tuple[list | None, bool, dict[str, dict[str, Any]]]:
+    """Return ``(models, native_catalog_empty, model_catalog)`` for a custom endpoint row.
 
     ``probe_live`` runs the native-aware picker fetch; otherwise, when discovery is allowed, a
     warm same-fingerprint cache entry still serves the full catalog with no round-trip.
     ``has_explicit_models`` gates the *probe* (a network-cost guard for keyless endpoints that
     declare a catalog), never the cache read — applying it to the read re-pins the endpoint to
-    its declared subset. Returns ``(None, False)`` when nothing usable was found."""
+    its declared subset. Returns ``(None, False, {})`` when nothing usable was found."""
     timeout = 1.5 if for_picker else 5.0
     if probe_live:
         try:
@@ -517,21 +602,24 @@ def _discover_endpoint_models(
                 api_key, api_url, native_catalog_provider, has_explicit_models,
                 headers=headers, timeout=timeout, api_mode=api_mode)
             is_native = isinstance(live_models, _NativePickerModelList)
-            if live_models is not None and (live_models or not has_explicit_models or is_native):
-                return live_models, (is_native and not live_models)
+            if live_models is not None and (live_models or not has_explicit_models):
+                from lemon_cli.models import cached_api_model_catalog
+                catalog = {} if is_native else cached_api_model_catalog(
+                    api_key, api_url, headers=headers, api_mode=api_mode)
+                return live_models, (is_native and not live_models), catalog
         except Exception:
             pass
     elif discovery_allowed:
         try:
-            from lemon_cli.models import cached_fetch_api_models
-            cached_models = cached_fetch_api_models(
+            from lemon_cli.models import cached_fetch_api_models_with_catalog
+            cached_models, model_catalog = cached_fetch_api_models_with_catalog(
                 api_key, api_url, cache_only=True, timeout=timeout, headers=headers, api_mode=api_mode,
             )
             if cached_models:
-                return cached_models, False
+                return cached_models, False, model_catalog
         except (ImportError, OSError, RuntimeError, TimeoutError, TypeError, ValueError, http.client.HTTPException):
             pass
-    return None, False
+    return None, False, {}
 
 
 def _collect_authed_provider_slugs(
@@ -670,7 +758,7 @@ class _PickerBuild:
     def discover_endpoint(
         self, api_key: str, api_url: str, native_provider: str, has_explicit_models: bool, *,
         headers: dict | None, api_mode: str | None, discovery_allowed: bool, is_current: bool,
-    ) -> tuple[list | None, bool, bool]:
+    ) -> tuple[list | None, bool, bool, dict[str, dict[str, Any]]]:
         """Probe policy shared by sections 3 and 4 (returns ``(models, native_empty, probed)``):
         with an api_key live /models is the source of truth (replaces the partial ``models:``
         subset); without one, an allowlist-shaped ``models:`` narrows a public endpoint and skips
@@ -679,11 +767,11 @@ class _PickerBuild:
         probe_live = (
             discovery_allowed and (bool(api_key) or not has_explicit_models)
             and self.can_probe_custom(row_is_current=is_current))
-        discovered, native_catalog_empty = _discover_endpoint_models(
+        discovered, native_catalog_empty, model_catalog = _discover_endpoint_models(
             api_key, api_url, native_provider, has_explicit_models,
             headers=headers, api_mode=api_mode, probe_live=probe_live,
             discovery_allowed=discovery_allowed, for_picker=self.for_picker)
-        return discovered, native_catalog_empty, probe_live
+        return discovered, native_catalog_empty, probe_live, model_catalog
 
 
 def _lap_builtin_rows(b: _PickerBuild, data: dict, user_providers: dict) -> None:
@@ -843,7 +931,7 @@ def _lap_user_provider_rows(b: _PickerBuild, user_providers: dict) -> None:
             ep_groups[group_key] = {
                 "slug": ep_name, "name": _group_display_name(display_name), "api_url": api_url, "models": [],
                 "has_explicit_models": False, "api_key": inline_api_key or _scoped_key_env(key_env),
-                "headers": headers, "api_mode": ep_cfg.get("api_mode"),
+                "headers": headers, "api_mode": ep_cfg.get("api_mode"), "cred_identity": cred_identity,
                 "discovery_allowed": bool(api_url) and _discover_flag(ep_cfg), "raw_names": [], "aliases": set()}
         grp = ep_groups[group_key]
         # ``default_model`` is the legacy key; ``model`` matches custom_providers.
@@ -861,14 +949,20 @@ def _lap_user_provider_rows(b: _PickerBuild, user_providers: dict) -> None:
         ep_url_norm = _norm_url(api_url)
         ep_aliases = {str(alias).lower() for alias in grp["aliases"]}
         is_current = b.endpoint_is_current(ep_name, ep_aliases, ep_url_norm)
-        discovered, native_catalog_empty, _ = b.discover_endpoint(
+        discovered, native_catalog_empty, probe_live, model_catalog = b.discover_endpoint(
             grp["api_key"], api_url,
             ep_name if str(ep_name).strip().lower() in {"ollama", "custom:ollama"} else "custom",
             grp["has_explicit_models"], headers=grp["headers"] or None, api_mode=grp["api_mode"],
             discovery_allowed=grp["discovery_allowed"], is_current=is_current)
         if discovered is not None:
             models_list = discovered
-
+            if probe_live:
+                try:
+                    _save_discovered_models_to_config(
+                        api_url, discovered, api_mode=grp.get("api_mode"), headers=grp.get("headers") or None,
+                        model_catalog=model_catalog, credential_identity=grp.get("cred_identity", ""))
+                except Exception:
+                    pass
         b.add_endpoint_row(ep_name, display_name, api_url, models_list, is_current, native_catalog_empty)
         b.seen_slugs.update(ep_aliases)
         # Record every raw member name so section 4 can match per-model custom_providers rows
@@ -893,7 +987,7 @@ def _lap_bare_custom_row(b: _PickerBuild, custom_providers: list | None) -> None
     models = [b.current_model] if b.current_model else []
     native_catalog_empty = False
     try:
-        discovered, native_catalog_empty = _discover_endpoint_models(
+        discovered, native_catalog_empty, _ = _discover_endpoint_models(
             "", api_url, "custom", False, headers=None, api_mode=None,
             probe_live=bool(b.refresh or b.probe_current_custom_provider), discovery_allowed=True,
             for_picker=b.for_picker)
@@ -934,7 +1028,7 @@ def _lap_custom_provider_rows(b: _PickerBuild, custom_providers: list) -> None:
             "slug": custom_provider_slug(display_name, provider_key), "name": display_name,
             "api_url": api_url, "api_key": "", "models": [], "has_explicit_models": False,
             "discover_models": True, "api_mode": api_mode, "extra_headers": entry_extra_headers,
-            "aliases": set()})
+            "cred_identity": cred_identity, "aliases": set()})
         grp["api_key"] = grp["api_key"] or api_key  # first member with a key wins
         grp["discover_models"] = grp["discover_models"] and discover  # one opt-out pins the whole row
         grp["aliases"].update(custom_provider_aliases(raw_name, provider_key))
@@ -968,7 +1062,7 @@ def _lap_custom_provider_rows(b: _PickerBuild, custom_providers: list) -> None:
         is_current = b.endpoint_is_current(
             slug, {str(alias).lower() for alias in grp["aliases"]}, grp_url_norm,
             url_match_ok=current_url_group_count == 1)
-        discovered, native_catalog_empty, probe_live = b.discover_endpoint(
+        discovered, native_catalog_empty, probe_live, model_catalog = b.discover_endpoint(
             api_key, api_url,
             "ollama" if "ollama" in {str(slug).strip().lower(), str(grp.get("name") or "").strip().lower()} else "custom",
             bool(grp.get("has_explicit_models")), headers=grp.get("extra_headers") or None,
@@ -979,7 +1073,8 @@ def _lap_custom_provider_rows(b: _PickerBuild, custom_providers: list) -> None:
             if probe_live:  # a successful live probe persists the catalog for no-probe surfaces
                 try:
                     _save_discovered_models_to_config(
-                        api_url, discovered, api_mode=grp.get("api_mode"), headers=grp.get("extra_headers") or None)
+                        api_url, discovered, api_mode=grp.get("api_mode"), headers=grp.get("extra_headers") or None,
+                        model_catalog=model_catalog, credential_identity=grp.get("cred_identity", ""))
                 except Exception:
                     pass
         b.add_endpoint_row(slug, grp["name"], grp["api_url"], grp["models"], is_current, native_catalog_empty)

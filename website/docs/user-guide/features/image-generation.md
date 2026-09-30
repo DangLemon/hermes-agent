@@ -29,6 +29,34 @@ Prices are FAL's pricing at time of writing; check [fal.ai](https://fal.ai/) for
 
 ## Setup
 
+### Automatic selection from your custom provider
+
+If your main model uses a custom OpenAI-compatible provider, Lemon AI uses its
+discovered model metadata to select an image generator. No separate image API
+key or YAML change is needed when the provider publishes this metadata.
+
+Selection requires `output_modalities` containing `image` and a supported
+`image_generation.protocol`: `images`, `chat_completions`, or `responses`.
+An image-like model name, `kind: image`, or image input alone is insufficient.
+The model ID can be any provider alias; there is no model-name whitelist.
+
+A provider-declared `image_generation.default: true` takes priority, followed
+by lower integer `image_generation.priority` values. Missing priorities sort
+after explicit priorities; ties retain catalog order. Responses models also
+need `image_generation.request_model`, the orchestration model ID.
+
+The tool reuses the selected provider's endpoint, credentials, and extra
+headers. API failures are reported without switching model or provider.
+This automatic route supports text-to-image only.
+
+An existing `image_gen.provider`, `image_gen.model`, or legacy `use_gateway`
+selection keeps priority. Refresh the model catalog after the provider adds
+metadata, then start a new conversation to load its toolset.
+
+Provider authors: see the
+[catalog metadata contract](../../developer-guide/image-gen-provider-plugin.md#custom-provider-catalog-metadata).
+
+
 :::tip Nous Subscribers
 If you have a paid [Nous Portal](https://portal.nousresearch.com) subscription, you can use image generation through the **[Tool Gateway](tool-gateway.md)** without a FAL API key. Your model selection persists across both paths. New installs can run `lemon setup --portal` to log in and turn on every gateway tool at once; existing installs can pick **Nous Subscription** as the image-gen backend via `lemon tools`.
 

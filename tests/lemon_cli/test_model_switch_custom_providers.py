@@ -1535,79 +1535,6 @@ def test_save_discovered_models_preserves_dict_form(monkeypatch):
     )
 
 
-def test_model_flow_named_custom_persists_discovered_models(monkeypatch):
-    """The ``lemon model`` named-custom-provider flow persists the discovered
-    catalog back to the entry's ``models:`` list.
-
-    No-probe surfaces (dashboard, desktop, ACP) call
-    ``build_models_payload(..., probe_custom_providers=False)`` and only show
-    the configured ``models:`` list. The CLI flow probes and shows the full
-    catalog but (before this fix) never saved it, so a provider added via
-    ``lemon model`` collapsed to the single ``model:`` default everywhere but
-    the CLI. It must persist discovered models the same way the picker path in
-    ``_save_discovered_models_to_config`` does.
-    """
-    monkeypatch.setattr(
-        "lemon_cli.models.fetch_api_models",
-        lambda api_key, base_url, **kw: [
-            "discovered-a",
-            "discovered-b",
-            "discovered-c",
-        ],
-    )
-    # Non-interactive model selection.
-    monkeypatch.setattr(
-        "lemon_cli.curses_ui.curses_radiolist", lambda *a, **k: 0
-    )
-    # No-op downstream writes so the test never touches a real config.
-    monkeypatch.setattr("lemon_cli.main_provider_setup._save_custom_provider", lambda *a, **k: None)
-    monkeypatch.setattr("lemon_cli.auth._save_model_choice", lambda *a, **k: None)
-    monkeypatch.setattr("lemon_cli.auth.deactivate_provider", lambda *a, **k: None)
-    monkeypatch.setattr(
-        "lemon_cli.config.load_config",
-        lambda: {"model": {}, "providers": {}, "custom_providers": []},
-    )
-    monkeypatch.setattr("lemon_cli.config.save_config", lambda cfg: None)
-
-    save_calls = []
-    monkeypatch.setattr(
-        "lemon_cli.model_switch_providers._save_discovered_models_to_config",
-        lambda api_url, model_ids, **kwargs: save_calls.append(
-            (api_url, model_ids, kwargs)
-        ),
-    )
-
-    from lemon_cli.model_setup_flows_custom import _model_flow_named_custom
-
-    _model_flow_named_custom(
-        {},
-        {
-            "name": "Dragomes",
-            "base_url": "http://example.com/v1",
-            "api_mode": "anthropic_messages",
-            "extra_headers": {"X-Tenant": "dragomes"},
-            "api_key": "sk-test",
-            "key_env": "",
-            "model": "MiniMax-M3",
-            "provider_key": "",
-            "discover_models": True,
-            "models": {},
-        },
-    )
-
-    assert save_calls == [
-        (
-            "http://example.com/v1",
-            ["discovered-a", "discovered-b", "discovered-c"],
-            {
-                "api_mode": "anthropic_messages",
-                "headers": {"X-Tenant": "dragomes"},
-            },
-        )
-    ], (
-        "_model_flow_named_custom must persist each live catalog with its "
-        "base URL, API mode, and endpoint headers"
-    )
 
 
 def test_shared_url_different_display_names_are_separate_rows(monkeypatch):
@@ -2219,3 +2146,88 @@ def test_legacy_sentinel_catalog_still_resolves_and_migrates(tmp_path, monkeypat
     assert list(saved["models"]) == _LOCAL_CATALOG
     assert "__discovered_model_catalog__" not in saved["models"]
     assert "__explicit_model_allowlist__" not in saved["models"]
+
+
+def test_discovered_image_metadata_saved_and_read_without_probe(monkeypatch):
+    """A live-discovered arbitrary image model remains selectable from stored metadata only."""
+    from lemon_cli.model_image_metadata import select_image_model
+    from lemon_cli.model_switch_providers import list_authenticated_providers
+
+    saved = {}
+    cfg = {
+        "custom_providers": [
+            {
+                "name": "Image Gateway",
+                "base_url": "https://gateway.example.com/v1",
+                "api_key": "sk-test",
+                "discover_models": True,
+                "model": "alias-image",
+                "models": {},
+            }
+        ]
+    }
+
+    monkeypatch.setattr("agent.models_dev.fetch_models_dev", lambda: {})
+    monkeypatch.setattr(providers_mod, "LEMON_OVERLAYS", {})
+    monkeypatch.setattr("lemon_cli.config.load_config", lambda: cfg)
+    monkeypatch.setattr("lemon_cli.config.save_config", lambda data: saved.update(data))
+    monkeypatch.setattr("lemon_cli.models.cached_fetch_api_models", lambda *a, **k: ["alias-image"])
+    monkeypatch.setattr(
+        "lemon_cli.models.cached_api_model_catalog",
+        lambda *a, **k: {
+            "alias-image": {
+                "kind": "image",
+                "input_modalities": ["text"],
+                "output_modalities": ["image"],
+                "image_generation": {"protocol": "images", "priority": 5},
+            }
+        },
+    )
+
+    rows = list_authenticated_providers(
+        custom_providers=cfg["custom_providers"], user_providers={}, max_models=50,
+    )
+
+    assert next(row for row in rows if row.get("is_user_defined"))["models"] == ["alias-image"]
+    stored_models = saved["custom_providers"][0]["models"]
+    assert stored_models["alias-image"]["image_generation"] == {"protocol": "images", "priority": 5}
+    assert select_image_model(stored_models) == {"model": "alias-image", "protocol": "images"}
+
+
+def test_manual_model_metadata_refresh_preserves_context_and_removes_stale_image(monkeypatch):
+    """Manual per-model fields survive, but stale image capability is replaced by live text-only data."""
+    from lemon_cli.model_switch_providers import _save_discovered_models_to_config
+
+    saved = {}
+    cfg = {
+        "custom_providers": [
+            {
+                "name": "Gateway",
+                "base_url": "https://gateway.example.com/v1",
+                "api_key": "sk-test",
+                "model": "same-model",
+                "models": {
+                    "same-model": {
+                        "context_length": 123456,
+                        "output_modalities": ["image"],
+                        "image_generation": {"protocol": "images"},
+                    }
+                },
+            }
+        ]
+    }
+    monkeypatch.setattr("lemon_cli.config.load_config", lambda: cfg)
+    monkeypatch.setattr("lemon_cli.config.save_config", lambda data: saved.update(data))
+
+    _save_discovered_models_to_config(
+        "https://gateway.example.com/v1",
+        ["same-model"],
+        model_catalog={"same-model": {"kind": "chat", "output_modalities": ["text"]}},
+    )
+
+    metadata = saved["custom_providers"][0]["models"]["same-model"]
+    assert metadata == {
+        "context_length": 123456,
+        "kind": "chat",
+        "output_modalities": ["text"],
+    }

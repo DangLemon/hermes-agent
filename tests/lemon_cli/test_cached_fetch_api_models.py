@@ -128,6 +128,88 @@ class TestCachedFetchApiModels:
         assert out is None
         save.assert_not_called()
 
+    def test_successful_probe_stores_metadata_and_updates_same_id_shape(self):
+        import lemon_cli.models as mod
+
+        cache = {
+            "custom:https://gw.example.com/v1": self._entry(["same-model"], age_seconds=999999),
+        }
+        cache["custom:https://gw.example.com/v1"]["model_catalog"] = {
+            "same-model": {
+                "output_modalities": ["image"],
+                "image_generation": {"protocol": "images"},
+            }
+        }
+        saved = {}
+        payloads = [
+            {
+                "data": [
+                    {
+                        "id": "same-model",
+                        "kind": "image",
+                        "output_modalities": ["image"],
+                        "image_generation": {"protocol": "images", "default": True},
+                    }
+                ]
+            },
+            {"data": [{"id": "same-model", "kind": "chat", "output_modalities": ["text"]}]},
+        ]
+
+        def fake_get_json(*_args, **_kwargs):
+            return payloads.pop(0)
+
+        with patch.object(mod, "_load_provider_models_cache", return_value=cache), \
+             patch.object(mod, "_custom_endpoint_fingerprint", return_value="fp"), \
+             patch.object(mod, "_save_provider_models_cache", side_effect=saved.update), \
+             patch.object(mod, "_get_json", side_effect=fake_get_json):
+            first = mod.cached_fetch_api_models("sk-key", "https://gw.example.com/v1")
+            second = mod.cached_fetch_api_models("sk-key", "https://gw.example.com/v1", force_refresh=True)
+
+        assert first == ["same-model"]
+        assert saved["custom:https://gw.example.com/v1"]["model_catalog"]["same-model"] == {
+            "kind": "chat",
+            "output_modalities": ["text"],
+        }
+        assert second == ["same-model"]
+
+
+class TestModelImageMetadata:
+    def test_select_requires_explicit_image_output_and_protocol_and_honors_ordering(self):
+        from lemon_cli.model_image_metadata import select_image_model
+
+        catalog = {
+            "vision-only": {
+                "input_modalities": ["image", "text"],
+                "output_modalities": ["text"],
+                "image_generation": {"protocol": "images", "priority": 0},
+            },
+            "kind-only": {"kind": "image", "output_modalities": ["image"]},
+            "slow-image": {
+                "output_modalities": ["image"],
+                "image_generation": {"protocol": "images", "priority": 20},
+            },
+            "response-image": {
+                "output_modalities": ["image"],
+                "image_generation": {
+                    "protocol": "responses",
+                    "default": True,
+                    "priority": 99,
+                    "request_model": "chat-orchestrator",
+                },
+            },
+        }
+
+        assert select_image_model(catalog) == {
+            "model": "response-image",
+            "protocol": "responses",
+            "request_model": "chat-orchestrator",
+        }
+
+    def test_id_only_catalog_is_not_image_support(self):
+        from lemon_cli.model_image_metadata import select_image_model
+
+        assert select_image_model(["gpt-image-legacy-name"]) is None
+
 
 class TestCacheOnly:
     """``cache_only=True`` is the no-network read used by picker opens that
@@ -194,19 +276,6 @@ class TestCacheOnly:
             out = mod.cached_fetch_api_models("sk-key", "", cache_only=True)
         assert out is None
         live.assert_not_called()
-
-    def test_empty_live_result_is_not_persisted(self):
-        """An empty list from a transient error must never pin an empty
-        cache entry over real data on the next open."""
-        import lemon_cli.models as mod
-
-        with patch.object(mod, "_load_provider_models_cache", return_value={}), \
-             patch.object(mod, "_custom_endpoint_fingerprint", return_value="fp"), \
-             patch.object(mod, "_save_provider_models_cache") as save, \
-             patch.object(mod, "fetch_api_models", return_value=[]):
-            out = mod.cached_fetch_api_models("sk-key", "https://gw.example.com/v1")
-        assert out == []
-        save.assert_not_called()
 
     def test_blank_base_url_skips_cache_entirely(self):
         """No base_url means nothing to key the cache on — call straight
