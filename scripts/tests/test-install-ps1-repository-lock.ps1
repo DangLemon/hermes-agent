@@ -74,6 +74,8 @@ Assert-True ($installText -match 'New-IncomingCheckoutPath') `
     "each clone attempt uses a unique incoming directory"
 Assert-True ($installText -match '-C \$InstallDir rev-parse --is-inside-work-tree') `
     "repo probe uses git -C instead of Push-Location"
+Assert-True ($installText -match 'function Install-PortableFfmpeg') `
+    "installer has a portable ffmpeg fallback when package managers fail"
 
 New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
 try {

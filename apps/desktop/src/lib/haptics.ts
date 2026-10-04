@@ -100,8 +100,18 @@ export function registerHapticTrigger(trigger: HapticTrigger | null) {
   registeredTrigger = trigger
 }
 
+export function canTriggerHaptic(): boolean {
+  if (typeof navigator === 'undefined') {
+    return false
+  }
+  const activation = navigator.userActivation
+  return activation === undefined || activation.isActive
+}
+
+// The browser's vibration API can reject calls without a user gesture. Keep the gate here so every renderer haptic call shares the same policy.
+
 export function triggerHaptic(intent: HapticIntent = 'selection') {
-  if ($hapticsMuted.get() || !registeredTrigger) {
+  if ($hapticsMuted.get() || !registeredTrigger || !canTriggerHaptic()) {
     return
   }
 
@@ -126,4 +136,10 @@ export function triggerHaptic(intent: HapticIntent = 'selection') {
   const config = HAPTIC_INTENTS[intent]
 
   void registeredTrigger(config.pattern, config.options)?.catch(() => undefined)
+}
+
+export function __resetHapticsForTests() {
+  registeredTrigger = null
+  lastSelectionAt = 0
+  recentFires = []
 }
