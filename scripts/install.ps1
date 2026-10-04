@@ -759,9 +759,29 @@ function Write-Err {
     param([string]$Message)
     Write-Host "[X] $Message" -ForegroundColor Red
 }
+function Checkout-FetchedBranchOrRef {
+    # A release stamp can carry a GitHub tag in -Branch. `git fetch origin
+    # <tag>` updates FETCH_HEAD but does not create origin/<tag>, so a plain
+    # `git checkout <tag>` fails with "pathspec ... did not match" on an
+    # existing checkout. Prefer the remote-tracking branch when it exists;
+    # otherwise the fetched ref is a tag (or another detached ref).
+    param([Parameter(Mandatory = $true)][string]$Ref)
+
+    git -c windows.appendAtomically=false rev-parse --verify "refs/remotes/origin/$Ref" 2>$null
+    $isRemoteBranch = ($LASTEXITCODE -eq 0)
+    if ($isRemoteBranch) {
+        git -c windows.appendAtomically=false checkout $Ref
+        if ($LASTEXITCODE -ne 0) { throw "git checkout $Ref failed (exit $LASTEXITCODE)" }
+        return $true
+    }
+
+    Write-Info "Fetched $Ref is not a remote branch; checking out FETCH_HEAD detached..." | Out-Null
+    git -c windows.appendAtomically=false checkout --detach FETCH_HEAD
+    if ($LASTEXITCODE -ne 0) { throw "git checkout fetched ref $Ref failed (exit $LASTEXITCODE)" }
+    return $false
+}
 
 function Invoke-NativeWithRelaxedErrorAction {
-    param([scriptblock]$Script)
 
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
@@ -2365,6 +2385,46 @@ function Update-ProcessPathForPackages {
     $env:Path = [string]::Join(';', $ordered)
 }
 
+function Install-PortableFfmpeg {
+    # winget is optional and often unavailable on locked-down Windows images.
+    # Keep FFmpeg optional, but provide a user-scoped fallback so TTS does not
+    # depend on an administrator-owned package manager.
+    param([Parameter(Mandatory = $true)][string]$Root)
+
+    $stage = Join-Path $env:TEMP ("lemon-ffmpeg-" + [Guid]::NewGuid().ToString("N"))
+    $zip = Join-Path $env:TEMP "lemon-ffmpeg-essentials.zip"
+    $target = Join-Path $Root "ffmpeg"
+    try {
+        New-Item -ItemType Directory -Force -Path $stage | Out-Null
+        Write-Info "Downloading portable ffmpeg to $target ..."
+        Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $zip -UseBasicParsing
+        Expand-Archive -LiteralPath $zip -DestinationPath $stage -Force
+        $binary = Get-ChildItem -LiteralPath $stage -Filter "ffmpeg.exe" -File -Recurse | Select-Object -First 1
+        if (-not $binary) { throw "portable archive did not contain ffmpeg.exe" }
+        $binDir = $binary.Directory.FullName
+        New-Item -ItemType Directory -Force -Path $target | Out-Null
+        Copy-Item -LiteralPath $binDir\* -Destination $target -Recurse -Force
+        $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+        $entries = @($userPath -split ";" | Where-Object { $_ })
+        if ($entries -notcontains $target) {
+            [Environment]::SetEnvironmentVariable("Path", (($entries + $target) -join ";"), "User")
+        }
+        $env:Path = "$target;$env:Path"
+        if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+            throw "portable ffmpeg was extracted but is not callable"
+        }
+        Write-Success "ffmpeg installed to $target (portable, user-scoped)"
+        return $true
+    } catch {
+        Write-Warn "Portable ffmpeg fallback failed: $($_.Exception.Message)"
+        return $false
+    } finally {
+        Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+
 function Install-SystemPackages {
     $script:HasRipgrep = $false
     $script:HasFfmpeg = $false
@@ -2518,7 +2578,15 @@ function Install-SystemPackages {
         }
     }
 
-    # Show manual instructions for anything still missing
+    if ($needFfmpeg) {
+        $portableFfmpegRoot = Join-Path $LemonHome "tools"
+        if (Install-PortableFfmpeg -Root $portableFfmpegRoot) {
+            $script:HasFfmpeg = $true
+            $needFfmpeg = $false
+        }
+    }
+
+
     if ($needRipgrep) {
         Write-Warn "ripgrep not installed (file search will use findstr fallback)"
         Write-Info "  winget install BurntSushi.ripgrep.MSVC"
@@ -2672,18 +2740,19 @@ function Install-Repository {
                     git -c windows.appendAtomically=false checkout --detach "refs/tags/$Tag"
                     if ($LASTEXITCODE -ne 0) { throw "git checkout tag $Tag failed (exit $LASTEXITCODE)" }
                 } else {
-                    git -c windows.appendAtomically=false checkout $Branch
-                    if ($LASTEXITCODE -ne 0) { throw "git checkout $Branch failed (exit $LASTEXITCODE)" }
-                    # Managed installs should follow origin/$Branch exactly. If
-                    # the checkout has diverged (or has local-only commits),
-                    # ff-only pull cannot succeed. Fail closed instead of
-                    # resetting the checkout; local commits and restored worktree
-                    # edits remain inspectable.
-                    git -c windows.appendAtomically=false pull --ff-only origin $Branch
-                    if ($LASTEXITCODE -ne 0) {
-                        Write-Err "Fast-forward update from origin/$Branch was not possible."
-                        Write-Info "No destructive reset was performed. Resolve local commits manually, then re-run the installer."
-                        $updateFailed = $true
+                    $isBranch = Checkout-FetchedBranchOrRef -Ref $Branch
+                    if ($isBranch) {
+                        # Managed installs should follow origin/$Branch exactly. If
+                        # the checkout has diverged (or has local-only commits),
+                        # ff-only pull cannot succeed. Fail closed instead of
+                        # resetting the checkout; local commits and restored worktree
+                        # edits remain inspectable.
+                        git -c windows.appendAtomically=false pull --ff-only origin $Branch
+                        if ($LASTEXITCODE -ne 0) {
+                            Write-Err "Fast-forward update from origin/$Branch was not possible."
+                            Write-Info "No destructive reset was performed. Resolve local commits manually, then re-run the installer."
+                            $updateFailed = $true
+                        }
                     }
                 }
 

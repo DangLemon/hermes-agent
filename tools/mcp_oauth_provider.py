@@ -9,6 +9,7 @@ modules keep their own subclass (logger name, disk-watch hooks) on top of it.
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -25,26 +26,24 @@ class LemonProviderMixin:
       endpoint rejects the exchange (looping the browser page) — coerce ``client_secret_post``.
     - ``token_user_agent`` (``oauth.user_agent``) is stamped onto token-endpoint requests only
       (some authorization servers/WAFs reject httpx's default).
-    - Any 2xx token/refresh response is accepted; token bodies never leak into errors/logs."""
+    - Any 2xx token/refresh response is accepted; token bodies never leak into errors/logs.
+    """
 
     _lemon_logger: logging.Logger = logger
 
     def __init__(self, *args: Any, token_user_agent: str | None = None, **kwargs: Any):
         super().__init__(*args, **kwargs)
-        # oauth.user_agent — stamped onto token-endpoint requests only; some authorization servers/WAFs
-        # reject httpx's default (#75576).
         self._lemon_token_user_agent = token_user_agent
 
     def _prepare_token_request(self, request):
         """Stamp the configured User-Agent onto a token/refresh request."""
-        ua = getattr(self, "_lemon_token_user_agent", None)  # tests build via __new__
+        ua = getattr(self, "_lemon_token_user_agent", None)
         if ua:
             request.headers["User-Agent"] = ua
         return request
 
     def _coerce_client_secret_post(self) -> None:
-        """Same rule as ``LemonTokenStorage._coerce_secret_auth_method``, applied to the
-        in-memory client info BEFORE the SDK builds a token-endpoint request from it."""
+        """Set client_secret_post when a dynamic registration returned a secret."""
         info = self.context.client_info
         if not info:
             return
@@ -100,20 +99,23 @@ class LemonProviderMixin:
 
 
 def prepare_oauth_config(server_name: str, server_url: str, oauth_config: dict | None) -> tuple[dict, "LemonTokenStorage"]:
-    """Copy the ``oauth:`` block, apply provider defaults, open its token storage. The copy
-    matters: later steps record ``_resolved_port`` / ``_cimd_url`` in the dict, which must
-    never leak back into the caller's config."""
+    """Copy OAuth config and reject unresolved credential placeholders before browser auth."""
     from tools import mcp_oauth as mo
     cfg = dict(oauth_config or {})
+    unresolved = [
+        key for key in ("client_id", "client_secret")
+        if isinstance(cfg.get(key), str) and re.search(r"\$\{[^}]+\}", cfg[key])
+    ]
+    if unresolved:
+        raise ValueError(
+            f"unresolved OAuth credential placeholder for MCP server '{server_name}': {', '.join(unresolved)}"
+        )
     mo.apply_oauth_provider_defaults(cfg, server_name=server_name, server_url=server_url)
     return cfg, mo.LemonTokenStorage(server_name)
 
 
 def build_provider_kwargs(cfg: dict, storage: "LemonTokenStorage", *, ssh_proxy_hint: bool) -> dict[str, Any]:
-    """Resolve the callback port and return the shared provider constructor kwargs. Order
-    matters: metadata needs the resolved port, pre-registration needs the metadata.
-    ``ssh_proxy_hint`` lets the redirect handler tailor its remote-session hint to a configured
-    proxy ``redirect_uri``. Helpers are looked up on ``tools.mcp_oauth`` so tests can patch them."""
+    """Resolve callback settings and return shared provider constructor kwargs."""
     from tools import mcp_oauth as mo
     port = mo._configure_callback_port(cfg, storage)
     client_metadata = mo._build_client_metadata(cfg)
@@ -123,8 +125,6 @@ def build_provider_kwargs(cfg: dict, storage: "LemonTokenStorage", *, ssh_proxy_
         "client_metadata": client_metadata,
         "storage": storage,
         "redirect_handler": mo._make_redirect_handler(port, redirect_uri=redirect_uri),
-        # mcp 2.0 dropped OAuthClientProvider's own `timeout`; the configured
-        # `oauth.timeout` bounds the callback waiter's poll loop instead.
         "callback_handler": mo._make_callback_waiter(port, cfg.get("_cimd_url"), timeout=float(cfg.get("timeout", 300))),
         "token_user_agent": mo.token_request_user_agent(cfg),
         **mo.cimd_provider_kwargs(cfg)}

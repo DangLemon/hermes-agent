@@ -373,7 +373,7 @@ function Preparing({ boot }: { boot: DesktopBootState }) {
   const { t } = useI18n()
   const progress = Math.max(2, Math.min(100, Math.round(boot.progress)))
   const hasError = Boolean(boot.error)
-  const installing = boot.phase.startsWith('runtime.')
+  const installing = typeof boot.phase === 'string' && boot.phase.startsWith('runtime.')
 
   return (
     <div className="grid gap-3" role="status">

@@ -440,6 +440,19 @@ class TestContextVarInterpolation:
             "${NOT_A_REAL_VAR_XYZ}"
         )
 
+    def test_oauth_placeholders_fail_before_authorization_url(self):
+        from tools.mcp_oauth_provider import prepare_oauth_config
+
+        with pytest.raises(ValueError, match="unresolved OAuth credential placeholder"):
+            prepare_oauth_config(
+                "amazon-ads",
+                "https://advertising-ai.amazon.com/mcp",
+                {
+                    "client_id": "${AMAZON_ADS_CLIENT_ID}",
+                    "client_secret": "${AMAZON_ADS_CLIENT_SECRET}",
+                },
+            )
+
     def test_context_vars_in_nested_config(self, monkeypatch):
         import os
 
